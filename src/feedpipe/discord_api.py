@@ -122,7 +122,8 @@ MAX_TAG_CHARS = 20
 
 def tag_name(feed: db.Feed) -> str:
     name = (feed.title or urlsplit(feed.url).hostname or "feed").strip()
-    return name[:MAX_TAG_CHARS]
+    # Discord は末尾の空白を落として保存するので、切った後にも strip しないと名前が一致しない
+    return name[:MAX_TAG_CHARS].strip()
 
 
 @dataclass
@@ -141,7 +142,7 @@ class PlannedChannel:
         return self.channel_id is not None
 
     def _all_tags(self) -> list[str]:
-        subs = [label[:MAX_TAG_CHARS] for label in self.subgenres.values()]
+        subs = [label[:MAX_TAG_CHARS].strip() for label in self.subgenres.values()]
         return list(dict.fromkeys([*subs, *(tag_name(f) for f in self.feeds)]))
 
     def wanted_tags(self) -> list[str]:
@@ -150,8 +151,12 @@ class PlannedChannel:
 
     def missing_tags(self) -> list[str]:
         have = {t["name"] for t in self.existing_tags}
-        room = MAX_TAGS - len(have)
-        return [n for n in self.wanted_tags() if n not in have][: max(room, 0)]
+        return [n for n in self.wanted_tags() if n not in have]
+
+    def extra_tags(self) -> list[dict]:
+        """今のジャンル構成では使わない既存のタグ（setup で削除する）。"""
+        wanted = set(self.wanted_tags())
+        return [t for t in self.existing_tags if t["name"] not in wanted]
 
     @property
     def tag_overflow(self) -> int:
@@ -239,9 +244,10 @@ def apply_plan(
             created.append(pc)
         else:
             changes: dict = {}
-            if missing := pc.missing_tags():
-                # 既存のタグは id 付きで渡さないと消えてしまう
-                changes["available_tags"] = [*pc.existing_tags, *({"name": n} for n in missing)]
+            if pc.missing_tags() or pc.extra_tags():
+                # 残すタグは id 付きで渡す（id がないと別のタグとして作り直され、投稿から外れる）
+                have = {t["name"]: t for t in pc.existing_tags}
+                changes["available_tags"] = [have.get(n, {"name": n}) for n in pc.wanted_tags()]
             if pc.nsfw != nsfw:
                 changes["nsfw"] = nsfw
             if changes:
@@ -252,9 +258,9 @@ def apply_plan(
         # 投稿時に付けるタグ: "sub:<サブジャンル>" と "feed:<フィード ID>" → タグ ID
         feed_tags = {f"feed:{f.id}": tag_ids[n] for f in pc.feeds if (n := tag_name(f)) in tag_ids}
         feed_tags |= {
-            f"sub:{path}": tag_ids[label[:MAX_TAG_CHARS]]
+            f"sub:{path}": tag_ids[label[:MAX_TAG_CHARS].strip()]
             for path, label in pc.subgenres.items()
-            if label[:MAX_TAG_CHARS] in tag_ids
+            if label[:MAX_TAG_CHARS].strip() in tag_ids
         }
 
         hook = next((w for w in client.webhooks(pc.channel_id) if w.get("name") == webhook_name and w.get("token")), None)

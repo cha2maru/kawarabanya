@@ -81,6 +81,14 @@ def setup():
     return fake, client, conn
 
 
+def test_tag_name_strips_after_truncation():
+    feed = db.Feed(id=1, url="u", original_url="u", title="はてなブックマーク - キーワード - コミティア", site_url=None,
+                   category=None, enabled=True, disabled_reason=None, last_status=None, last_error=None,
+                   last_success_at=None, latest_entry_at=None, fail_count=0, etag=None, last_modified=None,
+                   initialized_at=None)
+    assert discord_api.tag_name(feed) == "はてなブックマーク - キーワード -"
+
+
 def test_channel_name():
     assert channel_name("tech") == "tech"
     assert channel_name("News Daily/Sub") == "news-daily-sub"
@@ -97,6 +105,7 @@ def test_plan_and_apply_forums():
     assert [(p.name, p.exists) for p in plan.channels] == [("news", False), ("tech", True), ("ホビー", False)]
     tech = plan.channels[1]
     assert tech.missing_tags() == ["新フィード"]
+    assert tech.extra_tags() == []
 
     created = apply_plan(client, conn, plan, "feedpipe", nsfw=True)
     assert [p.name for p in created] == ["news", "ホビー"]
@@ -189,3 +198,14 @@ def test_subgenre_tags(tmp_path):
     notify.notify_pending(conn, limit=5, max_age_days=3, transport=httpx.MockTransport(fake.handler), interval=0)
     tag_by_name = {t["name"]: t["id"] for t in forum["available_tags"]}
     assert fake.posts[-1]["applied_tags"] == [tag_by_name["国際"], tag_by_name["世界ニュース"]]
+
+
+def test_removes_unused_tags():
+    fake, client, conn = setup()
+    tech = next(c for c in fake.channels if c["id"] == "11")
+    tech["available_tags"].append({"id": "old", "name": "消えたフィード"})
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn, ["tech"]), "feedpipe")
+    assert [t["name"] for t in plan.channels[0].extra_tags()] == ["消えたフィード"]
+    apply_plan(client, conn, plan, "feedpipe")
+    assert [t["name"] for t in tech["available_tags"]] == ["既存フィード", "新フィード"]
+    assert tech["available_tags"][0]["id"] == "t1"  # 残すタグは id を保つ

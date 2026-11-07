@@ -321,6 +321,8 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
             todo = []
             if missing := pc.missing_tags():
                 todo.append(f"タグ追加 {len(missing)}")
+            if extra := pc.extra_tags():
+                todo.append(f"タグ削除 {len(extra)}: {'、'.join(t['name'] for t in extra)}")
             if pc.nsfw != cfg.discord.nsfw:
                 todo.append("年齢制限" + ("オン" if cfg.discord.nsfw else "オフ"))
             state = f"既存（{'、'.join(todo)}）" if todo else "既存"
