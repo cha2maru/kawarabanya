@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from calendar import timegm
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from . import db
 
@@ -23,6 +23,7 @@ class Item:
     content_md: str | None = None
     # content_md の出どころ: article（元記事から抽出）/ feed（フィードの本文）/ none
     content_source: str = "none"
+    summary: str | None = None
     id: int | None = None
 
 
@@ -61,3 +62,11 @@ def from_entry(feed: db.Feed, entry: dict) -> Item:
         published=_entry_datetime(entry),
         feed_html=_entry_html(entry),
     )
+
+
+def is_recent(published: datetime | str | None, fallback: datetime | str, days: int) -> bool:
+    """公開日時（なければ fallback = 取得日時）が days 日以内か。"""
+    when = published or fallback
+    if isinstance(when, str):
+        when = datetime.fromisoformat(when)
+    return when >= datetime.now(UTC) - timedelta(days=days)

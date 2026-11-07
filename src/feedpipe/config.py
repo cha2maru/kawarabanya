@@ -49,6 +49,19 @@ class FulltextConfig:
 
 
 @dataclass
+class SummarizeConfig:
+    enabled: bool = True
+    endpoint: str = "http://127.0.0.1:8080/v1"
+    model: str = "Qwen3.5-4B"
+    max_input_chars: int = 3000
+    max_tokens: int = 300
+    temperature: float = 0.3
+    timeout: float = 180.0
+    # 公開からこの日数以内の記事だけ要約する（通知しない古い記事に CPU を使わない）
+    max_age_days: int = 3
+
+
+@dataclass
 class DiscordConfig:
     # Bot が参加しているサーバーが 1 つだけなら省略できる
     guild_id: str | None = None
@@ -59,6 +72,8 @@ class DiscordConfig:
     nsfw: bool = True
     # 1 回の実行で投稿する上限（超えた分は次回に回す）
     max_posts_per_run: int = 30
+    # 公開からこの日数を過ぎた記事は投稿しない（未読でも stale にする）
+    max_age_days: int = 3
     token_env: str = "DISCORD_BOT_TOKEN"
 
     @property
@@ -70,6 +85,7 @@ class DiscordConfig:
 class Config:
     general: GeneralConfig = field(default_factory=GeneralConfig)
     fulltext: FulltextConfig = field(default_factory=FulltextConfig)
+    summarize: SummarizeConfig = field(default_factory=SummarizeConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
     path: Path | None = None
 
@@ -91,6 +107,7 @@ def load_config(path: Path | None = None) -> Config:
     return Config(
         general=_section(GeneralConfig, raw.get("general", {}), "general", path),
         fulltext=_section(FulltextConfig, raw.get("fulltext", {}), "fulltext", path),
+        summarize=_section(SummarizeConfig, raw.get("summarize", {}), "summarize", path),
         discord=_section(DiscordConfig, raw.get("discord", {}), "discord", path),
         path=path,
     )

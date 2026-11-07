@@ -124,3 +124,72 @@ def test_markdown_path_and_collision(tmp_path):
     assert p2.name.endswith("_a_b_c_d_2.md")
     assert markdown.slugify("あ" * 100, "x") == "あ" * 50
     assert markdown.slugify(None, "fallback") == "fallback"
+
+
+def test_summarize_on_save(tmp_path):
+    import json as _json
+
+    from feedpipe.summarize import Summarizer, clean_output
+
+    calls = []
+
+    def llm(request: httpx.Request) -> httpx.Response:
+        body = _json.loads(request.content)
+        calls.append(body)
+        title = body["messages"][1]["content"].split("\n")[0]
+        return httpx.Response(200, json={"choices": [{"message": {"content": f"<think></think>{title} の要約。11 月 30 日まで"}}]})
+
+    conn, cfg = make(tmp_path)
+    site = Site()
+    # 記事 A〜C は 2026/11/1〜3 公開。テスト実行日によらず「最近」と判定されるよう大きくする
+    cfg.summarize.max_age_days = 100000
+
+    async def go():
+        async with Summarizer(cfg.summarize, transport=httpx.MockTransport(llm)) as s:
+            feeds = db.list_feeds(conn, enabled=True)
+            return await run_feeds(conn, feeds, cfg, backfill=2, summarizer=s,
+                                   transport=httpx.MockTransport(site.handler))
+
+    asyncio.run(go())
+    assert len(calls) == 2
+    assert calls[0]["chat_template_kwargs"] == {"enable_thinking": False}
+    summaries = sorted(r[0] for r in conn.execute("SELECT summary FROM items WHERE summary IS NOT NULL"))
+    assert summaries == ["タイトル: 記事Bの要約。11月30日まで", "タイトル: 記事Cの要約。11月30日まで"]
+    md = next(p for p in (tmp_path / "archive").rglob("*.md") if "記事C" in p.name).read_text()
+    assert 'summary: "タイトル: 記事Cの要約。11月30日まで"' in md
+    assert clean_output("AI 技術と 9 日") == "AI技術と9日"
+
+
+def test_summarize_skips_old_and_unavailable(tmp_path):
+    from feedpipe.summarize import Summarizer
+
+    def down(request):
+        raise httpx.ConnectError("refused")
+
+    conn, cfg = make(tmp_path)
+
+    async def go(days):
+        cfg.summarize.max_age_days = days
+        async with Summarizer(cfg.summarize, transport=httpx.MockTransport(down)) as s:
+            return await run_feeds(conn, db.list_feeds(conn, enabled=True), cfg, backfill=3,
+                                   summarizer=s, transport=httpx.MockTransport(Site().handler))
+
+    # すべて古い扱い → 要約を呼ばない
+    [r] = asyncio.run(go(0))
+    assert len(r.saved) == 3 and all(i.summary is None for i in r.saved)
+
+    # サーバーに繋がらなくても保存は成功する
+    site = Site()
+    site.items.append(("d", "記事D"))
+    site.etag = '"v2"'
+
+    async def go2():
+        cfg.summarize.max_age_days = 100000
+        async with Summarizer(cfg.summarize, transport=httpx.MockTransport(down)) as s:
+            r = await run_feeds(conn, db.list_feeds(conn, enabled=True), cfg, summarizer=s,
+                                transport=httpx.MockTransport(site.handler))
+            return r, s.available
+
+    [r], available = asyncio.run(go2())
+    assert [i.title for i in r.saved] == ["記事D"] and r.saved[0].summary is None
+    assert available is False

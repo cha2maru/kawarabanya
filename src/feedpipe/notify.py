@@ -13,8 +13,9 @@ from pathlib import Path
 
 import httpx
 
-from . import db
+from . import db, markdown
 from .discord_api import UNCATEGORIZED, DiscordError, send_webhook
+from .item import is_recent
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class Pending:
     title: str | None
     url: str | None
     published: str | None
+    fetched_at: str
     summary: str | None
     md_path: str | None
     webhook_url: str
@@ -46,13 +48,14 @@ class NotifyStats:
     failed: int = 0
     no_channel: int = 0  # 送り先のチャンネルが未登録
     remaining: int = 0  # 上限に達したため次回に回したもの
+    stale: int = 0  # 公開から日数が経っていたため投稿せずに済ませたもの
     errors: list[str] = field(default_factory=list)
 
 
 def pending_items(conn: sqlite3.Connection, category: str | None = None) -> tuple[list[Pending], int]:
     """通知待ちの記事と、送り先がないため送れない記事の数を返す。"""
     rows = conn.execute(
-        "SELECT i.id, i.feed_id, f.title AS feed_title, i.title, i.url, i.published, i.summary,"
+        "SELECT i.id, i.feed_id, f.title AS feed_title, i.title, i.url, i.published, i.fetched_at, i.summary,"
         " i.md_path, d.webhook_url, d.tags"
         " FROM items i JOIN feeds f ON f.id = i.feed_id"
         " LEFT JOIN discord_channels d ON d.category = COALESCE(f.category, ?)"
@@ -68,6 +71,7 @@ def pending_items(conn: sqlite3.Connection, category: str | None = None) -> tupl
             title=r["title"],
             url=r["url"],
             published=r["published"],
+            fetched_at=r["fetched_at"],
             summary=r["summary"],
             md_path=r["md_path"],
             webhook_url=r["webhook_url"],
@@ -83,10 +87,7 @@ def excerpt(md_path: str | None, limit: int = EXCERPT_CHARS) -> str:
     """保存した Markdown の本文から、先頭の数百字をプレーンテキストで取り出す。"""
     if not md_path or not Path(md_path).exists():
         return ""
-    text = Path(md_path).read_text(encoding="utf-8")
-    if text.startswith("---\n"):
-        text = text.split("\n---\n", 1)[-1]
-    text = text.split("\n---\n\n元記事:", 1)[0]
+    text = markdown.read_body(md_path)
     text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)  # 画像
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)  # リンクは文字だけ
     lines = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
@@ -129,6 +130,7 @@ def notify_pending(
     conn: sqlite3.Connection,
     *,
     limit: int,
+    max_age_days: int,
     category: str | None = None,
     dry_run: bool = False,
     transport: httpx.BaseTransport | None = None,
@@ -136,6 +138,13 @@ def notify_pending(
 ) -> NotifyStats:
     stats = NotifyStats()
     items, stats.no_channel = pending_items(conn, category)
+    old = [p for p in items if not is_recent(p.published, p.fetched_at, max_age_days)]
+    items = [p for p in items if p not in old]
+    stats.stale = len(old)
+    if old and not dry_run:
+        with conn:
+            for p in old:
+                db.update_item(conn, p.item_id, status="stale")
     stats.remaining = max(len(items) - limit, 0)
     for i, p in enumerate(items[:limit]):
         payload = build_payload(p)

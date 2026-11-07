@@ -48,3 +48,17 @@ uv run feedpipe discord setup [--apply]      # カテゴリごとにフォーラ
 uv run feedpipe notify [--dry-run]           # 保存済み・未通知の記事を投稿（run の最後にも自動で実行）
 uv run feedpipe run --no-notify              # 通知しない（次回の run / notify で送られる）
 ```
+
+### 要約（ローカル LLM）
+
+`scripts/llama-server.sh` で llama.cpp の `llama-server`（既定モデル: Qwen3.5-4B Q4_K_M）を起動しておくと、
+`run` が保存した記事を要約し、Front Matter の `summary` と Discord の投稿本文に使う。サーバーが止まっていれば要約なしで続行する。
+
+```sh
+scripts/llama-server.sh &                    # http://127.0.0.1:8080/v1
+uv run feedpipe summarize                    # 保存済み・未通知で要約のない最近の記事を要約
+uv run feedpipe run --no-summary             # 要約しない
+```
+
+- 要約と投稿は **公開から 3 日以内の記事だけ**（`[summarize] max_age_days` / `[discord] max_age_days`）。
+  それより古い未通知の記事は投稿せず `stale` にする（Markdown の保存はする）。

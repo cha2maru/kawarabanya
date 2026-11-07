@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -67,6 +68,10 @@ class FakeDiscord:
         return httpx.Response(404, json={"message": "not found"})
 
 
+def ago(**kw) -> str:
+    return (datetime.now(UTC) - timedelta(**kw)).isoformat(timespec="seconds")
+
+
 def setup():
     fake = FakeDiscord()
     client = DiscordClient("TOKEN", transport=httpx.MockTransport(fake.handler))
@@ -123,16 +128,17 @@ def test_notify_posts_forum_threads(tmp_path):
     md.write_text('---\ntitle: "x"\n---\n\n# 記事1\n\n本文の **先頭** です。[リンク](https://l) 20\\~50% a\\_b\n\n---\n\n元記事: <https://a>\n')
     feed_id = db.find_feed_by_url(conn, "https://6tech.example/既存フィード").id
     with conn:
-        a = db.insert_item(conn, feed_id, "a", "https://a", "記事1", "2026-11-07T01:02:03+00:00", "saved")
+        a = db.insert_item(conn, feed_id, "a", "https://a", "記事1", ago(hours=5), "saved")
         db.update_item(conn, a, md_path=str(md))
-        b = db.insert_item(conn, feed_id, "b", "https://b", "記事2", "2026-11-07T02:00:00+00:00", "saved")
+        b = db.insert_item(conn, feed_id, "b", "https://b", "記事2", ago(hours=1), "saved")
         db.update_item(conn, b, summary="LLM の要約 @everyone")
         db.insert_item(conn, feed_id, "c", "https://c", "既読", None, "seen")
+        db.insert_item(conn, feed_id, "d", "https://d", "古い記事", ago(days=4), "saved")
 
     stats = notify.notify_pending(
-        conn, limit=10, transport=httpx.MockTransport(fake.handler), interval=0
+        conn, limit=10, max_age_days=3, transport=httpx.MockTransport(fake.handler), interval=0
     )
-    assert (stats.sent, stats.failed) == (2, 0)
+    assert (stats.sent, stats.failed, stats.stale) == (2, 0, 1)
     p1, p2 = fake.posts
     assert p1["thread_name"] == "記事1"
     assert p1["username"] == "既存フィード"
@@ -144,8 +150,9 @@ def test_notify_posts_forum_threads(tmp_path):
     assert p2["allowed_mentions"] == {"parse": []}
 
     rows = dict(conn.execute("SELECT key, status FROM items").fetchall())
-    assert rows == {"a": "notified", "b": "notified", "c": "seen"}
-    assert notify.notify_pending(conn, limit=10, transport=httpx.MockTransport(fake.handler)).sent == 0
+    assert rows == {"a": "notified", "b": "notified", "c": "seen", "d": "stale"}
+    again = notify.notify_pending(conn, limit=10, max_age_days=3, transport=httpx.MockTransport(fake.handler))
+    assert (again.sent, again.stale) == (0, 0)
 
 
 def test_notify_limit_and_missing_channel():
@@ -153,5 +160,5 @@ def test_notify_limit_and_missing_channel():
     feed_id = db.list_feeds(conn)[0].id
     with conn:
         db.insert_item(conn, feed_id, "x", "https://x", "x", None, "saved")
-    stats = notify.notify_pending(conn, limit=10)
+    stats = notify.notify_pending(conn, limit=10, max_age_days=3)
     assert stats.no_channel == 1 and stats.sent == 0

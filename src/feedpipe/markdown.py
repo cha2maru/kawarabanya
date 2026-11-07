@@ -83,3 +83,26 @@ def save(archive_dir: Path, item: Item, fetched: datetime) -> Path:
         except FileExistsError:
             n += 1
             candidate = path.with_name(f"{path.stem}_{n}{path.suffix}")
+
+
+def read_body(path: str | Path) -> str:
+    """保存した Markdown から Front Matter・タイトル見出し・元記事リンクを除いた本文を返す。"""
+    text = Path(path).read_text(encoding="utf-8")
+    if text.startswith("---\n"):
+        text = text.split("\n---\n", 1)[-1]
+    text = text.rsplit("\n---\n\n元記事:", 1)[0].strip()
+    if text.startswith("# "):
+        text = text.partition("\n")[2]
+    return text.strip()
+
+
+def add_summary(path: str | Path, summary: str) -> None:
+    """Front Matter に summary を書き込む（既にあれば置き換える）。"""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---\n"):
+        return
+    fm, sep, rest = text[4:].partition("\n---\n")
+    lines = [ln for ln in fm.split("\n") if not ln.startswith("summary: ")]
+    lines.append(f"summary: {_yaml_str(summary)}")
+    path.write_text("---\n" + "\n".join(lines) + sep + rest, encoding="utf-8")

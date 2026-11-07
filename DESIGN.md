@@ -196,8 +196,8 @@ game = "env:DISCORD_WEBHOOK_GAME"
 |---|---|---|
 | P1 ✅ | プロジェクト雛形、SQLite、**OPML 取り込み/書き出し**、`check`（死活チェック） | feedly.opml を取り込み、生きているフィードが判明する |
 | P2 ✅ | rss ソース、dedupe、fulltext、markdown 保存、初回の既読化（`run` が自動で行う） | 新着記事が全文 Markdown で保存される |
-| P3 | Discord 通知（item/digest、カテゴリ別 Webhook、`retry`） | 新着が Discord に届く |
-| P4 | llama-server + LFM2.5-1.2B-JP で要約、カテゴリ別 on/off | 要約付きで通知される |
+| P3 ✅ | Discord 通知（item/digest、カテゴリ別 Webhook、`retry`） | 新着が Discord に届く |
+| P4 ✅ | llama-server + Qwen3.5-4B（LFM2.5-1.2B-JP から変更）で要約、カテゴリ別 on/off | 要約付きで通知される |
 | P5 | cron / systemd timer による定期実行、ログ | 放置で動き続ける |
 | P6（将来） | html ソース（CSS セレクタ）、cmd ソース、キーワードフィルタ | RSS 以外も監視できる |
 

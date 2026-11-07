@@ -17,7 +17,8 @@ from pathlib import Path
 from . import db, discord_api, notify, opml
 from .check import CheckResult, Status, apply_results, check_feeds
 from .config import Config, load_config, load_dotenv
-from .run import FeedReport, run_feeds
+from .run import FeedReport, run_feeds, summarize_pending
+from .summarize import Summarizer
 
 STATUS_MARK = {
     Status.OK: "OK  ",
@@ -155,7 +156,7 @@ def _print_report(r: FeedReport) -> None:
     elif r.new:
         print(f"[NEW ] {r.feed.id:>4} {title} 新着 {r.new} 件 / 保存 {len(r.saved)} 件", flush=True)
     for it in r.saved:
-        print(f"         + [{it.content_source}] {it.title}")
+        print(f"         + [{it.content_source}{' 要約' if it.summary else ''}] {it.title}")
     for it, err in r.errors:
         print(f"         ! {it.title}: {err}")
 
@@ -170,9 +171,16 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
         cfg.fulltext.enabled = False
 
     print(f"{len(feeds)} 件を取得します…", file=sys.stderr)
-    reports = asyncio.run(
-        run_feeds(conn, feeds, cfg, backfill=args.backfill, on_report=None if args.quiet else _print_report)
-    )
+    async def go():
+        if not cfg.summarize.enabled or args.no_summary:
+            return await run_feeds(conn, feeds, cfg, backfill=args.backfill, on_report=on_report)
+        async with Summarizer(cfg.summarize) as summarizer:
+            return await run_feeds(
+                conn, feeds, cfg, backfill=args.backfill, summarizer=summarizer, on_report=on_report
+            )
+
+    on_report = None if args.quiet else _print_report
+    reports = asyncio.run(go())
     failed = sum(1 for r in reports if not r.check.status.is_ok)
     unchanged = sum(1 for r in reports if r.check.not_modified)
     inited = sum(1 for r in reports if r.initialized)
@@ -186,6 +194,18 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
     if not args.no_notify and conn.execute("SELECT 1 FROM discord_channels LIMIT 1").fetchone():
         rc |= _notify(cfg, conn)
     return rc
+
+
+def cmd_summarize(cfg: Config, args: argparse.Namespace) -> int:
+    conn = _open_db(cfg, args)
+
+    async def go():
+        async with Summarizer(cfg.summarize) as summarizer:
+            return await summarize_pending(conn, summarizer, cfg.summarize.max_age_days, args.limit)
+
+    done, total = asyncio.run(go())
+    print(f"要約: {done} / {total} 件（公開から {cfg.summarize.max_age_days} 日以内・未通知の記事）")
+    return 0 if done == total else 1
 
 
 # --- feeds -----------------------------------------------------------------
@@ -331,9 +351,15 @@ def _notify(
     dry_run: bool = False,
 ) -> int:
     stats = notify.notify_pending(
-        conn, limit=limit or cfg.discord.max_posts_per_run, category=category, dry_run=dry_run
+        conn,
+        limit=limit or cfg.discord.max_posts_per_run,
+        max_age_days=cfg.discord.max_age_days,
+        category=category,
+        dry_run=dry_run,
     )
     line = f"通知: 送信 {stats.sent} 件"
+    if stats.stale:
+        line += f" / {cfg.discord.max_age_days} 日より古いため送らない {stats.stale} 件"
     if stats.failed:
         line += f" / 失敗 {stats.failed} 件"
     if stats.remaining:
@@ -400,8 +426,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="初回のフィードは既読化に加えて、新しい順に N 件を保存する")
     s.add_argument("--no-fulltext", action="store_true", help="元記事を取りに行かず、フィードの本文だけ使う")
     s.add_argument("--no-notify", action="store_true", help="Discord に通知しない（次回以降に送られる）")
+    s.add_argument("--no-summary", action="store_true", help="LLM で要約しない")
     s.add_argument("-q", "--quiet", action="store_true", help="結果の集計だけ表示する")
     s.set_defaults(func=cmd_run)
+
+    s = sub.add_parser("summarize", help="保存済み・未通知で要約のない最近の記事を要約する")
+    s.add_argument("--limit", type=int)
+    s.set_defaults(func=cmd_summarize)
 
     s = sub.add_parser("notify", help="保存済みで未通知の記事を Discord に投稿する")
     s.add_argument("--limit", type=int, help="投稿する上限（既定: [discord] max_posts_per_run）")
