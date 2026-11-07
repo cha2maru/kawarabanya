@@ -46,7 +46,7 @@ uv run kawarabanya feeds add "http://127.0.0.1:1200/github/repos/DIYgod" --genre
 
 | コマンド | 内容 |
 |---|---|
-| `bot` | 常駐 Bot。60 分ごとと、まとめの時刻（6:30・18:30）に `run`・`genres suggest --apply --due`・`digest --due` を順に別プロセスで実行する |
+| `bot` | 常駐 Bot。Bot にメンションして日本語で頼むと、コマンドに直して返事をする（下の「Discord から頼む」）。60 分ごとと、まとめの時刻（6:30・18:30）に `run`・`genres suggest --apply --due`・`digest --due` を順に別プロセスで実行する |
 | `digest [--genre X] [--due] [--dry-run]` | ジャンルごとのまとめ（前回のまとめ以降の記事の傾向＋重要度順の投稿へのリンク）を今すぐ #ニュース に投稿する。Bot は 6:30・18:30 に投稿する |
 | `digest --update [--genre X]` | 最後に投稿したまとめを、最新の記事・重要度で作り直して書き換える |
 | `digest --delete [--genre X] [--day YYYY-MM-DD]` | ジャンルごとに最後のまとめ（`--day` ならその日のすべて）を削除する |
@@ -70,6 +70,18 @@ uv run kawarabanya feeds add "http://127.0.0.1:1200/github/repos/DIYgod" --genre
 全体のオプション: `-c config.toml`、`--db PATH`、`-v`（詳しいログ）。
 
 ## 設定
+
+### Discord から頼む
+
+Bot にメンションして日本語で書くと、ローカル LLM がコマンドに直す（サーバーの持ち主だけ）。サイトの追加・削除、好き嫌いの変更、取り込み・まとめの実行は、ボタンで確認してから実行する。状態や一覧はすぐ返す。
+
+```
+@RSSBOT https://example.com/news をボードゲームに追加して   → feeds add … --genre hobby/boardgame（確認）
+@RSSBOT GIGAZINE を外して                                    → feeds remove 182（確認）
+@RSSBOT スポーツはまとめに出さなくていい                     → genres interest culture/sports low（確認）
+@RSSBOT いまどうなってる？                                   → status
+@RSSBOT 何ができるの？                                       → 例の一覧
+```
 
 ### genres.toml（git 管理外。見本: genres.example.toml）
 

@@ -14,7 +14,7 @@ def cmd_discord_invite_url(cfg: Config, args: argparse.Namespace) -> int:
     """discord invite-url: 必要な権限付きの Bot 招待 URL を表示する。"""
     client = _discord_client(cfg)
     print(discord_api.invite_url(client.application_id()))
-    print("権限: チャンネルを見る / チャンネルの管理 / ウェブフックの管理 / メッセージ履歴を読む / スレッドの管理", file=sys.stderr)
+    print("権限: チャンネルを見る / チャンネルの管理 / ウェブフックの管理 / メッセージ履歴を読む / スレッドの管理 / メッセージを送信", file=sys.stderr)
     return 0
 
 def cmd_discord_guilds(cfg: Config, args: argparse.Namespace) -> int:
