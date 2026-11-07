@@ -336,8 +336,9 @@ def test_digest_render_and_post(tmp_path):
     assert next(i.title for i in digest.collect(conn, "tech", since, {"tech/ai": "like"})) == "判定なし"  # 0.8 + 0.3
 
     many = [digest.DigestItem(f"記事{i}" * 20, f"t{i}", 0.5, None) for i in range(50)]
-    text = digest.render("傾向。", many, "1", top=50)
-    assert len(text) <= digest.MAX_CONTENT and text.endswith("件") and text.startswith("傾向。")
+    text = digest.render(["話題 A", "話題 B"], many, "1", top=50)
+    assert len(text) <= digest.MAX_CONTENT and text.endswith("件") and text.startswith("**話題**\n- 話題 A\n- 話題 B\n")
+    assert digest.render([], many[:1], "1", top=1).startswith("**注目の記事**")
 
 
 def test_notify_writes_discord_link(tmp_path):
@@ -433,3 +434,28 @@ def test_feed_interest_down_and_mute(tmp_path):
         db.insert_item(conn, a, "m", "https://m", "ミュート", ago(hours=1), "saved")
     db.set_option(conn, a, "interest", "mute")
     assert notify.notify_pending(conn, limit=5, max_age_days=3, interval=0).muted == 1
+
+
+def test_health_alerts_once_and_rearm():
+    from kawarabanya.rss import health
+
+    fake, client, conn = setup()
+    t = httpx.MockTransport(fake.handler)
+    feed_id = db.list_feeds(conn)[0].id
+    with conn:
+        db.set_enabled(conn, feed_id, False, "fail_x5:forbidden")
+        conn.execute("UPDATE feeds SET last_error = 'HTTP 403' WHERE id = ?", (feed_id,))
+    found = health.find_problems(conn)
+    assert list(found) == [f"feed:{feed_id}"] and "HTTP 403" in found[f"feed:{feed_id}"]
+    assert health.send_alerts(conn, found, t) == []  # 送り先がまだない → 覚えず、次に送る
+
+    fake.channels.append({"id": "50", "type": 0, "name": "ニュース", "parent_id": "999"})
+    discord_api.register_webhook(client, conn, discord_api.DIGEST_KEY, "1", "50", "ニュース", "kawarabanya")
+    assert health.send_alerts(conn, found, t) == [f"feed:{feed_id}"]
+    assert "取得を止めました" in fake.posts[-1]["content"] and fake.posts[-1]["allowed_mentions"] == {"parse": []}
+    count = len(fake.posts)
+    assert health.send_alerts(conn, found, t) == []  # 同じ不調は送らない
+    assert len(fake.posts) == count
+
+    assert health.send_alerts(conn, {}, t) == []  # 直ったら忘れる
+    assert health.send_alerts(conn, found, t) == [f"feed:{feed_id}"]  # 再発したらまた送る

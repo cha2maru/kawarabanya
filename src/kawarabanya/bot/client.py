@@ -12,6 +12,7 @@ import logging
 import re
 import shlex
 import sys
+from collections import Counter
 from pathlib import Path
 
 import discord
@@ -21,12 +22,15 @@ from kawarabanya.bot import assistant
 from kawarabanya.core import db
 from kawarabanya.core.config import Config
 from kawarabanya.core.llm import Summarizer
+from kawarabanya.rss import health
 from kawarabanya.rss.pipeline import load_genres_if_any
 
 # Discord のメッセージの上限（2,000 字）に収めるため、コマンドの出力はこの字数で切る
 MAX_OUTPUT = 1800
 # 依頼に添付された OPML を受け取る上限（バイト）
 MAX_UPLOAD = 5 * 1024 * 1024
+# 定期処理がこの回数続けて失敗したら Discord に知らせる（1 回の失敗は一時的なことが多い）
+JOB_FAILURES = 3
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +49,7 @@ class Bot(discord.Client):
         # 毎時の実行・定時の実行・依頼されたコマンドが重ならないよう、1 つずつ実行する
         self._lock = asyncio.Lock()
         self.summarizer: Summarizer | None = None
+        self.job_failures: Counter[str] = Counter()
         args = list(config_args)
         self.db_path = args[args.index("--db") + 1] if "--db" in args else cfg.general.db
 
@@ -79,11 +84,32 @@ class Bot(discord.Client):
     async def cycle(self) -> None:
         """定期実行の 1 回分。run で記事を取り込み、まとめの時刻を過ぎていれば、サブジャンルを作ってからまとめを投稿する。"""
         async with self._lock:
-            await self._kawarabanya("run", "-q", *self.cfg.bot.run_args)
+            await self._job("run", "-q", *self.cfg.bot.run_args)
             # 要約サーバーを run と取り合わないよう、run の後に続けて実行する。
             # 新しいサブジャンルを先に作り、振り分け直した記事をまとめに反映する（まとめの時刻ごと）
-            await self._kawarabanya("genres", "suggest", "--apply", "--due")
-            await self._kawarabanya("digest", "--due")
+            await self._job("genres", "suggest", "--apply", "--due")
+            await self._job("digest", "--due")
+        try:
+            await asyncio.to_thread(self._check_health)
+        except Exception:  # 通知の失敗で定期実行のループを止めない
+            log.exception("不調の確認に失敗")
+
+    async def _job(self, *args: str) -> None:
+        """定期処理を実行し、続けて失敗した回数を数える。"""
+        rc, _ = await self._kawarabanya(*args)
+        self.job_failures[args[0]] = self.job_failures[args[0]] + 1 if rc else 0
+
+    def _check_health(self) -> None:
+        """新しく起きた不調を Discord に知らせる（別スレッドで動くので DB はここで開く）。"""
+        conn = db.connect(self.db_path)
+        try:
+            found = health.find_problems(conn, self.cfg.general.rsshub_url)
+            for job, count in self.job_failures.items():
+                if count >= JOB_FAILURES:
+                    found[f"job:{job}"] = f"定期処理 {job} が {JOB_FAILURES} 回続けて失敗しました。ログを見てください"
+            health.send_alerts(conn, found)
+        finally:
+            conn.close()
 
     async def _kawarabanya(self, *args: str) -> tuple[int, str]:
         """kawarabanya のサブコマンドを別プロセスで実行し、出力をログに流す。(終了コード, 出力) を返す。

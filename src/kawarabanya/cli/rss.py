@@ -212,7 +212,7 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
         f"（フィード: 初回 {inited} / 更新なし {unchanged} / 取得失敗 {failed}）"
     )
     db.set_state(conn, "run_at", datetime.now(UTC).isoformat(timespec="seconds"))
-    rc = 1 if errors else 0
+    rc = 0  # 記事単位の失敗は上の結果に出し、run の失敗にはしない（Bot が不調として数えないように）
     if not args.no_notify and conn.execute("SELECT 1 FROM discord_channels LIMIT 1").fetchone():
         rc |= _notify(cfg, conn)
         if cfg.discord.token:

@@ -46,9 +46,19 @@ SAME_STORY_PROMPT = (
     "同じなら A、関連はあっても別の出来事なら B を 1 文字だけ答えてください。"
 )
 TREND_PROMPT = (
-    "あなたはニュース編集者です。今日のニュース見出しの一覧を読み、"
-    "全体として目立つ傾向を日本語2文以内で述べてください。一覧にないことは書かないでください。"
+    "あなたはニュース編集者です。重要度の高い順に番号の付いた見出しの一覧から、読者に伝える話題を最大 3 つ選びます。"
+    "topic には 1 つの話題だけを 25 字以内の体言止めで書きます。見出しにない事実を足さず、別の見出しの内容を混ぜません。"
+    "同じ話題の見出しが複数あれば 1 つにまとめ、items にその番号をすべて書きます。"
 )
+TREND_SCHEMA = {
+    "type": "object",
+    "properties": {"topics": {"type": "array", "minItems": 1, "maxItems": 3, "items": {
+        "type": "object",
+        "properties": {"topic": {"type": "string"}, "items": {"type": "array", "items": {"type": "integer"}}},
+        "required": ["topic", "items"],
+    }}},
+    "required": ["topics"],
+}
 
 CJK = r"぀-ヿ㐀-鿿！-｠"
 
@@ -167,27 +177,19 @@ class Summarizer:
             return None
         return result if isinstance(result, dict) else None
 
-    async def trend(self, titles: list[str]) -> str | None:
-        """見出しの一覧から、全体の傾向を 2 文で書かせる。"""
+    async def trend(self, titles: list[str]) -> list[str]:
+        """見出しの一覧（重要度の高い順）から、話題を最大 3 つ選ばせる。実在する見出しを挙げた話題だけを返す。
+
+        2 文の文章で書かせると、関係のない話題を 1 つの文につなげたので、話題を別々の短い句にする。
+        """
         if not titles:
-            return None
-        data = await self._chat(
-            {
-                "messages": [
-                    {"role": "system", "content": TREND_PROMPT},
-                    {"role": "user", "content": "\n".join(f"- {t}" for t in titles)},
-                ],
-                "temperature": self.cfg.temperature,
-                "max_tokens": 200,
-            },
-            "傾向のまとめ",
-        )
-        if data is None:
-            return None
-        try:
-            return clean_output(data["choices"][0]["message"]["content"]) or None
-        except (KeyError, IndexError, TypeError):
-            return None
+            return []
+        user = "\n".join(f"{n}. {t}" for n, t in enumerate(titles, 1))
+        data = await self.ask_json(TREND_PROMPT, user, TREND_SCHEMA, "話題のまとめ", max_tokens=300, timeout=120)
+        return [
+            clean_output(t["topic"]) for t in (data or {}).get("topics", [])
+            if t.get("topic") and any(isinstance(n, int) and 1 <= n <= len(titles) for n in t.get("items", []))
+        ]
 
     async def _choose(self, system: str, user: str, letters: str, what: str) -> dict[str, float] | None:
         """user（見出しと冒頭など）を渡して letters のどれか 1 文字だけを出させ、各文字の確率（合計 1）を返す。

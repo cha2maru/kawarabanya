@@ -21,6 +21,7 @@ from datetime import datetime
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import charset_normalizer
+import lxml.etree
 import lxml.html
 
 # 記事を見分けるキーにする URL から除く、追跡用のパラメータ
@@ -98,7 +99,8 @@ def _parse(html: bytes | str):
     """HTML を読む（bytes は decode_html で文字コードを判別する）。"""
     if isinstance(html, bytes):
         html, _ = decode_html(html)
-    return lxml.html.fromstring(html)
+    # lxml は <?xml encoding=...?> で始まる str を受け付けないので、UTF-8 の bytes にして渡す
+    return lxml.html.fromstring(html.encode("utf-8", errors="replace"), parser=lxml.html.HTMLParser(encoding="utf-8"))
 
 
 def _text(el) -> str:
@@ -162,5 +164,8 @@ def extract(html: bytes | str, base_url: str, src: HtmlSource) -> list[dict]:
 
 def page_title(html: bytes | str) -> str | None:
     """ページの <title>（フィード名の代わりに使う）。"""
-    titles = _parse(html).findall(".//title")
+    try:
+        titles = _parse(html).findall(".//title")
+    except lxml.etree.ParserError:  # 空のページ
+        return None
     return _text(titles[0]) or None if titles else None

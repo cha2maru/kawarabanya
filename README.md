@@ -5,7 +5,7 @@
 - **全文を Markdown で保存**: 元記事のページから本文を取り出し、`archive/` に残す（文字コードは自動で判別し、UTF-8 で保存）。
 - **ローカル LLM で整理**: 記事をサブジャンルに振り分け（フォーラムのタグになる）、重要度を判定して、重要な記事だけ要約する。外部の API は使わない（Qwen3.5-4B を llama.cpp で動かす。1 件 1.5〜9 秒）。
 - **重複をまとめる**: 同じ URL・同じ本文の記事に加え、本文の違う「同じ出来事」の記事も LLM で見分けて 1 件にする。
-- **まとめ**: 1 日 2 回（6:30・18:30）、ジャンルごとの傾向と重要な記事へのリンクを投稿する。
+- **まとめ**: 1 日 2 回（6:30・18:30）、ジャンルごとの話題（最大 3 つ）と重要な記事へのリンクを投稿する。
 - **好みを覚える**: 投稿に付いた 👍 を数える。ジャンルの好き嫌い（好き・うすい・ミュート）でまとめの並びや投稿を変えられる。
 - **ジャンルが育つ**: どのサブジャンルにも当てはまらない記事がたまると、LLM が新しいサブジャンルを作る（多すぎれば似たものをまとめる）。
 - **Discord から日本語で頼める**: 「@Bot このサイトを追加して」「スポーツはまとめに出さなくていい」などをコマンドに直し、ボタンで確認して実行する。
@@ -99,7 +99,7 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 | コマンド | 内容 |
 |---|---|
 | `bot` | 常駐 Bot。Bot にメンションして日本語で頼むと、コマンドに直して返事をする（「Discord から頼む」）。60 分ごとと、まとめの時刻（6:30・18:30）に `run`・`genres suggest --apply --due`・`digest --due` を順に別プロセスで実行する |
-| `digest [--genre X] [--due] [--dry-run]` | ジャンルごとのまとめ（前回のまとめ以降の記事の傾向＋重要度順の投稿へのリンク）を今すぐ #ニュース に投稿する。Bot は 6:30・18:30 に投稿する |
+| `digest [--genre X] [--due] [--dry-run]` | ジャンルごとのまとめ（前回のまとめ以降の記事の話題＋重要度順の投稿へのリンク）を今すぐ #ニュース に投稿する。Bot は 6:30・18:30 に投稿する |
 | `digest --update [--genre X]` | 最後に投稿したまとめを、最新の記事・重要度で作り直して書き換える |
 | `digest --delete [--genre X] [--day YYYY-MM-DD]` | ジャンルごとに最後のまとめ（`--day` ならその日のすべて）を削除する |
 | `run [--category X] [--backfill N] [--no-fulltext] [--no-summary] [--no-notify]` | 取得 → 保存 → 重要度の判定 → 要約 → 投稿 → 👍 集計。初回のフィードは既存記事を既読にするだけ |
@@ -232,13 +232,14 @@ llm_server_command = "scripts/llama-server.sh"   # Bot と一緒に要約サー�
 
 - **更新**: `git pull && uv sync` のあと `systemctl --user restart kawarabanya-bot`。DB の形が変わる版では、起動時に自動でマイグレーションする（その前に `data/kawarabanya.db.bak-v<旧版>` にバックアップを取る）。新しい版で作った DB を古い版で開こうとすると止まる。
 - **バックアップ**: `data/`（DB）と `archive/`（記事の Markdown）、`config.toml`・`genres.toml`・`.env`。`genres.toml` は Bot も書き換える（サブジャンルの自動作成・Discord からの依頼）。
+- **不調の通知**: Bot は、失敗が続いて自動で止めたフィード、RSSHub の無応答（`rsshub_url` を書いたとき）、定期処理の 3 回連続の失敗を、まとめの投稿先のチャンネルに知らせる（新しく起きたときに 1 回だけ。直ったあと再発すればまた知らせる）。
 - **調子が悪いとき**: `uv run kawarabanya doctor` と `uv run kawarabanya status`、ログ（`journalctl --user -u kawarabanya-bot`）。
 
 ## 開発
 
 ```sh
 uv run pytest
-uvx ruff check src tests                           # 規則は pyproject.toml の [tool.ruff]
+uvx ruff check src tests                           # 規則は pyproject.toml の [tool.ruff]。push のたびに GitHub Actions でも実行する
 uv run --with pdoc pdoc kawarabanya -o docs/api   # API ドキュメント（docstring から HTML）
 ```
 

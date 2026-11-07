@@ -16,7 +16,7 @@ import httpx
 from kawarabanya.core import db
 from kawarabanya.core.config import Config
 from kawarabanya.core.discord_api import DIGEST_KEY, DiscordClient, DiscordError
-from kawarabanya.rss import genres
+from kawarabanya.rss import genres, health
 from kawarabanya.rss.sources import extensions
 
 # GET /applications/@me の flags（MESSAGE CONTENT INTENT がオンか）
@@ -92,10 +92,7 @@ def _check_rsshub(cfg: Config, r: Report) -> None:
     base = cfg.general.rsshub_url.rstrip("/")
     if not base:
         return
-    try:
-        ok = httpx.get(base + "/", timeout=10).is_success
-    except httpx.HTTPError:
-        ok = False
+    ok = health.rsshub_alive(base)
     # 止まっていると RSSHub 経由のフィードが取得に失敗し続け、5 回で自動的に無効になる
     r("ok" if ok else "ng", "RSSHub", base if ok else f"{base} に応答がありません（docker start rsshub。Docker Desktop が起動しているか）")
 

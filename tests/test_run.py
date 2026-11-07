@@ -400,3 +400,22 @@ def test_classify_two_steps_when_too_many_subgenres(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="選択肢は"):
         asyncio.run(too_many())  # 黙って選択肢を捨てない
+
+
+def test_trend_keeps_topics_with_real_headlines():
+    import json as _json
+
+    from kawarabanya.core.llm import Summarizer
+
+    answer = {"topics": [{"topic": "本物の話題", "items": [1, 2]}, {"topic": "番号が実在しない話題", "items": [9]},
+                         {"topic": "番号のない話題", "items": []}]}
+
+    def llm(req):
+        assert "1. 見出しA\n2. 見出しB" in _json.loads(req.content)["messages"][1]["content"]
+        return httpx.Response(200, json={"choices": [{"message": {"content": _json.dumps(answer, ensure_ascii=False)}}]})
+
+    async def go():
+        async with Summarizer(SummarizeConfig(), transport=httpx.MockTransport(llm)) as s:
+            return await s.trend(["見出しA", "見出しB"]), await s.trend([])
+
+    assert asyncio.run(go()) == (["本物の話題"], [])

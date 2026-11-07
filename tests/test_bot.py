@@ -86,3 +86,23 @@ def test_readonly_request_runs_without_waiting_for_lock(tmp_path):
 
     asyncio.run(go())
     assert ran == [("status",)] and "✅" in replies[-1][1]["content"]
+
+
+def test_job_failures_alert_after_three(tmp_path, monkeypatch):
+    bot, _me, _ran = make_bot(tmp_path, {})
+    sent = []
+    monkeypatch.setattr(botmod.health, "send_alerts", lambda conn, found: sent.append(dict(found)))
+
+    async def fail(*argv):
+        return 1, "エラー"
+
+    bot._kawarabanya = fail
+
+    async def go(times):
+        for _ in range(times):
+            await bot.cycle()
+
+    asyncio.run(go(2))
+    assert not any("job:run" in s for s in sent)  # 1〜2 回は一時的なことが多い
+    asyncio.run(go(1))
+    assert "job:run" in sent[-1] and "job:digest" in sent[-1]

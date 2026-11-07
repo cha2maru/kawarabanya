@@ -8,7 +8,7 @@ from kawarabanya.core import db
 from kawarabanya.core.config import GeneralConfig
 from kawarabanya.rss.genres import apply_genres, load_genres
 from kawarabanya.rss.sources.check import Status, apply_results, check_feeds
-from kawarabanya.rss.sources.htmlsource import HtmlSource, extract, normalize_url
+from kawarabanya.rss.sources.htmlsource import HtmlSource, extract, normalize_url, page_title
 
 PAGE = """<html><head><title>お知らせ | Example</title></head><body>
 <nav><a href="/about">会社概要</a></nav>
@@ -161,3 +161,10 @@ def test_extension_source(tmp_path, monkeypatch):
     p.write_text('[news]\nfeeds = [{ url = "https://x.example/", extension = "nope" }]\n', encoding="utf-8")
     with pytest.raises(ValueError, match="拡張 nope がありません"):
         load_genres(p)
+
+
+def test_xml_declaration_and_empty_page():
+    xhtml = '<?xml version="1.0" encoding="UTF-8"?><html><head><title>題名</title></head><body></body></html>'
+    assert page_title(xhtml) == "題名"  # 判別して str にしたあとの XHTML
+    assert page_title(xhtml.encode()) == "題名"
+    assert page_title("") is None

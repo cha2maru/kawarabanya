@@ -3,8 +3,8 @@
 投稿するのは [digest] times の時刻（既定 6:30 と 18:30）と、`kawarabanya digest` を実行したとき。
 どちらも前回のまとめ以降（最大 window_hours 時間）の記事をまとめる。
 
-まとめ = LLM が見出しの一覧から書く「今日の傾向」（2 文）＋ 重要度の高い順の投稿へのリンク。
-一覧は LLM に書かせない（関係のない話題を 1 行に混ぜることがあったため）。
+まとめ = LLM が見出しの一覧から選ぶ「話題」（最大 3 つ）＋ 重要度の高い順の投稿へのリンク。
+リンクの一覧は LLM に書かせない（関係のない話題を 1 行に混ぜることがあったため）。
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ from kawarabanya.core.llm import Summarizer
 from kawarabanya.rss.genres import interest_of, top_genre
 
 MAX_CONTENT = 2000
-# 傾向を書かせる見出しの上限（LLM の入力 8,192 トークンに収めるため）
-MAX_TREND_TITLES = 150
+# 話題を選ばせる見出しの数（重要度の高い順）。150 件では話題が散り、見出しにない話を書くことが増えた
+MAX_TREND_TITLES = 20
 
 
 @dataclass
@@ -74,9 +74,10 @@ def _link_text(title: str) -> str:
     return title.replace("[", "［").replace("]", "］")
 
 
-def render(trend: str | None, items: list[DigestItem], guild_id: str, top: int, limit: int = MAX_CONTENT) -> str:
-    """まとめの本文（傾向＋重要度順の投稿へのリンク＋「ほか N 件」）を limit 字に収めて作る。"""
-    lines = [f"{trend}\n\n**注目の記事**" if trend else "**注目の記事**"]
+def render(trend: list[str], items: list[DigestItem], guild_id: str, top: int, limit: int = MAX_CONTENT) -> str:
+    """まとめの本文（話題＋重要度順の投稿へのリンク＋「ほか N 件」）を limit 字に収めて作る。"""
+    topics = "".join(f"- {t}\n" for t in trend)
+    lines = [f"**話題**\n{topics}\n**注目の記事**" if trend else "**注目の記事**"]
     for it in items[:top]:
         line = f"- [{_link_text(it.title)}]({post_url(guild_id, it.thread_id)})" if it.thread_id else f"- {it.title}"
         if it.likes:
@@ -111,7 +112,7 @@ async def post_digest(
     update=True なら、最後に投稿したまとめを作り直して書き換える。
     投稿する記事がない・送り先がない・（更新なら）未投稿のときは None。
     """
-    channel = _channel(conn)
+    channel = digest_channel(conn)
     last, before = [*_history(conn, genre), None, None][:2]
     if channel is None or (update and last is None):
         return None
@@ -125,7 +126,7 @@ async def post_digest(
     items = collect(conn, genre, since, levels)
     if not items:
         return None
-    trend = None
+    trend = []
     if summarizer:
         trend = await summarizer.trend([i.title for i in items[:MAX_TREND_TITLES]])
     header = f"## 📰 {label or genre} {now.astimezone():%m/%d %H:%M} のまとめ（{len(items)} 件）"
@@ -150,7 +151,7 @@ def delete_digest(
     conn: sqlite3.Connection, genre: str, day: str, *, transport: httpx.BaseTransport | None = None
 ) -> bool:
     """genre のまとめ（digests.day が day のもの）を消す。投稿済みの記録も消す。"""
-    channel = _channel(conn)
+    channel = digest_channel(conn)
     message_id = _posted(conn, genre, day)
     if message_id is None:
         return False
@@ -168,7 +169,8 @@ def _history(conn: sqlite3.Connection, genre: str) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def _channel(conn: sqlite3.Connection) -> sqlite3.Row | None:
+def digest_channel(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    """まとめの投稿先（Webhook とサーバー）。未登録なら None。"""
     return conn.execute(
         "SELECT webhook_url, guild_id FROM discord_channels WHERE category = ?", (DIGEST_KEY,)
     ).fetchone()
