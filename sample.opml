@@ -1,0 +1,32 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<opml version="1.0">
+    <head>
+        <title>kawarabanya sample subscriptions</title>
+    </head>
+    <body>
+        <outline text="news" title="news">
+            <outline type="rss" text="NHKニュース" title="NHKニュース" xmlUrl="https://www.nhk.or.jp/rss/news/cat0.xml" htmlUrl="https://www3.nhk.or.jp/news/"/>
+            <outline type="rss" text="国内 - Yahoo!ニュース" title="国内 - Yahoo!ニュース" xmlUrl="https://news.yahoo.co.jp/rss/categories/domestic.xml" htmlUrl="https://news.yahoo.co.jp/categories/domestic"/>
+            <outline type="rss" text="国際 - Yahoo!ニュース" title="国際 - Yahoo!ニュース" xmlUrl="https://news.yahoo.co.jp/rss/categories/world.xml" htmlUrl="https://news.yahoo.co.jp/categories/world"/>
+            <outline type="rss" text="BBC News" title="BBC News" xmlUrl="https://feeds.bbci.co.uk/news/rss.xml" htmlUrl="https://www.bbc.co.uk/news"/>
+        </outline>
+        <outline text="tech" title="tech">
+            <outline type="rss" text="GIGAZINE" title="GIGAZINE" xmlUrl="https://gigazine.net/news/rss_2.0/" htmlUrl="https://gigazine.net/"/>
+            <outline type="rss" text="ITmedia NEWS" title="ITmedia NEWS" xmlUrl="https://rss.itmedia.co.jp/rss/2.0/news_bursts.xml" htmlUrl="https://www.itmedia.co.jp/news/"/>
+            <outline text="dev" title="dev">
+                <outline type="rss" text="Publickey" title="Publickey" xmlUrl="https://www.publickey1.jp/atom.xml" htmlUrl="https://www.publickey1.jp/"/>
+                <outline type="rss" text="Zennのトレンド" title="Zennのトレンド" xmlUrl="https://zenn.dev/feed" htmlUrl="https://zenn.dev/"/>
+            </outline>
+        </outline>
+        <outline text="game" title="game">
+            <outline type="rss" text="4Gamer.net" title="4Gamer.net" xmlUrl="https://www.4gamer.net/rss/index.xml" htmlUrl="https://www.4gamer.net/"/>
+        </outline>
+        <outline text="culture" title="culture">
+            <outline type="rss" text="コミックナタリー" title="コミックナタリー" xmlUrl="https://natalie.mu/comic/feed/news" htmlUrl="https://natalie.mu/comic"/>
+            <outline type="rss" text="音楽ナタリー" title="音楽ナタリー" xmlUrl="https://natalie.mu/music/feed/news" htmlUrl="https://natalie.mu/music"/>
+        </outline>
+        <outline text="あとで読む" title="あとで読む">
+            <outline type="rss" text="GIGAZINE" title="GIGAZINE" xmlUrl="https://gigazine.net/news/rss_2.0/" htmlUrl="https://gigazine.net/"/>
+        </outline>
+    </body>
+</opml>
