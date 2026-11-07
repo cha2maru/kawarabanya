@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from calendar import timegm
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -61,7 +62,8 @@ def from_entry(feed: db.Feed, entry: dict) -> Item:
         feed=feed,
         key=_entry_key(entry),
         url=(entry.get("link") or "").strip() or None,
-        title=(entry.get("title") or "").strip() or None,
+        # Google ニュースなどは見出しに <b> などのタグを含める
+        title=re.sub(r"<[^>]+>", "", entry.get("title") or "").strip() or None,
         author=entry.get("author") or None,
         published=_entry_datetime(entry),
         feed_html=_entry_html(entry),

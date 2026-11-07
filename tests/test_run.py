@@ -7,7 +7,7 @@ import httpx
 from feedpipe import db
 from feedpipe.config import Config, GeneralConfig
 from feedpipe.rss import archive
-from feedpipe.rss.item import Item
+from feedpipe.rss.item import Item, from_entry
 from feedpipe.rss.pipeline import run_feeds
 
 ARTICLE = """<html><head><title>{t}</title></head><body><nav>メニュー</nav>
@@ -264,3 +264,9 @@ def test_classify_subgenre(tmp_path):
         "b": None,  # どれにも当てはまらない
         "c": "tech/gadget",
     }
+
+
+def test_title_tags_removed():
+    conn = db.connect(":memory:")
+    feed = db.get_feed(conn, db.insert_feed(conn, "https://x.example/feed", None, None, None))
+    assert from_entry(feed, {"title": "『<b>アークナイツ</b>』新情報", "link": "https://x.example/1"}).title == "『アークナイツ』新情報"

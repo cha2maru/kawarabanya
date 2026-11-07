@@ -391,7 +391,7 @@ def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
         async with Summarizer(cfg.summarize) as summarizer:
             return {
                 g: await digest.post_digest(
-                    conn, summarizer, g, now=now, top=cfg.digest.top, window_hours=cfg.digest.window_hours,
+                    conn, summarizer, g, label=defs[g].label if defs and g in defs else None, now=now, top=cfg.digest.top, window_hours=cfg.digest.window_hours,
                     update=args.update, dry_run=args.dry_run,
                 )
                 for g in genre_list

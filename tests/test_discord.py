@@ -277,10 +277,10 @@ def test_digest_render_and_post(tmp_path):
     discord_api.register_webhook(client, conn, discord_api.DIGEST_KEY, "1", ch["id"], ch["name"], "feedpipe")
 
     now = datetime.now(UTC)
-    content = asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24,
+    content = asyncio.run(digest.post_digest(conn, None, "tech", label="テック", now=now, top=2, window_hours=24,
                                                transport=httpx.MockTransport(fake.handler)))
     lines = content.splitlines()
-    assert lines[0].startswith("## 📰 tech ") and lines[0].endswith("のまとめ（3 件）")
+    assert lines[0].startswith("## 📰 テック ") and lines[0].endswith("のまとめ（3 件）")
     assert lines[1] == "**注目の記事**"
     assert lines[2] == "- [大事件 ［速報］](https://discord.com/channels/1/t-b)  👍2"  # 重要度の高い順
     assert lines[3] == "- [小ネタ](https://discord.com/channels/1/t-a)"

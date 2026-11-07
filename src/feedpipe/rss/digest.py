@@ -78,6 +78,7 @@ async def post_digest(
     summarizer: Summarizer | None,
     genre: str,
     *,
+    label: str | None = None,
     now: datetime,
     top: int,
     window_hours: int,
@@ -85,7 +86,7 @@ async def post_digest(
     dry_run: bool = False,
     transport: httpx.BaseTransport | None = None,
 ) -> str | None:
-    """genre の今日のまとめを投稿し、本文を返す。
+    """genre の今日のまとめを投稿し、本文を返す。見出しには label（なければ genre）を使う。
 
     update=True なら、投稿済みの今日のまとめを作り直して書き換える。
     投稿する記事がない・送り先がない・（投稿なら）投稿済み・（更新なら）未投稿のときは None。
@@ -101,7 +102,7 @@ async def post_digest(
     trend = None
     if summarizer:
         trend = await summarizer.trend([i.title for i in items[:MAX_TREND_TITLES]])
-    header = f"## 📰 {genre} {now.astimezone():%m/%d} のまとめ（{len(items)} 件）"
+    header = f"## 📰 {label or genre} {now.astimezone():%m/%d} のまとめ（{len(items)} 件）"
     content = header + "\n" + render(trend, items, channel["guild_id"], top, limit=MAX_CONTENT - len(header) - 1)
     if dry_run:
         return content
