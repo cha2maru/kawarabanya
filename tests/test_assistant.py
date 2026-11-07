@@ -101,7 +101,7 @@ def test_genre_assign(tmp_path):
     # 投稿のスレッドでは、その記事を移し、語があれば一緒に登録する
     data = {"command": "genre_assign", "genre": "hobby/vape", "word": "これ"}
     move = assistant.build(data, "これはVAPE", conn, genres, post=post_row(conn))
-    assert move.argv == ["items", "move", "5", "hobby/vape"] and "引き継げません" in move.summary
+    assert move.argv == ["items", "move", "5", "hobby"] and "引き継げません" in move.summary
     data = {"command": "genre_assign", "genre": "hobby/vape", "word": "ゴジラ"}
     assert assistant.build(data, "ゴジラはVAPE", conn, genres, post=post_row(conn)).argv[-2:] == ["--keyword", "ゴジラ"]
     # 依頼にない語、ジャンルの名前そのものは語にしない。スレッドの外で語がなければ断る
@@ -116,4 +116,4 @@ def test_genre_written_in_request_wins(tmp_path):
     data = {"command": "genre_assign", "genre": "hobby/vape", "word": ""}
     assert assistant.build(data, "これはtech", conn, genres, post=post_row(conn)).argv == ["items", "move", "5", "tech"]
     assert assistant.build(data, "これはホビー", conn, genres, post=post_row(conn)).argv[-1] == "hobby"
-    assert assistant.build(data, "これは煙のやつ", conn, genres, post=post_row(conn)).argv[-1] == "hobby/vape"
+    assert assistant.build(data, "これは煙のやつ", conn, genres).error  # スレッドの外で語がない

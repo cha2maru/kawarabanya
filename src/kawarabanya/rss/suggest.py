@@ -85,8 +85,9 @@ def unmatched_items(conn: sqlite3.Connection, genres: dict[str, Genre], days: in
     since = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
     tops = [g.path for g in genres.values() if not g.is_sub]
     rows = conn.execute(
-        "SELECT id, title, subgenre, status, md_path FROM items WHERE status IN ('saved', 'notified') AND fetched_at >= ?"
-        f" AND subgenre IN ({','.join('?' * len(tops))}) ORDER BY fetched_at DESC",
+        "SELECT i.id, i.title, i.subgenre, i.status, i.md_path, f.category FROM items i JOIN feeds f ON f.id = i.feed_id"
+        " WHERE i.status IN ('saved', 'notified') AND i.fetched_at >= ?"
+        f" AND i.subgenre IN ({','.join('?' * len(tops))}) ORDER BY i.fetched_at DESC",
         (since, *tops),
     ).fetchall()
     return rows[:MAX_TITLES]
@@ -147,12 +148,15 @@ async def verify(
     summarizer: Summarizer, genres: dict[str, Genre], s: Suggestion, rows: dict[int, sqlite3.Row]
 ) -> Suggestion | None:
     """新しいサブジャンルを足した一覧で s の記事を振り分け直し、実際にそこを選んだ記事だけを残す。"""
-    options = _options(genres, [(s.genre, s.label, s.description)])
-    if len(options) > len(CHOICE_LETTERS):  # 1 回で選べる数を超えたら、案のジャンルの中だけで比べる
-        options = _options({p: g for p, g in genres.items() if g.top == s.genre}, [(s.genre, s.label, s.description)])
+    every = _options(genres, [(s.genre, s.label, s.description)])
+    within = _options({p: g for p, g in genres.items() if g.top == s.genre}, [(s.genre, s.label, s.description)])
+    if len(every) > len(CHOICE_LETTERS):  # 1 回で選べる数を超えたら、案のジャンルの中だけで比べる
+        every = within
     kept = []
     for item_id in s.item_ids:
         r = rows[item_id]
+        # items move でジャンルを移した記事は、元のジャンルのサブジャンルを選びがちなので、移した先の中で比べる
+        options = within if top_genre(r["category"]) != s.genre else every
         res = await summarizer.classify(r["title"], _body(r), options)
         if res and res[0] == len(options) - 1 and res[1] >= MATCH_P:
             kept.append(item_id)

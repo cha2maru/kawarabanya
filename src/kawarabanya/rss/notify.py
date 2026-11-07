@@ -293,6 +293,7 @@ def move_post(conn: sqlite3.Connection, client: DiscordClient, item_id: int, pat
 
     同じフォーラムの中ならタグを付け替える。投稿済みのスレッドはフォーラムを移せないので、別のジャンルへは
     新しいフォーラムに投稿してから元の投稿を消す（投稿を失わない順番。URL は変わり、👍 は引き継げない）。
+    別のジャンルへ移した記事はサブジャンルなしにする（genres suggest が新しいサブジャンルを作るかを判定する）。
     """
     r = conn.execute(
         "SELECT i.*, f.title AS feed_title, f.category FROM items i JOIN feeds f ON f.id = i.feed_id WHERE i.id = ?",
@@ -301,16 +302,19 @@ def move_post(conn: sqlite3.Connection, client: DiscordClient, item_id: int, pat
     if r is None:
         raise ValueError(f"記事 {item_id} がありません")
     thread = r["discord_thread_id"]
+    top = top_genre(path) or UNCATEGORIZED
+    same_genre = top == (top_genre(r["subgenre"] or r["category"]) or UNCATEGORIZED)
+    if not same_genre:
+        path = top
     if r["status"] != "notified" or not thread:
         with conn:
             db.update_item(conn, item_id, subgenre=path)
         return f"{r['title']}: {path} にしました（投稿前の記事）"
-    top = top_genre(path) or UNCATEGORIZED
     channel = conn.execute("SELECT webhook_url, guild_id, tags FROM discord_channels WHERE category = ?", (top,)).fetchone()
     if channel is None:
         raise ValueError(f"{top}: フォーラムが未登録です（kawarabanya discord setup --apply）")
     tags = json.loads(channel["tags"]) if channel["tags"] else {}
-    if top == (top_genre(r["subgenre"] or r["category"]) or UNCATEGORIZED):
+    if same_genre:
         client.request("PATCH", f"/channels/{thread}", {"applied_tags": [t for t in [tags.get(f"sub:{path}")] if t]})
         with conn:
             db.update_item(conn, item_id, subgenre=path)

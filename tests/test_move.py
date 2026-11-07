@@ -38,10 +38,10 @@ def test_move_to_other_forum_posts_then_deletes(monkeypatch):
     sent = []
     monkeypatch.setattr(notify, "send_webhook", lambda url, payload: sent.append((url, payload)) or {"channel_id": "200"})
     notify.move_post(conn, client, 1, "culture/movie")
-    assert sent[0][0] == "https://hook/culture" and sent[0][1]["applied_tags"] == ["8"]
+    assert sent[0][0] == "https://hook/culture" and "applied_tags" not in sent[0][1]
     assert client.calls == [("DELETE", "/channels/100", None)]
     r = conn.execute("SELECT subgenre, discord_thread_id, likes FROM items").fetchone()
-    assert tuple(r) == ("culture/movie", "200", 0)
+    assert tuple(r) == ("culture", "200", 0)  # 別のジャンルへはサブジャンルなし
 
 
 def test_move_keeps_post_when_repost_fails(monkeypatch):
@@ -117,3 +117,15 @@ def test_merge_keeps_keywords(tmp_path):
     apply(db.connect(":memory:"), p, [], [Merge("tech", ["a", "b"], "a", "合", "説明")])
     defs = load_genres(p)
     assert defs["tech/a"].keywords == ["甲", "乙"] and "tech/b" not in defs
+
+
+def test_suggest_verifies_moved_items_within_new_genre():
+    from kawarabanya.rss.suggest import Suggestion, verify
+
+    defs = dict(GENRES)
+    moved = {"id": 1, "title": "t", "md_path": None, "category": "tech", "subgenre": "culture"}
+    stayed = {"id": 2, "title": "t", "md_path": None, "category": "culture", "subgenre": "culture"}
+    s = Chooser((1, 0.9), (0, 0.9))
+    suggestion = Suggestion("culture", "shop", "買い物", "", [1, 2])
+    asyncio.run(verify(s, defs, suggestion, {1: moved, 2: stayed}))
+    assert len(s.seen[0]) < len(s.seen[1])  # 移した記事の候補は culture の中だけ

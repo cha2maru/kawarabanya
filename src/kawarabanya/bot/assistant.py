@@ -210,7 +210,10 @@ def build(
             word = _word(data, text, genres[genre])
             also = f"（「{word}」の記事も今後はここへ）" if word else ""
             if post:
-                note = "" if post["category"].split("/")[0] == genres[genre].top else "。元の投稿は消え、👍 は引き継げません"
+                note = ""
+                if post["category"].split("/")[0] != genres[genre].top:
+                    genre, label = genres[genre].top, genres[genres[genre].top].label  # サブジャンルなしで移す
+                    note = "。元の投稿は消え、👍 は引き継げません"
                 argv = ["items", "move", str(post["id"]), genre] + (["--keyword", word] if word else [])
                 return Intent(command, argv, f"「{post['title']}」を「{label}」に移す{also}{note}", confirm)
             if not word:
