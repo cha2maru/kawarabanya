@@ -13,14 +13,15 @@ from pathlib import Path
 
 import httpx
 
-from . import db, markdown
+from .. import db
+from ..config import Config
+from ..llm import Summarizer
+from . import archive
 from .check import CheckResult, apply_results, check_feed
-from .config import Config
 from .fetcher import Fetcher
 from .fulltext import fill_content
 from .genres import Genre, load_genres, priority_criteria
 from .item import Item, from_entry, is_recent
-from .summarize import Summarizer
 
 log = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ async def _process(
     try:
         await fill_content(fetcher, item, cfg.fulltext)
         fetched = datetime.now(UTC)
-        path = markdown.save(Path(cfg.general.archive_dir), item, fetched)
+        path = archive.save(Path(cfg.general.archive_dir), item, fetched)
     except Exception as e:  # 1 記事の失敗で全体を止めない
         log.exception("記事の処理に失敗: %s", item.url)
         with conn:
@@ -127,7 +128,7 @@ async def _summarize(
     summary = await summarizer.summarize(title, content_md)
     if not summary:
         return "failed"
-    markdown.add_summary(md_path, summary)
+    archive.add_summary(md_path, summary)
     with conn:
         db.update_item(conn, item_id, summary=summary)
     return "summarized"
@@ -159,7 +160,7 @@ async def summarize_pending(
     for r in targets:
         if not Path(r["md_path"]).exists():
             continue
-        body = markdown.read_body(r["md_path"])
+        body = archive.read_body(r["md_path"])
         results[await _summarize(
             conn, summarizer, cfg, genres, r["id"], r["title"], r["category"], body, r["md_path"], r["priority"]
         )] += 1

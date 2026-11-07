@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from . import db
-from .genres import Genre, top_genre
+from .rss.genres import Genre, top_genre
 
 log = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
-from feedpipe import db, discord_api, notify
+from feedpipe import db, discord_api
 from feedpipe.discord_api import (
     GUILD_FORUM,
     DiscordClient,
@@ -11,6 +11,7 @@ from feedpipe.discord_api import (
     channel_name,
     make_plan,
 )
+from feedpipe.rss import notify
 
 
 class FakeDiscord:
@@ -197,7 +198,7 @@ def test_notify_limit_and_missing_channel():
 
 
 def test_subgenre_tags(tmp_path):
-    from feedpipe.genres import load_genres
+    from feedpipe.rss.genres import load_genres
 
     fake = FakeDiscord()
     fake.channels = []
@@ -260,7 +261,7 @@ def test_digest_render_and_post(tmp_path):
     import asyncio
     from datetime import datetime
 
-    from feedpipe import digest
+    from feedpipe.rss import digest
 
     fake, client, conn = setup()
     plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn, ["tech"]), "feedpipe")

@@ -12,16 +12,16 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from . import db
-from .discord_api import (
+from .. import db
+from ..discord_api import (
     DIGEST_KEY,
     delete_webhook_message,
     edit_webhook_message,
     post_url,
     send_webhook,
 )
+from ..llm import Summarizer
 from .genres import top_genre
-from .summarize import Summarizer
 
 MAX_CONTENT = 2000
 # 傾向を書かせる見出しの上限（LLM の入力 8,192 トークンに収めるため）

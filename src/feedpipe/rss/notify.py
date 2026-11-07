@@ -13,8 +13,8 @@ from pathlib import Path
 
 import httpx
 
-from . import db, markdown
-from .discord_api import (
+from .. import db
+from ..discord_api import (
     UNCATEGORIZED,
     DiscordClient,
     DiscordError,
@@ -22,6 +22,7 @@ from .discord_api import (
     post_url,
     send_webhook,
 )
+from . import archive
 from .item import is_recent
 
 log = logging.getLogger(__name__)
@@ -102,7 +103,7 @@ def excerpt(md_path: str | None, limit: int = EXCERPT_CHARS) -> str:
     """保存した Markdown の本文から、先頭の数百字をプレーンテキストで取り出す。"""
     if not md_path or not Path(md_path).exists():
         return ""
-    text = markdown.read_body(md_path)
+    text = archive.read_body(md_path)
     text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)  # 画像
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)  # リンクは文字だけ
     lines = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
@@ -189,7 +190,7 @@ def notify_pending(
             )
         if thread_id and p.guild_id and p.md_path and Path(p.md_path).exists():
             # 保存した記事から Discord の投稿に飛べるようにする
-            markdown.set_field(p.md_path, "discord", post_url(p.guild_id, thread_id))
+            archive.set_field(p.md_path, "discord", post_url(p.guild_id, thread_id))
         stats.sent += 1
     return stats
 

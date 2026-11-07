@@ -8,7 +8,7 @@ import logging
 import httpx
 import trafilatura
 
-from .config import FulltextConfig
+from ..config import FulltextConfig
 from .fetcher import Fetcher
 from .item import Item
 

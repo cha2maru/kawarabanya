@@ -4,8 +4,8 @@ import socket
 import httpx
 
 from feedpipe import db
-from feedpipe.check import Status, apply_results, check_feeds
 from feedpipe.config import GeneralConfig
+from feedpipe.rss.check import Status, apply_results, check_feeds
 
 RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Feed T</title>
 <item><title>a</title><link>https://x/a</link><pubDate>Mon, 02 Nov 2026 03:00:00 GMT</pubDate></item>

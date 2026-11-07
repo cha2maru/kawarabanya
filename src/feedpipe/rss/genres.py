@@ -21,7 +21,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import db
+from .. import db
 
 RESERVED = {"label", "description", "feeds", "priority"}
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from feedpipe import db, opml
+from feedpipe import db
+from feedpipe.rss import opml
 
 NESTED = """<?xml version="1.0" encoding="UTF-8"?>
 <opml version="1.0">

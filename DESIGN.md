@@ -29,6 +29,19 @@ systemd --user: feedpipe-bot.service
 - `run` を別プロセスにするのは、要約に数十分かかっても Bot のイベントループ（Discord との接続維持）を止めないため。前回の `run` が終わるまで次は始めない。
 - 投稿は Webhook、チャンネル・タグの作成と 👍 の読み取りは Bot トークン（REST）。どちらも同じ Bot（同じ招待 URL）で管理する。
 
+### 2.1 コードの構成（`src/feedpipe/`）
+
+```
+config.py  db.py  bot.py  discord_api.py  llm.py   # 共通: 設定・SQLite・常駐 Bot・Discord REST/Webhook・LLM クライアント
+rss/        # RSS 機能
+  fetcher.py check.py item.py fulltext.py opml.py genres.py
+  archive.py（Markdown 保存） pipeline.py（取得〜要約の流れ = run） notify.py（投稿・👍） digest.py（1 日のまとめ）
+cli/        # コマンド
+  __init__.py（引数の定義と main） common.py（表示の補助・DB/Discord の用意） rss.py（RSS のコマンド） server.py（Discord 管理・bot）
+```
+
+機能を足すときは、`rss/` と同じように機能ごとのパッケージを作り、コマンドは `cli/` に、Discord 上の対話は `bot.py` に足す。`discord_api.py` のフォーラム構成（ジャンル＝フォーラム）は今は RSS 専用の処理が混ざっている。
+
 ## 3. 主な処理
 
 ### 3.1 フィード管理

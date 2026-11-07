@@ -4,10 +4,11 @@ from pathlib import Path
 
 import httpx
 
-from feedpipe import db, markdown
+from feedpipe import db
 from feedpipe.config import Config, GeneralConfig
-from feedpipe.item import Item
-from feedpipe.run import run_feeds
+from feedpipe.rss import archive
+from feedpipe.rss.item import Item
+from feedpipe.rss.pipeline import run_feeds
 
 ARTICLE = """<html><head><title>{t}</title></head><body><nav>メニュー</nav>
 <article><h1>{t}</h1>{body}</article><footer>フッター</footer></body></html>"""
@@ -117,20 +118,20 @@ def _item(title: str | None, key: str = "k") -> Item:
 
 def test_markdown_path_and_collision(tmp_path):
     now = datetime(2026, 11, 7, tzinfo=UTC)
-    p1 = markdown.save(tmp_path, _item('a/b: "c"?  d'), now)
-    p2 = markdown.save(tmp_path, _item('a/b: "c"?  d'), now)
+    p1 = archive.save(tmp_path, _item('a/b: "c"?  d'), now)
+    p2 = archive.save(tmp_path, _item('a/b: "c"?  d'), now)
     assert p1.parent.relative_to(tmp_path).parts == ("uncategorized", "2026", "11")
     assert p1.name.endswith("_a_b_c_d.md")
     assert p2.name.endswith("_a_b_c_d_2.md")
-    assert markdown.slugify("あ" * 100, "x") == "あ" * 50
-    assert markdown.slugify(None, "fallback") == "fallback"
+    assert archive.slugify("あ" * 100, "x") == "あ" * 50
+    assert archive.slugify(None, "fallback") == "fallback"
 
 
 def test_summarize_on_save(tmp_path):
     import json as _json
     import math
 
-    from feedpipe.summarize import Summarizer, clean_output
+    from feedpipe.llm import Summarizer, clean_output
 
     calls = []
 
@@ -174,7 +175,7 @@ def test_summarize_on_save(tmp_path):
     # 基準を 0 にすると判定せず全件要約する
     calls.clear()
     cfg.summarize.priority_threshold = 0
-    from feedpipe.run import summarize_pending
+    from feedpipe.rss.pipeline import summarize_pending
 
     async def go2():
         async with Summarizer(cfg.summarize, transport=httpx.MockTransport(llm)) as s:
@@ -185,7 +186,7 @@ def test_summarize_on_save(tmp_path):
 
 
 def test_summarize_skips_old_and_unavailable(tmp_path):
-    from feedpipe.summarize import Summarizer
+    from feedpipe.llm import Summarizer
 
     def down(request):
         raise httpx.ConnectError("refused")

@@ -16,8 +16,8 @@ from urllib.parse import urlsplit
 import feedparser
 import httpx
 
-from . import db
-from .config import GeneralConfig
+from .. import db
+from ..config import GeneralConfig
 from .fetcher import Fetcher
 
 PERMANENT_REDIRECTS = {301, 308}

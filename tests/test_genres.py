@@ -1,7 +1,7 @@
 import pytest
 
 from feedpipe import db
-from feedpipe.genres import apply_genres, load_genres
+from feedpipe.rss.genres import apply_genres, load_genres
 
 TOML = """
 [news]
