@@ -44,7 +44,7 @@ scripts/install.sh --llm      # 依存・設定の見本・llama.cpp と要約�
 ### 3. フィードとジャンル
 
 ```sh
-uv run kawarabanya import-opml subscriptions.opml   # 今使っている RSS リーダーの OPML があれば取り込む
+uv run kawarabanya import-opml subscriptions.opml   # 今使っている RSS リーダーの OPML があれば取り込む（試すだけなら sample.opml）
 uv run kawarabanya feeds add https://example.com/ --genre tech   # 1 件ずつなら、サイトの URL から RSS を探して登録
 uv run kawarabanya check --disable-dead             # つながらないフィードを無効にする
 $EDITOR genres.toml                                 # ジャンル・サブジャンルとフィードの URL を書く（書き方は下の「設定」）
@@ -232,3 +232,7 @@ uv run --with pdoc pdoc kawarabanya -o docs/api   # API ドキュメント（doc
 ```
 
 コードの構成と依存の向き（`cli`・`bot` → `rss` → `core`）、書き方は [docs/CODING.md](docs/CODING.md)。Discord から頼めることを足すときは `src/kawarabanya/bot/assistant.py` の `COMMANDS` に、サイト別の取り込みは `extensions/` に足す。
+
+## ライセンス
+
+[MIT](LICENSE)

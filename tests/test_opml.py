@@ -67,5 +67,6 @@ def test_export_roundtrip(tmp_path):
 def test_sample_opml():
     sample = Path(__file__).parent.parent / "sample.opml"
     r = opml.parse_opml(sample)
-    assert len(r.entries) == 13
-    assert len(r.duplicates) == 1
+    assert len(r.entries) == 11
+    assert len(r.duplicates) == 1  # GIGAZINE は 2 つのフォルダにある
+    assert {e.category for e in r.entries} == {"news", "tech", "tech/dev", "game", "culture"}  # 入れ子のフォルダ
