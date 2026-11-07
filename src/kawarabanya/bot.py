@@ -1,4 +1,4 @@
-"""常駐 Bot。Discord に接続したまま、定期的に `feedpipe run` を別プロセスで実行する。
+"""常駐 Bot。Discord に接続したまま、定期的に `kawarabanya run` を別プロセスで実行する。
 
 スラッシュコマンドなどの対話機能は、この Client に足していく。
 """
@@ -60,18 +60,18 @@ class Bot(discord.Client):
     async def cycle(self) -> None:
         """定期実行の 1 回分。run で記事を取り込み、まとめの時刻を過ぎていれば、サブジャンルを作ってからまとめを投稿する。"""
         async with self._lock:
-            await self._feedpipe("run", "-q", *self.cfg.bot.run_args)
+            await self._kawarabanya("run", "-q", *self.cfg.bot.run_args)
             # 要約サーバーを run と取り合わないよう、run の後に続けて実行する。
             # 新しいサブジャンルを先に作り、振り分け直した記事をまとめに反映する（まとめの時刻ごと）
-            await self._feedpipe("genres", "suggest", "--apply", "--due")
-            await self._feedpipe("digest", "--due")
+            await self._kawarabanya("genres", "suggest", "--apply", "--due")
+            await self._kawarabanya("digest", "--due")
 
-    async def _feedpipe(self, *args: str) -> None:
-        """feedpipe のサブコマンドを別プロセスで実行し、出力をログに流す。
+    async def _kawarabanya(self, *args: str) -> None:
+        """kawarabanya のサブコマンドを別プロセスで実行し、出力をログに流す。
 
         要約で数十分かかることがあるので、イベントループを止めないよう別プロセスにする。
         """
-        cmd = [sys.executable, "-m", "feedpipe", *self.config_args, *args]
+        cmd = [sys.executable, "-m", "kawarabanya", *self.config_args, *args]
         log.info("定期実行: %s", shlex.join(cmd[1:]))
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
@@ -101,5 +101,5 @@ def run_bot(cfg: Config, config_args: list[str]) -> None:
     token = cfg.discord.token
     if not token:
         raise ValueError(f"{cfg.discord.token_env} が設定されていません（.env に書いてください）")
-    # discord.py のログ設定は使わず、feedpipe の logging 設定に任せる
+    # discord.py のログ設定は使わず、kawarabanya の logging 設定に任せる
     Bot(cfg, config_args).run(token, log_handler=None)

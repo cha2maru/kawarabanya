@@ -1,6 +1,8 @@
-# feedpipe
+# kawarabanya（瓦版屋）
 
 個人用 Discord サーバーを管理する Bot。今ある機能は RSS: 記事を全文 Markdown で保存し、ローカル LLM で要約して、ジャンルごとの Discord フォーラムに投稿する。設計は [DESIGN.md](DESIGN.md)。
+
+旧名は feedpipe（同名のプロジェクトがあったため 2026-11-07 に改名）。そのころ作った Discord のカテゴリと Webhook は、`config.toml` の `[discord] parent_category` / `webhook_name` を `"feedpipe"` にして使い続ける。
 
 ## セットアップ
 
@@ -9,33 +11,33 @@ uv sync
 
 # 1. Discord Bot（https://discord.com/developers/applications で作成）
 cp .env.example .env                         # DISCORD_BOT_TOKEN を書く
-uv run feedpipe discord invite-url           # この URL からサーバーに招待する（サーバーは「コミュニティ」を有効に）
+uv run kawarabanya discord invite-url           # この URL からサーバーに招待する（サーバーは「コミュニティ」を有効に）
 
 # 2. フィードとジャンル
-uv run feedpipe import-opml feedly.opml
-uv run feedpipe check --disable-dead         # つながらないフィードを無効化
+uv run kawarabanya import-opml feedly.opml
+uv run kawarabanya check --disable-dead         # つながらないフィードを無効化
 cp genres.example.toml genres.toml           # ジャンルとフィードの URL を書く
-uv run feedpipe genres apply --disable-unassigned
+uv run kawarabanya genres apply --disable-unassigned
 
 # 3. Discord のフォーラム（ジャンルごと）を作る
-uv run feedpipe discord setup                # 予定を表示
-uv run feedpipe discord setup --apply
+uv run kawarabanya discord setup                # 予定を表示
+uv run kawarabanya discord setup --apply
 
 # 4. 要約用のモデル（llama.cpp と Qwen3.5-4B）を用意し、scripts/llama-server.sh のパスを合わせる
 
 # 5. 常駐 Bot をサービスとして起動
-cp scripts/feedpipe-bot.service ~/.config/systemd/user/
-systemctl --user daemon-reload && systemctl --user enable --now feedpipe-bot
-journalctl --user -u feedpipe-bot -f         # ログ
+cp scripts/kawarabanya-bot.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now kawarabanya-bot
+journalctl --user -u kawarabanya-bot -f         # ログ
 ```
 
 ### RSS のないサイト（RSSHub・任意）
 
-[RSSHub](https://docs.rsshub.app/) を Docker で動かすと、RSS のないサイトも普通のフィードとして登録できる（feedpipe 側の変更は不要）。
+[RSSHub](https://docs.rsshub.app/) を Docker で動かすと、RSS のないサイトも普通のフィードとして登録できる（kawarabanya 側の変更は不要）。
 
 ```sh
 docker run -d --name rsshub --restart unless-stopped -p 127.0.0.1:1200:1200 diygod/rsshub
-uv run feedpipe feeds add "http://127.0.0.1:1200/github/repos/DIYgod" --category tech   # genres.toml にも URL を書く
+uv run kawarabanya feeds add "http://127.0.0.1:1200/github/repos/DIYgod" --category tech   # genres.toml にも URL を書く
 ```
 
 ルートの一覧は `curl http://127.0.0.1:1200/api/namespace`。ルートによっては API キーなどの設定（環境変数）が要る。
@@ -113,7 +115,7 @@ feeds = [
 
 ```toml
 [general]
-db = "data/feedpipe.db"
+db = "data/kawarabanya.db"
 archive_dir = "archive"
 max_failures = 5             # 連続失敗でフィードを無効化する回数
 
@@ -136,7 +138,7 @@ max_posts_per_run = 30
 [digest]
 enabled = true
 channel = "ニュース"         # まとめを投稿するテキストチャンネル（サーバー内を名前で探す。事前に作っておく）
-times = ["06:30", "18:30"]   # まとめを投稿する時刻。前回のまとめ以降の記事をまとめる（feedpipe digest で随時も投稿できる）
+times = ["06:30", "18:30"]   # まとめを投稿する時刻。前回のまとめ以降の記事をまとめる（kawarabanya digest で随時も投稿できる）
 window_hours = 24            # 前回のまとめがない・古いときに、さかのぼる時間数の上限
 top = 10                     # まとめに並べる投稿へのリンクの数
 
@@ -151,7 +153,7 @@ llm_server_command = "scripts/llama-server.sh"   # Bot と一緒に要約サー�
 ```sh
 uv run pytest
 uvx ruff check src tests
-uv run --with pdoc pdoc feedpipe -o docs/api   # API ドキュメント（docstring から HTML。docs/api/index.html を開く）
+uv run --with pdoc pdoc kawarabanya -o docs/api   # API ドキュメント（docstring から HTML。docs/api/index.html を開く）
 ```
 
-対話機能（スラッシュコマンドなど）は `src/feedpipe/bot.py` の `Bot` に足していく。
+対話機能（スラッシュコマンドなど）は `src/kawarabanya/bot.py` の `Bot` に足していく。

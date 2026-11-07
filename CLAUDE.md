@@ -1,4 +1,4 @@
-# feedpipe
+# kawarabanya
 
 個人用 Discord サーバーを管理する Bot（今ある機能は RSS）。構成と方針は DESIGN.md、使い方は README.md。
 

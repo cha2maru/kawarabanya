@@ -3,15 +3,15 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import httpx
 
-from feedpipe import db, discord_api
-from feedpipe.discord_api import (
+from kawarabanya import db, discord_api
+from kawarabanya.discord_api import (
     GUILD_FORUM,
     DiscordClient,
     apply_plan,
     channel_name,
     make_plan,
 )
-from feedpipe.rss import notify
+from kawarabanya.rss import notify
 
 
 class FakeDiscord:
@@ -19,12 +19,12 @@ class FakeDiscord:
 
     def __init__(self):
         self.channels = [
-            {"id": "10", "type": 4, "name": "feedpipe"},
+            {"id": "10", "type": 4, "name": "kawarabanya"},
             {"id": "11", "type": GUILD_FORUM, "name": "tech", "parent_id": "10",
              "available_tags": [{"id": "t1", "name": "AI"}, {"id": "t2", "name": "既存フィード"}]},
             {"id": "12", "type": GUILD_FORUM, "name": "news"},  # 親カテゴリが違うので別物
         ]
-        self.webhooks: dict[str, list] = {"11": [{"id": "w11", "name": "feedpipe", "token": "k11"}]}
+        self.webhooks: dict[str, list] = {"11": [{"id": "w11", "name": "kawarabanya", "token": "k11"}]}
         self.posts: list[dict] = []
         self.likes: dict[str, int] = {}
         self.messages: dict[str, dict] = {}  # Webhook で投稿したメッセージ
@@ -117,7 +117,7 @@ def setup():
 
 
 def tech_genres(tmp_path):
-    from feedpipe.rss.genres import load_genres
+    from kawarabanya.rss.genres import load_genres
 
     g = tmp_path / "genres.toml"
     g.write_text('[tech]\n[tech.ai]\nlabel = "AI"\n[tech.security]\nlabel = "セキュリティ"\n', encoding="utf-8")
@@ -135,7 +135,7 @@ def test_channel_name():
 def test_plan_and_apply_forums(tmp_path):
     fake, client, conn = setup()
     guild = discord_api.resolve_guild(client, None)
-    plan = make_plan(client, guild, discord_api.feeds_by_category(conn), "feedpipe", tech_genres(tmp_path))
+    plan = make_plan(client, guild, discord_api.feeds_by_category(conn), "kawarabanya", tech_genres(tmp_path))
     assert plan.parent_id == "10"
     assert [(p.name, p.exists) for p in plan.channels] == [("news", False), ("tech", True), ("ホビー", False)]
     tech = plan.channels[1]
@@ -144,7 +144,7 @@ def test_plan_and_apply_forums(tmp_path):
     assert tech.missing_tags() == ["セキュリティ"]
     assert [t["name"] for t in tech.extra_tags()] == ["既存フィード"]
 
-    created = apply_plan(client, conn, plan, "feedpipe", nsfw=True)
+    created = apply_plan(client, conn, plan, "kawarabanya", nsfw=True)
     assert [p.name for p in created] == ["news", "ホビー"]
     hobby = next(c for c in fake.channels if c["name"] == "ホビー")
     assert hobby["type"] == GUILD_FORUM and hobby["parent_id"] == "10"
@@ -160,16 +160,16 @@ def test_plan_and_apply_forums(tmp_path):
     assert set(json.loads(rows["tech"]["tags"])) == {"sub:tech/ai", "sub:tech/security"}
 
     # もう一度実行しても作り直さない
-    again = make_plan(client, guild, discord_api.feeds_by_category(conn), "feedpipe", tech_genres(tmp_path))
+    again = make_plan(client, guild, discord_api.feeds_by_category(conn), "kawarabanya", tech_genres(tmp_path))
     assert all(p.exists and not p.missing_tags() and not p.extra_tags() and p.nsfw for p in again.channels)
-    assert apply_plan(client, conn, again, "feedpipe", nsfw=True) == []
+    assert apply_plan(client, conn, again, "kawarabanya", nsfw=True) == []
 
 
 def test_notify_posts_forum_threads(tmp_path):
     fake, client, conn = setup()
-    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "feedpipe",
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "kawarabanya",
                      tech_genres(tmp_path))
-    apply_plan(client, conn, plan, "feedpipe")
+    apply_plan(client, conn, plan, "kawarabanya")
 
     md = tmp_path / "a.md"
     md.write_text('---\ntitle: "x"\n---\n\n# 記事1\n\n本文の **先頭** です。[リンク](https://l) 20\\~50% a\\_b\n\n---\n\n元記事: <https://a>\n')
@@ -213,7 +213,7 @@ def test_notify_limit_and_missing_channel():
 
 
 def test_subgenre_tags(tmp_path):
-    from feedpipe.rss.genres import load_genres
+    from kawarabanya.rss.genres import load_genres
 
     fake = FakeDiscord()
     fake.channels = []
@@ -224,11 +224,11 @@ def test_subgenre_tags(tmp_path):
     g = tmp_path / "genres.toml"
     g.write_text('[news]\ndescription = "総合"\n[news.world]\nlabel = "国際"\n', encoding="utf-8")
 
-    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "feedpipe",
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "kawarabanya",
                      load_genres(g))
     [pc] = plan.channels  # news/world も news のフォーラムにまとまる
     assert pc.name == "news" and pc.wanted_tags() == ["国際"]
-    apply_plan(client, conn, plan, "feedpipe")
+    apply_plan(client, conn, plan, "kawarabanya")
     forum = next(c for c in fake.channels if c["type"] == GUILD_FORUM)
     assert forum["topic"] == "総合"
 
@@ -243,8 +243,8 @@ def test_subgenre_tags(tmp_path):
 
 def test_default_reaction_and_like_sync():
     fake, client, conn = setup()
-    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "feedpipe")
-    apply_plan(client, conn, plan, "feedpipe")
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "kawarabanya")
+    apply_plan(client, conn, plan, "kawarabanya")
     forums = [c for c in fake.channels if c["type"] == GUILD_FORUM and c.get("parent_id") == "10"]
     assert all(c["default_reaction_emoji"]["emoji_name"] == "👍" for c in forums)  # 新規も既存も
 
@@ -267,20 +267,20 @@ def test_digest_render_and_post(tmp_path):
     import asyncio
     from datetime import datetime
 
-    from feedpipe.rss import digest
+    from kawarabanya.rss import digest
 
     fake, client, conn = setup()
-    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn, ["tech"]), "feedpipe")
-    apply_plan(client, conn, plan, "feedpipe")
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn, ["tech"]), "kawarabanya")
+    apply_plan(client, conn, plan, "kawarabanya")
     feed_id = db.list_feeds(conn, category="tech")[0].id
     with conn:
         for key, title, prio, likes in [("a", "小ネタ", 0.1, None), ("b", "大事件 [速報]", 0.95, 2), ("c", "判定なし", None, None)]:
             iid = db.insert_item(conn, feed_id, key, None, title, ago(hours=2), "notified")
             db.update_item(conn, iid, notified_at=ago(hours=2), discord_thread_id=f"t-{key}", priority=prio, likes=likes)
 
-    fake.channels.append({"id": "50", "type": 0, "name": "ニュース", "parent_id": "999"})  # feedpipe の外
+    fake.channels.append({"id": "50", "type": 0, "name": "ニュース", "parent_id": "999"})  # kawarabanya の外
     ch = discord_api.find_text_channel(client, "1", "ニュース")
-    discord_api.register_webhook(client, conn, discord_api.DIGEST_KEY, "1", ch["id"], ch["name"], "feedpipe")
+    discord_api.register_webhook(client, conn, discord_api.DIGEST_KEY, "1", ch["id"], ch["name"], "kawarabanya")
 
     now = datetime.now(UTC)
     content = asyncio.run(digest.post_digest(conn, None, "tech", label="テック", now=now, top=2, window_hours=24,
@@ -346,8 +346,8 @@ def test_digest_render_and_post(tmp_path):
 
 def test_notify_writes_discord_link(tmp_path):
     fake, client, conn = setup()
-    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn, ["tech"]), "feedpipe")
-    apply_plan(client, conn, plan, "feedpipe")
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn, ["tech"]), "kawarabanya")
+    apply_plan(client, conn, plan, "kawarabanya")
     md = tmp_path / "a.md"
     md.write_text('---\ntitle: "x"\n---\n\n# x\n\n本文\n')
     feed_id = db.list_feeds(conn, category="tech")[0].id
@@ -364,8 +364,8 @@ def test_retag_posts(tmp_path):
 
     fake, client, conn = setup()
     genres = tech_genres(tmp_path)
-    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "feedpipe", genres)
-    apply_plan(client, conn, plan, "feedpipe")
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "kawarabanya", genres)
+    apply_plan(client, conn, plan, "kawarabanya")
     feed_id = db.list_feeds(conn, category="tech")[0].id
     with conn:
         a = db.insert_item(conn, feed_id, "a", None, "判定済み", ago(hours=1), "notified")
@@ -395,9 +395,9 @@ def test_delete_duplicate_posts():
 
 def test_pending_items_follow_item_genre(tmp_path):
     _fake, client, conn = setup()
-    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "feedpipe",
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "kawarabanya",
                      tech_genres(tmp_path))
-    apply_plan(client, conn, plan, "feedpipe")
+    apply_plan(client, conn, plan, "kawarabanya")
     feed_id = db.find_feed_by_url(conn, "https://6tech.example/既存フィード").id
     with conn:
         a = db.insert_item(conn, feed_id, "a", "https://a", "映画の記事", ago(hours=1), "saved")

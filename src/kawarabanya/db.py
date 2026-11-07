@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS state (
     value TEXT
 );
 
--- feedpipe のカテゴリ → Discord のチャンネルと Webhook
+-- kawarabanya のカテゴリ → Discord のチャンネルと Webhook
 CREATE TABLE IF NOT EXISTS discord_channels (
     category TEXT PRIMARY KEY,
     guild_id TEXT NOT NULL,

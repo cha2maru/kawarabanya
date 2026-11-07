@@ -97,7 +97,7 @@ def import_entries(
     return stats
 
 
-def export_opml(feeds: list[db.Feed], path: str | Path, title: str = "feedpipe subscriptions") -> None:
+def export_opml(feeds: list[db.Feed], path: str | Path, title: str = "kawarabanya subscriptions") -> None:
     """フィードをカテゴリ（"a/b" はネスト）ごとにまとめて OPML に書き出す。"""
     root = ET.Element("opml", version="2.0")
     head = ET.SubElement(root, "head")

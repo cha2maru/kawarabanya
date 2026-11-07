@@ -1,5 +1,5 @@
 [project]
-name = "feedpipe"
+name = "kawarabanya"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-feedpipe = "feedpipe:main"
+kawarabanya = "kawarabanya:main"
 
 [build-system]
 requires = ["uv_build>=0.12.22,<0.13.0"]

@@ -53,7 +53,7 @@ class DiscordClient:
             timeout=20,
             headers={
                 "Authorization": f"Bot {token}",
-                "User-Agent": "DiscordBot (https://github.com/, 0.1) feedpipe",
+                "User-Agent": "DiscordBot (https://github.com/, 0.1) kawarabanya",
             },
         )
 
@@ -134,7 +134,7 @@ def resolve_guild(client: DiscordClient, guild_id: str | None) -> dict:
 
 
 def channel_name(category: str | None) -> str:
-    """feedpipe のカテゴリを Discord のチャンネル名にする（Discord 側の正規化に合わせる）。"""
+    """kawarabanya のカテゴリを Discord のチャンネル名にする（Discord 側の正規化に合わせる）。"""
     name = (category or UNCATEGORIZED).lower()
     name = re.sub(r"[\s/]+", "-", name)
     name = re.sub(r"[^\w\-ー]", "", name).strip("-")
@@ -263,7 +263,7 @@ def apply_plan(
                 pc.name,
                 GUILD_FORUM,
                 parent_id=plan.parent_id,
-                topic=pc.description or f"feedpipe: {pc.category}",
+                topic=pc.description or f"kawarabanya: {pc.category}",
                 available_tags=[{"name": n} for n in pc.wanted_tags()],
                 nsfw=nsfw,
                 default_reaction_emoji=DEFAULT_REACTION,

@@ -321,7 +321,7 @@ def _notify(
     if stats.remaining:
         line += f" / 上限のため次回に回す {stats.remaining} 件"
     if stats.no_channel:
-        line += f" / 送り先未登録 {stats.no_channel} 件（feedpipe discord setup）"
+        line += f" / 送り先未登録 {stats.no_channel} 件（kawarabanya discord setup）"
     print(line)
     for e in stats.errors:
         print(f"  ! {e}")
@@ -359,7 +359,7 @@ def cmd_genres_apply(cfg: Config, args: argparse.Namespace) -> int:
     if args.dry_run:
         print("--dry-run のため DB は更新していません")
     elif r.moved:
-        print("Discord のフォーラム・タグも更新するには: feedpipe discord setup --apply")
+        print("Discord のフォーラム・タグも更新するには: kawarabanya discord setup --apply")
     if r.unassigned and args.disable_unassigned and not args.dry_run:
         print(f"未割り当ての {len(r.unassigned)} 件は無効にしました（feeds enable で戻せます）")
     elif r.unassigned:

@@ -4,11 +4,11 @@ from pathlib import Path
 
 import httpx
 
-from feedpipe import db
-from feedpipe.config import Config, GeneralConfig
-from feedpipe.rss import archive
-from feedpipe.rss.item import Item, from_entry
-from feedpipe.rss.pipeline import run_feeds
+from kawarabanya import db
+from kawarabanya.config import Config, GeneralConfig
+from kawarabanya.rss import archive
+from kawarabanya.rss.item import Item, from_entry
+from kawarabanya.rss.pipeline import run_feeds
 
 ARTICLE = """<html><head><title>{t}</title></head><body><nav>メニュー</nav>
 <article><h1>{t}</h1>{body}</article><footer>フッター</footer></body></html>"""
@@ -133,7 +133,7 @@ def test_summarize_on_save(tmp_path):
     import json as _json
     import math
 
-    from feedpipe.llm import Summarizer, clean_output
+    from kawarabanya.llm import Summarizer, clean_output
 
     calls = []
 
@@ -177,7 +177,7 @@ def test_summarize_on_save(tmp_path):
     # 基準を 0 にすると判定せず全件要約する
     calls.clear()
     cfg.summarize.priority_threshold = 0
-    from feedpipe.rss.pipeline import summarize_pending
+    from kawarabanya.rss.pipeline import summarize_pending
 
     async def go2():
         async with Summarizer(cfg.summarize, transport=httpx.MockTransport(llm)) as s:
@@ -188,7 +188,7 @@ def test_summarize_on_save(tmp_path):
 
 
 def test_summarize_skips_old_and_unavailable(tmp_path):
-    from feedpipe.llm import Summarizer
+    from kawarabanya.llm import Summarizer
 
     def down(request):
         raise httpx.ConnectError("refused")
@@ -226,7 +226,7 @@ def test_classify_subgenre(tmp_path):
     import json as _json
     import math
 
-    from feedpipe.llm import Summarizer
+    from kawarabanya.llm import Summarizer
 
     (tmp_path / "genres.toml").write_text(
         '[tech]\nfeeds = ["https://site.example/feed"]\n'
@@ -292,8 +292,8 @@ def test_same_story(tmp_path):
     import json as _json
     import math
 
-    from feedpipe.llm import Summarizer
-    from feedpipe.rss.pipeline import _title_bigrams
+    from kawarabanya.llm import Summarizer
+    from kawarabanya.rss.pipeline import _title_bigrams
 
     assert _title_bigrams("自民、退席の石破氏らに説明要求（共同通信） - Yahoo!ニュース") == _title_bigrams("自民退席の石破氏らに説明要求")
 

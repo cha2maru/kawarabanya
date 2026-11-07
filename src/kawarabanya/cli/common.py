@@ -46,7 +46,7 @@ def _open_db(cfg: Config, args: argparse.Namespace) -> sqlite3.Connection:
 TOKEN_HELP = """Bot のトークンが設定されていません。
   1. https://discord.com/developers/applications で New Application → Bot → Reset Token
   2. .env に DISCORD_BOT_TOKEN=<トークン> を書く
-  3. feedpipe discord invite-url で表示される URL から、Bot をサーバーに招待する"""
+  3. kawarabanya discord invite-url で表示される URL から、Bot をサーバーに招待する"""
 
 def _discord_client(cfg: Config) -> discord_api.DiscordClient:
     """Bot トークンで Discord の REST クライアントを作る。トークンがなければ手順付きの ValueError。"""

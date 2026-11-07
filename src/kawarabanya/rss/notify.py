@@ -126,8 +126,8 @@ def excerpt(md_path: str | None, limit: int = EXCERPT_CHARS) -> str:
 def _username(feed_title: str | None) -> str:
     # Webhook の表示名に "discord" は使えない
     """投稿者として表示する名前（フィード名）。Discord の制限で「discord」を含む名前は使えない。"""
-    name = (feed_title or "feedpipe").strip()[:MAX_USERNAME]
-    return "feedpipe" if "discord" in name.lower() else name
+    name = (feed_title or "kawarabanya").strip()[:MAX_USERNAME]
+    return "kawarabanya" if "discord" in name.lower() else name
 
 
 def build_payload(p: Pending) -> dict:

@@ -14,7 +14,7 @@
     label = "国際"
     feeds = ["https://...", ...]
 
-フィードの移動は、URL を別のジャンルの feeds に移して `feedpipe genres apply`。
+フィードの移動は、URL を別のジャンルの feeds に移して `kawarabanya genres apply`。
 """
 
 from __future__ import annotations

@@ -42,7 +42,7 @@ from .server import (
 
 def build_parser() -> argparse.ArgumentParser:
     """サブコマンドと引数を定義した ArgumentParser を返す。"""
-    p = argparse.ArgumentParser(prog="feedpipe", description="RSS を全文 Markdown で保存し通知する")
+    p = argparse.ArgumentParser(prog="kawarabanya", description="RSS を全文 Markdown で保存し通知する")
     p.add_argument("-c", "--config", type=Path, help="設定ファイル（既定: ./config.toml）")
     p.add_argument("--db", help="DB ファイル（設定ファイルの値を上書き）")
     p.add_argument("-v", "--verbose", action="store_true", help="詳細なログを出す")
@@ -170,7 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_discord_delete_duplicates)
     s = dc.add_parser("test", help="カテゴリのチャンネルにテスト送信")
     s.add_argument("category")
-    s.add_argument("message", nargs="?", default="feedpipe からのテスト送信です")
+    s.add_argument("message", nargs="?", default="kawarabanya からのテスト送信です")
     s.set_defaults(func=cmd_discord_test)
 
     return p
@@ -192,8 +192,8 @@ def main(argv: list[str] | None = None) -> int:
     # 音声機能は使わないので、PyNaCl などがないという警告は出さない
     logging.getLogger("discord.client").setLevel(logging.INFO if args.verbose else logging.ERROR)
     if args.command == "bot":
-        # 常駐中は何をしたかを残したいので、-v がなくても feedpipe 自身のログは INFO で出す
-        logging.getLogger("feedpipe").setLevel(logging.INFO)
+        # 常駐中は何をしたかを残したいので、-v がなくても kawarabanya 自身のログは INFO で出す
+        logging.getLogger("kawarabanya").setLevel(logging.INFO)
     try:
         load_dotenv()
         cfg = load_config(args.config)

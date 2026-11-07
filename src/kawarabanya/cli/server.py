@@ -133,11 +133,11 @@ def cmd_discord_test(cfg: Config, args: argparse.Namespace) -> int:
     conn = _open_db(cfg, args)
     row = conn.execute("SELECT webhook_url, channel_name FROM discord_channels WHERE category = ?", (args.category,)).fetchone()
     if row is None:
-        print(f"{args.category}: チャンネルが未登録です（feedpipe discord setup --apply）", file=sys.stderr)
+        print(f"{args.category}: チャンネルが未登録です（kawarabanya discord setup --apply）", file=sys.stderr)
         return 1
     # フォーラムへの投稿にはスレッド名が必要
     discord_api.send_webhook(
-        row["webhook_url"], {"thread_name": "feedpipe テスト", "content": args.message, "username": "feedpipe"}
+        row["webhook_url"], {"thread_name": "kawarabanya テスト", "content": args.message, "username": "kawarabanya"}
     )
     print(f"#{row['channel_name']} に送信しました")
     return 0

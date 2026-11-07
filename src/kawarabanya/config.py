@@ -29,13 +29,13 @@ def load_dotenv(path: Path = DEFAULT_ENV_PATH) -> None:
 @dataclass
 class GeneralConfig:
     """[general]: DB・保存先・HTTP 取得・フィードの自動無効化。"""
-    db: str = "data/feedpipe.db"
+    db: str = "data/kawarabanya.db"
     archive_dir: str = "archive"
     genres_file: str = "genres.toml"
     concurrency: int = 16
     per_host: int = 2
     timeout: float = 20.0
-    user_agent: str = "Mozilla/5.0 (compatible; feedpipe/0.1)"
+    user_agent: str = "Mozilla/5.0 (compatible; kawarabanya/0.1)"
     # 連続失敗がこの回数に達したフィードは自動で無効化する
     max_failures: int = 5
     # 最新記事がこの日数より古いフィードを「放置」として報告する（無効化はしない）
@@ -75,9 +75,10 @@ class DiscordConfig:
     # Bot が参加しているサーバーが 1 つだけなら省略できる
     """[discord]: Bot・フォーラム・投稿の設定。トークンは環境変数（.env）から読む。"""
     guild_id: str | None = None
-    # feedpipe のチャンネルをまとめる Discord のカテゴリ名
-    parent_category: str = "feedpipe"
-    webhook_name: str = "feedpipe"
+    # kawarabanya のチャンネルをまとめる Discord のカテゴリ名
+    parent_category: str = "kawarabanya"
+    # 同じ名前の Webhook で投稿したメッセージしか書き換え・削除できないので、運用中に変えない
+    webhook_name: str = "kawarabanya"
     # フォーラムを年齢制限チャンネルにする
     nsfw: bool = True
     # 1 回の実行で投稿する上限（超えた分は次回に回す）
@@ -107,7 +108,7 @@ class DigestConfig:
 
 @dataclass
 class BotConfig:
-    # 常駐中に `feedpipe run` を実行する間隔（分）。0 なら実行しない
+    # 常駐中に `kawarabanya run` を実行する間隔（分）。0 なら実行しない
     """[bot]: 常駐 Bot の定期実行と、一緒に起動する要約サーバー。"""
     run_interval_minutes: int = 60
     # run に追加で渡す引数（例: ["--no-summary"]）

@@ -1,0 +1,18 @@
+# systemd のユーザーサービス。インストール:
+#   cp scripts/kawarabanya-bot.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now kawarabanya-bot
+# ログ: journalctl --user -u kawarabanya-bot -f
+[Unit]
+Description=kawarabanya Discord bot
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/workspace/rss
+ExecStart=%h/workspace/rss/.venv/bin/kawarabanya bot
+Restart=on-failure
+RestartSec=30
+# ログを journal にすぐ出す
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

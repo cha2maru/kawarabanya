@@ -275,7 +275,7 @@ def apply(
             continue  # 既存のサブジャンルに統合された
         added.add(s.path)
         text = text.rstrip("\n") + (
-            f"\n\n[{s.genre}.{s.key}]  # {day} feedpipe genres suggest が追加\n"
+            f"\n\n[{s.genre}.{s.key}]  # {day} kawarabanya genres suggest が追加\n"
             f"label = {json.dumps(s.label, ensure_ascii=False)}\n"
             f"description = {json.dumps(s.description, ensure_ascii=False)}\n"
         )

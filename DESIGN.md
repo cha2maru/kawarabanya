@@ -1,4 +1,4 @@
-# feedpipe 設計（v0.2）
+# kawarabanya 設計（v0.2）
 
 最終更新: 2026-11-07（全サブジャンルからの振り分け・サブジャンルの自動作成と統合・まとめを 1 日 2 回に）
 
@@ -12,24 +12,24 @@
 ## 2. 全体構成
 
 ```
-systemd --user: feedpipe-bot.service
-└─ feedpipe bot（常駐。discord.py で Gateway に接続）
+systemd --user: kawarabanya-bot.service
+└─ kawarabanya bot（常駐。discord.py で Gateway に接続）
    ├─ 子プロセス: scripts/llama-server.sh（llama.cpp + Qwen3.5-4B、OpenAI 互換 API :8080）
-   └─ 60 分ごと・まとめの時刻（6:30・18:30）に子プロセスを順に: feedpipe run → feedpipe genres suggest --apply --due → feedpipe digest --due（後の 2 つはまとめの時刻ごとに 1 回）
+   └─ 60 分ごと・まとめの時刻（6:30・18:30）に子プロセスを順に: kawarabanya run → kawarabanya genres suggest --apply --due → kawarabanya digest --due（後の 2 つはまとめの時刻ごとに 1 回）
         取得 ─▶ 既読判定 ─▶ 全文抽出 ─▶ Markdown 保存 ─▶ サブジャンル・重要度判定 ─▶ 要約 ─▶ 投稿 ─▶ 👍 集計
         (httpx)  (SQLite)   (trafilatura) (archive/)     (LLM 1 トークン) (LLM)  (Webhook) (Bot API)
 
 設定・データ:
   config.toml   … 動作設定（git 管理外）        .env         … Bot トークン（git 管理外）
   genres.toml   … ジャンルとフィードの割り当て（git 管理外。見本は genres.example.toml）
-  data/feedpipe.db … SQLite（feeds / items / discord_channels）
+  data/kawarabanya.db … SQLite（feeds / items / discord_channels）
   archive/      … 記事の Markdown
 ```
 
 - `run` を別プロセスにするのは、要約に数十分かかっても Bot のイベントループ（Discord との接続維持）を止めないため。前回の `run` が終わるまで次は始めない。
 - 投稿は Webhook、チャンネル・タグの作成と 👍 の読み取りは Bot トークン（REST）。どちらも同じ Bot（同じ招待 URL）で管理する。
 
-### 2.1 コードの構成（`src/feedpipe/`）
+### 2.1 コードの構成（`src/kawarabanya/`）
 
 ```
 config.py  db.py  bot.py  discord_api.py  llm.py   # 共通: 設定・SQLite・常駐 Bot・Discord REST/Webhook・LLM クライアント
@@ -43,7 +43,7 @@ cli/        # コマンド
 機能を足すときは、`rss/` と同じように機能ごとのパッケージを作り、コマンドは `cli/` に、Discord 上の対話は `bot.py` に足す。`discord_api.py` のフォーラム構成（ジャンル＝フォーラム）は今は RSS 専用の処理が混ざっている。
 
 ### 2.2 RSS のないサイト
-RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードとして登録できる（feedpipe 側には専用の処理を持たない）。**2026-11-07 に試したあと停止・削除した**（使うときは README の手順で起動する）。2026-11-07 時点の版で名前空間は 2,087（日本向けは約 100。Zenn・Qiita・はてな・note はない）。サイト側の変更で動かないルート（例: NHK）や、設定がないと使えないルート（例: GitHub トレンドはトークンが要る）がある。
+RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードとして登録できる（kawarabanya 側には専用の処理を持たない）。**2026-11-07 に試したあと停止・削除した**（使うときは README の手順で起動する）。2026-11-07 時点の版で名前空間は 2,087（日本向けは約 100。Zenn・Qiita・はてな・note はない）。サイト側の変更で動かないルート（例: NHK）や、設定がないと使えないルート（例: GitHub トレンドはトークンが要る）がある。
 
 ### 2.3 HTML 取り込み（`rss/htmlsource.py`）
 - `genres.toml` の `feeds` に `{ url, item, title, link, date, link_pattern }` を書くと、一覧ページから CSS セレクタで記事を取り出し、以降は RSS と同じ処理（本文・保存・判定・要約・投稿）を通す。`feeds.source_type = 'html'`、セレクタは `options.html`。
@@ -54,7 +54,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
   - 本文は記事ページから trafilatura で取る（RSS-Bridge の content_selector に当たる部分は既存の仕組み）。
   - JSON-LD などからの自動検出（html2rss の AutoSource）は作っていない。
 - 文字コードの指定がない HTML は lxml が latin-1 とみなすので、先に UTF-8 として読む。
-- **ボット対策で断られるサイトには、ブラウザを装ってまで取りに行かない**（例: すごろくやは feedpipe の User-Agent に 403 を返す）。
+- **ボット対策で断られるサイトには、ブラウザを装ってまで取りに行かない**（例: すごろくやは kawarabanya の User-Agent に 403 を返す）。
 
 ## 3. 主な処理
 
@@ -88,7 +88,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 - サーバーに繋がらなければ、その回は判定・要約なしで続ける（後から `summarize` で補える）。
 
 ### 3.4 Discord
-- **ジャンル 1 つ = フォーラム 1 つ**（親カテゴリ「feedpipe」の下。年齢制限オン）。**フォーラムのタグはサブジャンルだけ**（上限 20 個、名前は 20 字）。フィード名はタグにせず、投稿者名で示す（フィードが 20 を超えるとタグが足りなくなるため）。
+- **ジャンル 1 つ = フォーラム 1 つ**（親カテゴリ「kawarabanya」の下。年齢制限オン）。**フォーラムのタグはサブジャンルだけ**（上限 20 個、名前は 20 字）。フィード名はタグにせず、投稿者名で示す（フィードが 20 を超えるとタグが足りなくなるため）。
 - 投稿のタグは記事のサブジャンル（`items.subgenre`、なければフィードを固定したサブジャンル）。
 - **1 記事 = 1 投稿**: スレッド名 = 記事タイトル、表示名 = フィード名、本文 = 要約（なければ本文の先頭 200 字）＋公開日時＋URL。メンションは無効化。
 - 公開から 3 日を過ぎた未通知の記事は投稿せず `stale` にする。1 回の実行で投稿するのは 30 件まで。
@@ -97,8 +97,8 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 - **👍 は「興味あり」の印**として集計するだけで、投稿の取捨選択には使わない（押されていない投稿は「見ていない」可能性があるので、興味なしとは扱わない）。投稿から 7 日以内の記事を 6 時間ごとに確認する。
 
 ### 3.5 まとめ（digest）
-- まとめ用のテキストチャンネル（`[digest] channel`、既定 **#ニュース**。サーバー内を名前で探し、feedpipe 配下でなくてよい。なければ作らずに知らせる）に、**ジャンルごとに 1 メッセージ**「## 📰 テック MM/DD HH:MM のまとめ（N 件）」（見出しは genres.toml の label）を投稿する。リンク先は各ジャンルのフォーラムの投稿。
-- 投稿するのは **`[digest] times` の時刻（既定 6:30 と 18:30）** と、**`feedpipe digest` を実行したとき**。どちらも**前回のまとめ以降の記事**（最大 `window_hours` = 24 時間）をまとめるので、記事は重ならない。定時は「その時刻より後にそのジャンルのまとめを投稿済みなら飛ばす」（Bot が止まっていた分は次の実行で投稿する）。
+- まとめ用のテキストチャンネル（`[digest] channel`、既定 **#ニュース**。サーバー内を名前で探し、kawarabanya 配下でなくてよい。なければ作らずに知らせる）に、**ジャンルごとに 1 メッセージ**「## 📰 テック MM/DD HH:MM のまとめ（N 件）」（見出しは genres.toml の label）を投稿する。リンク先は各ジャンルのフォーラムの投稿。
+- 投稿するのは **`[digest] times` の時刻（既定 6:30 と 18:30）** と、**`kawarabanya digest` を実行したとき**。どちらも**前回のまとめ以降の記事**（最大 `window_hours` = 24 時間）をまとめるので、記事は重ならない。定時は「その時刻より後にそのジャンルのまとめを投稿済みなら飛ばす」（Bot が止まっていた分は次の実行で投稿する）。
 - **好き嫌い**（`genres.toml` の `interest`、記事のサブジャンル → ジャンルの順に探す）: `like` は重要度に 0.3 を足してまとめの上に寄せる、`low` は投稿はするがまとめに載せない、`mute` は投稿もしない（`items.status` を `muted` に）。`digest = false` は `low` の古い書き方。
 - 本文 = LLM が対象の記事の見出しから書く「傾向」（2 文）＋ **重要度の高い順の投稿へのリンク**（上位 10 件、👍 の数付き）＋「ほか N 件」。2,000 字に収める。
 - 「主な話題」を LLM に箇条書きさせる案は、関係のない話題を 1 行に混ぜたので採らず、一覧はコードで作る。
@@ -160,5 +160,5 @@ LFM（軽さ優先で最初に選んだ）は事実の誤りがあったため�
 3. **llama-server のスレッド数**: 8 → 16 で読み込みが速くなるかは未測定。
 4. **スラッシュコマンド**: `/feed add` など。次に作る機能が決まってから。
 5. **WSL2 での常駐**: Windows が起動している間だけ動く。WSL の起動時に自動で立ち上げるには `loginctl enable-linger` が必要。
-6. **プロジェクト名**: Bot 全体の名前にするか（今は `feedpipe`）。
+6. **プロジェクト名**: Bot 全体の名前にするか（今は `kawarabanya`）。
 7. サブジャンルの判定の精度（実データ 14 件の目視では妥当。どれにも当てはまらない記事はタグなし）。

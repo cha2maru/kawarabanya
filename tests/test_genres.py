@@ -1,7 +1,7 @@
 import pytest
 
-from feedpipe import db
-from feedpipe.rss.genres import apply_genres, load_genres
+from kawarabanya import db
+from kawarabanya.rss.genres import apply_genres, load_genres
 
 TOML = """
 [news]
@@ -67,7 +67,7 @@ def test_apply(tmp_path):
 
 
 def test_digest_flag(tmp_path):
-    from feedpipe.rss.genres import load_genres
+    from kawarabanya.rss.genres import load_genres
 
     p = tmp_path / "genres.toml"
     p.write_text('[culture]\n[culture.sports]\nlabel = "スポーツ"\ndigest = false\n', encoding="utf-8")
@@ -81,11 +81,11 @@ def test_suggest_subgenres(tmp_path):
 
     import httpx
 
-    from feedpipe import db
-    from feedpipe.config import SummarizeConfig
-    from feedpipe.llm import Summarizer
-    from feedpipe.rss import suggest
-    from feedpipe.rss.genres import load_genres
+    from kawarabanya import db
+    from kawarabanya.config import SummarizeConfig
+    from kawarabanya.llm import Summarizer
+    from kawarabanya.rss import suggest
+    from kawarabanya.rss.genres import load_genres
 
     p = tmp_path / "genres.toml"
     p.write_text('[news]\nlabel = "ニュース"\n[news.politics]\nlabel = "政治"\n[tech]\nlabel = "テック"\n',
@@ -146,11 +146,11 @@ def test_merge_subgenres_over_limit(tmp_path, monkeypatch):
 
     import httpx
 
-    from feedpipe import db
-    from feedpipe.config import SummarizeConfig
-    from feedpipe.llm import Summarizer
-    from feedpipe.rss import suggest
-    from feedpipe.rss.genres import load_genres
+    from kawarabanya import db
+    from kawarabanya.config import SummarizeConfig
+    from kawarabanya.llm import Summarizer
+    from kawarabanya.rss import suggest
+    from kawarabanya.rss.genres import load_genres
 
     monkeypatch.setattr(suggest, "MAX_TAGS", 4)  # 上限 4 を超える → 統合後は 3 個以下
     p = tmp_path / "genres.toml"

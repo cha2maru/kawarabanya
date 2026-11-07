@@ -1,6 +1,6 @@
 """ジャンルごとのまとめを、まとめ用のテキストチャンネル（既定 #ニュース）に投稿する。
 
-投稿するのは [digest] times の時刻（既定 6:30 と 18:30）と、`feedpipe digest` を実行したとき。
+投稿するのは [digest] times の時刻（既定 6:30 と 18:30）と、`kawarabanya digest` を実行したとき。
 どちらも前回のまとめ以降（最大 window_hours 時間）の記事をまとめる。
 
 まとめ = LLM が見出しの一覧から書く「今日の傾向」（2 文）＋ 重要度の高い順の投稿へのリンク。
@@ -134,7 +134,7 @@ async def post_digest(
         edit_webhook_message(channel["webhook_url"], last["thread_id"], payload, transport=transport)
         return content
     # まとめはテキストチャンネル（#ニュース）に、ジャンルごとに 1 メッセージで投稿する
-    msg = send_webhook(channel["webhook_url"], {"username": "feedpipe まとめ", **payload}, transport=transport)
+    msg = send_webhook(channel["webhook_url"], {"username": "瓦版屋 まとめ", **payload}, transport=transport)
     with conn:
         conn.execute(
             "INSERT OR REPLACE INTO digests (genre, day, thread_id, created_at) VALUES (?, ?, ?, ?)",
