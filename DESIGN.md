@@ -66,10 +66,11 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 ### 3.2 取得と保存（run）
 - 条件付き GET（ETag / Last-Modified）。全体 16・同一ホスト 2 の同時接続制限。
 - **初回のフィードは既存記事を既読にするだけ**（`--backfill N` で新しい順に N 件だけ保存）。フィード内の重複記事は先に除く。
+- 文字コード: ページの bytes は自前で判別してから trafilatura に渡す（trafilatura の推定は EUC-JP のページで外れた）。HTTP ヘッダーの charset・`<meta charset>`・UTF-8 を試し、すべて読めればそれ、読めない文字が 0.5% 以下ならいちばん少ないもの（jin115.com は EUC-JP のページの広告部分に UTF-8 が混ざる）、どれもだめなら charset-normalizer で推定する。ヘッダーの ISO-8859-1 などは既定値として付くことが多いので信じない。判別した元の文字コードは Front Matter の `charset` に残し、保存は常に UTF-8。
 - 本文は元記事から trafilatura で Markdown 抽出。取れない・短すぎる（200 字未満）ときはフィードの本文と長い方を使い、Front Matter の `source` に記録する。
 - **同じ記事は 1 件にまとめる**: 保存の前に、同じ URL か同じ本文（空白を除いた SHA-1、200 字以上のときだけ）の記事が保存済みなら、保存も投稿もせず `duplicate` にする（Yahoo!ニュース・トピックスは同じ記事を「主要」と「国内」などの複数のフィードに載せる。11/07 の投稿 176 件中 9 件が重複だった）。まとめは投稿した記事から作るので、まとめにも 1 件だけ載る。
 - **同じ出来事の記事も 1 件にまとめる（Jev 風）**: 本文が違う転載・別媒体の記事（朝日と時事、Yahoo!ニュースのトピックスと元記事など）は、最近の記事を要約の前に、直近 48 時間の記事のうち見出しの似たもの（媒体名を除いた 2 文字ずつの Jaccard 係数 0.15 以上）と比べ、2 本の見出し＋冒頭 300 字から「同じ出来事か」を A/B の 1 トークンで判定する。A の確率が 0.9 以上（`same_story_threshold`）なら、後に登録した方を `duplicate` にする（投稿済みの記事は残す）。
-- 保存先: `archive/{カテゴリ}/{年}/{月}/{日付}_{タイトル}.md`（Front Matter: title / url / feed / category / published / fetched / source / summary / discord＝投稿へのリンク）。
+- 保存先: `archive/{カテゴリ}/{年}/{月}/{日付}_{タイトル}.md`（Front Matter: title / url / feed / category / published / fetched / source / charset（元のページの文字コード）/ summary / discord＝投稿へのリンク）。
 
 ### 3.3 重要度の判定と要約
 - **公開から 3 日以内の記事だけ**対象にする（投稿しない古い記事に CPU を使わない）。

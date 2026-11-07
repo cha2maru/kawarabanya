@@ -483,6 +483,7 @@ name = "feedpipe"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "charset-normalizer" },
     { name = "cssselect" },
     { name = "discord-py" },
     { name = "feedparser" },
@@ -497,6 +498,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "charset-normalizer", specifier = ">=3.5.2" },
     { name = "cssselect", specifier = ">=1.6.0" },
     { name = "discord-py", specifier = ">=2.7.1" },
     { name = "feedparser", specifier = ">=6.0.14" },

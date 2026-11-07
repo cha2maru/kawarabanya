@@ -53,6 +53,8 @@ def render(item: Item, fetched: datetime) -> str:
         fm.append(f"published: {item.published.astimezone().isoformat(timespec='seconds')}")
     fm.append(f"fetched: {fetched.astimezone().isoformat(timespec='seconds')}")
     fm.append(f"source: {item.content_source}")
+    if item.charset:
+        fm.append(f"charset: {item.charset}")
     fm.append("---")
 
     body = [f"# {item.title or '(無題)'}", ""]

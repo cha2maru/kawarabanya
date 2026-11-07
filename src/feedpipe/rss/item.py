@@ -25,6 +25,8 @@ class Item:
     content_md: str | None = None
     # content_md の出どころ: article（元記事から抽出）/ feed（フィードの本文）/ none
     content_source: str = "none"
+    # 元記事のページの文字コード（euc-jp・shift_jis など。保存は常に UTF-8）
+    charset: str | None = None
     summary: str | None = None
     id: int | None = None
 

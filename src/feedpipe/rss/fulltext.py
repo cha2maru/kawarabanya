@@ -10,6 +10,7 @@ import trafilatura
 
 from ..config import FulltextConfig
 from .fetcher import Fetcher
+from .htmlsource import decode_html
 from .item import Item
 
 log = logging.getLogger(__name__)
@@ -29,18 +30,22 @@ def html_to_markdown(html: str | bytes, url: str | None, cfg: FulltextConfig) ->
     )
 
 
-async def _article_markdown(fetcher: Fetcher, url: str, cfg: FulltextConfig) -> str | None:
-    """元記事のページを取得して本文を Markdown にする。取得できない・HTML でなければ None。"""
+async def _article_markdown(fetcher: Fetcher, url: str, cfg: FulltextConfig) -> tuple[str | None, str | None]:
+    """元記事のページを取得して本文を Markdown にし、(Markdown, ページの文字コード) を返す。
+
+    取得できない・HTML でなければ (None, None)。
+    """
     try:
         resp = await fetcher.get(url)
     except httpx.HTTPError as e:
         log.info("本文の取得に失敗: %s (%s)", url, e)
-        return None
+        return None, None
     if not resp.is_success or "html" not in resp.headers.get("content-type", "html"):
         log.info("本文の取得に失敗: %s (HTTP %s)", url, resp.status_code)
-        return None
-    # 文字コードの判定は trafilatura に任せるため bytes のまま渡す
-    return await asyncio.to_thread(html_to_markdown, resp.content, str(resp.url), cfg)
+        return None, None
+    # trafilatura の文字コードの推定は EUC-JP のページなどで外れるので、先に判別して文字列で渡す
+    html, charset = decode_html(resp.content, resp.charset_encoding)
+    return await asyncio.to_thread(html_to_markdown, html, str(resp.url), cfg), charset
 
 
 async def fill_content(fetcher: Fetcher, item: Item, cfg: FulltextConfig) -> None:
@@ -52,13 +57,13 @@ async def fill_content(fetcher: Fetcher, item: Item, cfg: FulltextConfig) -> Non
         else:  # タグを含まないプレーンテキスト
             feed_md = item.feed_html.strip()
 
-    article_md = None
+    article_md = charset = None
     if cfg.enabled and item.url and not item.feed.option("no_fulltext"):
-        article_md = await _article_markdown(fetcher, item.url, cfg)
+        article_md, charset = await _article_markdown(fetcher, item.url, cfg)
 
     if article_md and (len(article_md) >= cfg.min_length or len(article_md) >= len(feed_md or "")):
-        item.content_md, item.content_source = article_md, "article"
+        item.content_md, item.content_source, item.charset = article_md, "article", charset
     elif feed_md:
         item.content_md, item.content_source = feed_md, "feed"
     elif article_md:
-        item.content_md, item.content_source = article_md, "article"
+        item.content_md, item.content_source, item.charset = article_md, "article", charset

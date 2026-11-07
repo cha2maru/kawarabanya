@@ -73,6 +73,7 @@ def test_first_run_marks_seen_and_backfills(tmp_path):
     text = path.read_text()
     assert 'title: "記事C"' in text
     assert "source: article" in text
+    assert "charset: utf-8" in text  # 元のページの文字コード（保存は常に UTF-8）
     assert "記事C の本文 0 段落目" in text
     assert text.count("# 記事C") == 1  # 本文側の同じ見出しは除く
     assert "メニュー" not in text

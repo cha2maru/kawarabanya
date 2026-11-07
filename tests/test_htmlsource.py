@@ -95,3 +95,20 @@ def test_extract_shift_jis_page():
     html = '<html><head><meta charset="Shift_JIS"></head><body><li><a href="/n/1">日本語の記事</a></li></body></html>'
     [e] = extract(html.encode("shift_jis"), "https://example.com/", HtmlSource(item="li"))
     assert e["title"] == "日本語の記事"
+
+
+def test_decode_html_charsets():
+    from feedpipe.rss.htmlsource import decode_html
+
+    body = "<p>置き配を盗まれたのでダミー荷物を置いてみた結果、見事にまた盗まれた</p>" * 3
+    euc = f'<html><head><meta charset="EUC-JP"></head><body>{body}</body></html>'.encode("euc_jp")
+    assert decode_html(euc, "EUC-JP")[1] == "euc-jp"  # HTTP ヘッダー
+    assert "置き配" in decode_html(euc)[0]  # <meta charset>
+    assert "置き配" in decode_html(euc, "iso-8859-1")[0]  # ヘッダーの latin-1 は信じない
+    nometa = f"<html><body>{body}</body></html>".encode("shift_jis")
+    assert "置き配" in decode_html(nometa)[0]  # 指定がなければ中身から推定
+    assert "置き配" in decode_html(nometa, "utf-8")[0]  # ヘッダーが間違っていても推定する
+    # EUC-JP のページに UTF-8 が少し混ざっていても EUC-JP として読む
+    mixed = euc.replace(b"<body>", b"<body><!--" + "広告".encode() + b"-->") + body.encode("euc_jp") * 20
+    text, enc = decode_html(mixed, "euc-jp")
+    assert enc == "euc-jp" and "置き配" in text

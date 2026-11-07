@@ -20,6 +20,7 @@ from dataclasses import dataclass, fields
 from datetime import datetime
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
+import charset_normalizer
 import lxml.html
 
 # 記事を見分けるキーにする URL から除く、追跡用のパラメータ
@@ -54,13 +55,49 @@ def normalize_url(url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, query, ""))
 
 
-def _parse(html: bytes | str):
-    """HTML を読む。文字コードの指定がないと lxml は latin-1 とみなすので、先に UTF-8 を試す。"""
-    if isinstance(html, bytes):
+META_CHARSET = re.compile(rb"""<meta[^>]+charset=["']?([\w-]+)""", re.IGNORECASE)
+# HTTP ヘッダーの既定値として付くことが多く、日本語のページでは当てにならない
+UNTRUSTED = {"iso-8859-1", "latin-1", "latin1", "us-ascii", "ascii"}
+
+
+# 一部の文字だけ読めない（広告などに別の文字コードが混ざる）ページは、この割合までなら宣言どおりの文字コードとみなす
+MAX_BROKEN = 0.005
+
+
+def decode_html(content: bytes, charset: str | None = None) -> tuple[str, str]:
+    """HTML の bytes を文字列にし、(文字列, 判別した文字コード) を返す。
+
+    HTTP ヘッダーの charset・<meta charset>・UTF-8 を試し、すべて読めればそれ、
+    読めない文字が MAX_BROKEN 以下ならいちばん少ないもの、どれもだめなら中身から推定する。
+    （jin115.com は EUC-JP のページの広告部分に UTF-8 が混ざる）
+    """
+    meta = META_CHARSET.search(content[:4096])
+    candidates = [charset, meta.group(1).decode("ascii") if meta else None, "utf-8"]
+    best: tuple[int, str, str] | None = None
+    for enc in dict.fromkeys(e.lower() for e in candidates if e):
+        if enc in UNTRUSTED:
+            continue
         try:
-            html = html.decode("utf-8")
-        except UnicodeDecodeError:
-            pass  # Shift_JIS など。<meta charset> を見て lxml が読む
+            text = content.decode(enc, errors="replace")
+        except LookupError:
+            continue
+        broken = text.count("\ufffd")
+        if broken == 0:
+            return text, enc
+        if best is None or broken < best[0]:
+            best = (broken, text, enc)
+    if best and best[0] <= len(best[1]) * MAX_BROKEN:
+        return best[1], best[2]
+    guess = charset_normalizer.from_bytes(content).best()
+    if guess:
+        return str(guess), guess.encoding
+    return content.decode("utf-8", errors="replace"), "utf-8"
+
+
+def _parse(html: bytes | str):
+    """HTML を読む（bytes は decode_html で文字コードを判別する）。"""
+    if isinstance(html, bytes):
+        html, _ = decode_html(html)
     return lxml.html.fromstring(html)
 
 
