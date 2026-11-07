@@ -49,15 +49,16 @@ class NotifyStats:
     errors: list[str] = field(default_factory=list)
 
 
-def pending_items(conn: sqlite3.Connection) -> tuple[list[Pending], int]:
+def pending_items(conn: sqlite3.Connection, category: str | None = None) -> tuple[list[Pending], int]:
     """通知待ちの記事と、送り先がないため送れない記事の数を返す。"""
     rows = conn.execute(
         "SELECT i.id, i.feed_id, f.title AS feed_title, i.title, i.url, i.published, i.summary,"
         " i.md_path, d.webhook_url, d.tags"
         " FROM items i JOIN feeds f ON f.id = i.feed_id"
         " LEFT JOIN discord_channels d ON d.category = COALESCE(f.category, ?)"
-        " WHERE i.status = 'saved' ORDER BY i.published, i.id",
-        (UNCATEGORIZED,),
+        " WHERE i.status = 'saved' AND (? IS NULL OR COALESCE(f.category, ?) = ?)"
+        " ORDER BY i.published, i.id",
+        (UNCATEGORIZED, category, UNCATEGORIZED, category),
     ).fetchall()
     ready = [
         Pending(
@@ -128,12 +129,13 @@ def notify_pending(
     conn: sqlite3.Connection,
     *,
     limit: int,
+    category: str | None = None,
     dry_run: bool = False,
     transport: httpx.BaseTransport | None = None,
     interval: float = SEND_INTERVAL,
 ) -> NotifyStats:
     stats = NotifyStats()
-    items, stats.no_channel = pending_items(conn)
+    items, stats.no_channel = pending_items(conn, category)
     stats.remaining = max(len(items) - limit, 0)
     for i, p in enumerate(items[:limit]):
         payload = build_payload(p)

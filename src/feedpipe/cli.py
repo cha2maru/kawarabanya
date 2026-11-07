@@ -322,8 +322,17 @@ def cmd_discord_channels(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
-def _notify(cfg: Config, conn: sqlite3.Connection, *, limit: int | None = None, dry_run: bool = False) -> int:
-    stats = notify.notify_pending(conn, limit=limit or cfg.discord.max_posts_per_run, dry_run=dry_run)
+def _notify(
+    cfg: Config,
+    conn: sqlite3.Connection,
+    *,
+    limit: int | None = None,
+    category: str | None = None,
+    dry_run: bool = False,
+) -> int:
+    stats = notify.notify_pending(
+        conn, limit=limit or cfg.discord.max_posts_per_run, category=category, dry_run=dry_run
+    )
     line = f"通知: 送信 {stats.sent} 件"
     if stats.failed:
         line += f" / 失敗 {stats.failed} 件"
@@ -338,7 +347,7 @@ def _notify(cfg: Config, conn: sqlite3.Connection, *, limit: int | None = None, 
 
 
 def cmd_notify(cfg: Config, args: argparse.Namespace) -> int:
-    return _notify(cfg, _open_db(cfg, args), limit=args.limit, dry_run=args.dry_run)
+    return _notify(cfg, _open_db(cfg, args), limit=args.limit, category=args.category, dry_run=args.dry_run)
 
 
 def cmd_discord_test(cfg: Config, args: argparse.Namespace) -> int:
@@ -396,6 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("notify", help="保存済みで未通知の記事を Discord に投稿する")
     s.add_argument("--limit", type=int, help="投稿する上限（既定: [discord] max_posts_per_run）")
+    s.add_argument("--category", help="このカテゴリだけ")
     s.add_argument("--dry-run", action="store_true", help="送らずに内容を表示する")
     s.set_defaults(func=cmd_notify)
 
