@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .. import discord_api
 from ..config import load_config, load_dotenv
+from ..rss import extensions
 from .rss import (
     _cmd_set_enabled,
     cmd_check,
@@ -213,6 +214,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         load_dotenv()
         cfg = load_config(args.config)
+        extensions.DIR = Path(cfg.general.extensions_dir)
         return args.func(cfg, args)
     except (OSError, ValueError, ET.ParseError, discord_api.DiscordError) as e:
         print(f"エラー: {e}", file=sys.stderr)

@@ -18,8 +18,8 @@ import httpx
 
 from .. import db
 from ..config import GeneralConfig
+from . import extensions
 from .fetcher import Fetcher
-from .htmlsource import HtmlSource, extract, page_title
 
 PERMANENT_REDIRECTS = {301, 308}
 
@@ -139,17 +139,21 @@ async def check_feed(
                 final = str(resp.url)
                 if final != feed.url:
                     result.moved_to = final
-            if feed.source_type == "html":
-                entries = extract(resp.content, str(resp.url), HtmlSource.from_dict(feed.option("html") or {}))
-                title = page_title(resp.content)
-                # サイトの作りが変わるとセレクタは黙って 0 件になるので、失敗として数えて気づけるようにする
-                error = "セレクタに一致する記事がありません（サイトの作りが変わった可能性）"
+            if feed.source_type != "rss":  # HTML 取り込み・サイト別の拡張
+                try:
+                    ext = extensions.get(feed.source_type)
+                    entries = ext.parse(resp.content, str(resp.url), feed.option(feed.source_type) or {})
+                    title = ext.title(resp.content)
+                    # サイトの作りが変わると黙って 0 件になるので、失敗として数えて気づけるようにする
+                    error = "記事が取り出せません（サイトの作りが変わった可能性）"
+                except Exception as e:  # noqa: BLE001 拡張の不具合で取り込み全体を止めない
+                    entries, title, error = [], None, f"拡張 {feed.source_type} の失敗: {type(e).__name__}: {e}"
             else:
                 parsed = feedparser.parse(resp.content, response_headers=dict(resp.headers))
                 entries = parsed.entries if parsed.version else []
                 title = parsed.feed.get("title")
                 error = None if parsed.version else f"フィードではありません（{resp.headers.get('content-type', '?')}）"
-            if entries or (feed.source_type != "html" and error is None):
+            if entries or (feed.source_type == "rss" and error is None):
                 result.status = Status.OK
                 result.feed_title = title
                 result.parsed_entries = entries

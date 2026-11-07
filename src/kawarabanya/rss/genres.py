@@ -8,7 +8,8 @@
     priority = "A: ... B: ... C: ..."   # 重要度の判定基準（省略可）
     interest = "low"            # 好き嫌い: like（まとめの上位に寄せる）/ low（まとめに載せない）/ mute（投稿もしない）
 
-    feeds に { url = ..., item = ..., ... } と書くと HTML 取り込み（rss/htmlsource.py）
+    feeds に { url = ..., item = ..., ... } と書くと HTML 取り込み（rss/htmlsource.py）、
+    { url = ..., extension = "名前", ... } と書くとサイト別の拡張（rss/extensions.py）
 
     [news.world]                # サブジャンル（Discord ではフォーラムのタグ）
     label = "国際"
@@ -27,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import db
-from .htmlsource import HtmlSource
+from . import extensions
 
 RESERVED = {"label", "description", "feeds", "priority", "interest", "digest"}
 # 好き嫌い（interest）。書かなければ normal（サブジャンルはジャンルの値を受け継ぐ）
@@ -46,8 +47,8 @@ class Genre:
     label: str
     description: str = ""
     feeds: list[str] = field(default_factory=list)
-    # HTML 取り込みの設定（URL → genres.toml に書いたテーブル）
-    html: dict[str, dict] = field(default_factory=dict)
+    # HTML 取り込み・拡張の設定（URL → genres.toml に書いたテーブル）
+    sources: dict[str, dict] = field(default_factory=dict)
     # 重要度の判定基準（A/B/C の説明）。空ならトップレベルのジャンル → 既定の基準
     priority: str = ""
     # 好き嫌い（INTEREST_LEVELS のキー）。None なら書いていない
@@ -104,18 +105,18 @@ def load_genres(path: str | Path) -> dict[str, Genre]:
         if "/" in key:
             raise ValueError(f"{path}: ジャンル名に / は使えません: {key}")
         feeds: list[str] = []
-        html: dict[str, dict] = {}
+        sources: dict[str, dict] = {}
         for entry in table.get("feeds", []):
-            # 文字列はフィードの URL、テーブルは HTML 取り込み（{ url = ..., item = ..., ... }）
+            # 文字列はフィードの URL、テーブルは HTML 取り込みか拡張（{ url = ..., item = ..., ... }）
             if isinstance(entry, dict):
                 url = entry.get("url")
                 if not url:
-                    raise ValueError(f"{path}: [{gpath}] の HTML 取り込みに url がありません")
+                    raise ValueError(f"{path}: [{gpath}] の HTML 取り込み・拡張に url がありません")
                 try:
-                    HtmlSource.from_dict({k: v for k, v in entry.items() if k not in ("url", "name")})
+                    extensions.split_entry(entry)
                 except ValueError as e:
                     raise ValueError(f"{path}: {url}: {e}") from None
-                html[url] = entry
+                sources[url] = entry
             else:
                 url = entry
             feeds.append(url)
@@ -127,7 +128,7 @@ def load_genres(path: str | Path) -> dict[str, Genre]:
             label=table.get("label", key),
             description=table.get("description", ""),
             feeds=feeds,
-            html=html,
+            sources=sources,
             priority=table.get("priority", ""),
             interest=_interest(table, gpath, path),
         )
@@ -171,8 +172,8 @@ def apply_genres(
         for g in genres.values():
             for url in g.feeds:
                 feed = db.find_feed_by_url(conn, url)
-                if url in g.html:
-                    feed = _sync_html_source(conn, feed, url, g.html[url], result, dry_run)
+                if url in g.sources:
+                    feed = _sync_source(conn, feed, url, g.sources[url], result, dry_run)
                 if feed is None:
                     result.unknown_urls.append(url)
                     continue
@@ -191,11 +192,11 @@ def apply_genres(
     return result
 
 
-def _sync_html_source(
+def _sync_source(
     conn: sqlite3.Connection, feed: db.Feed | None, url: str, entry: dict, result: ApplyResult, dry_run: bool
 ) -> db.Feed | None:
-    """HTML 取り込みのフィードを登録し、セレクタの設定を options["html"] に保存する。"""
-    selectors = {k: v for k, v in entry.items() if k not in ("url", "name")}
+    """HTML 取り込み・拡張のフィードを登録し、source_type を拡張の名前に、設定を options[拡張の名前] に保存する。"""
+    name, options = extensions.split_entry(entry)
     if dry_run:
         if feed is None:
             result.added.append(url)
@@ -204,9 +205,9 @@ def _sync_html_source(
         db.insert_feed(conn, url, entry.get("name"), url, None)
         feed = db.find_feed_by_url(conn, url)
         result.added.append(url)
-    if feed.source_type != "html" or feed.option("html") != selectors:
-        conn.execute("UPDATE feeds SET source_type = 'html' WHERE id = ?", (feed.id,))
-        db.set_option(conn, feed.id, "html", selectors)
+    if feed.source_type != name or feed.option(name) != options:
+        conn.execute("UPDATE feeds SET source_type = ? WHERE id = ?", (name, feed.id))
+        db.set_option(conn, feed.id, name, options)
         feed = db.get_feed(conn, feed.id)
     return feed
 

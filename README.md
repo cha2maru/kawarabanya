@@ -123,6 +123,31 @@ feeds = [
 
 `genres apply` で登録される。セレクタに一致する記事が 0 件になると失敗として数える（サイトの作りが変わったことに気づけるように）。
 
+CSS セレクタで取れないサイト（JSON の API、特殊な作りのページ）は、**拡張**を書く。`extensions/<名前>.py`（`[general] extensions_dir`）に `parse` を書き、`feeds` に `extension = "<名前>"` を足す（それ以外のキーは拡張の設定として `options` に渡る）:
+
+```python
+# extensions/example.py
+import json
+
+def parse(content: bytes, url: str, options: dict) -> list[dict]:
+    """取得したページ（bytes）から記事を返す。形は feedparser の entry と同じ。"""
+    return [{"id": x["url"], "link": x["url"], "title": x["title"], "published_parsed": None, "summary": ""}
+            for x in json.loads(content)[options["key"]]]
+
+def validate(options: dict) -> None:   # 省略可。設定が正しくなければ ValueError
+    if "key" not in options:
+        raise ValueError("key が必要です")
+
+def title(content: bytes) -> str | None:   # 省略可。フィードの名前（省略時はページの <title>）
+    return "Example"
+```
+
+```toml
+feeds = [{ url = "https://example.com/api/news", extension = "example", name = "Example", key = "items" }]
+```
+
+取得（条件付き GET・リダイレクト・失敗の回数）は本体が行い、拡張は取り出すだけ。拡張が例外を出したり 0 件を返したりすると、そのフィードの失敗として数える。組み込みの HTML 取り込みは `extension = "html"`（省略時）。
+
 フィードを移すには URL の行を別のジャンルに移して `genres apply` → `discord setup --apply`。書かれていないフィードの記事は投稿されない（保存はする）。
 
 保存した Markdown の Front Matter には、投稿後に Discord の投稿へのリンク（`discord:`）が入る。

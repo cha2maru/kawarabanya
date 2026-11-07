@@ -85,7 +85,7 @@ def test_check_html_source_and_broken_selector():
     results = asyncio.run(check_feeds(db.list_feeds(conn), GeneralConfig(), transport=httpx.MockTransport(handler)))
     by_id = {r.feed.id: r for r in results}
     assert by_id[ok].status is Status.OK and by_id[ok].entries == 3
-    assert by_id[broken].status is Status.NOT_FEED and "セレクタ" in by_id[broken].error
+    assert by_id[broken].status is Status.NOT_FEED and "取り出せません" in by_id[broken].error
     apply_results(conn, results, max_failures=5)
     assert db.get_feed(conn, ok).title == "お知らせ | Example"  # 名前がなければページのタイトル
     assert db.get_feed(conn, broken).fail_count == 1  # 0 件は失敗として数える
@@ -112,3 +112,52 @@ def test_decode_html_charsets():
     mixed = euc.replace(b"<body>", b"<body><!--" + "広告".encode() + b"-->") + body.encode("euc_jp") * 20
     text, enc = decode_html(mixed, "euc-jp")
     assert enc == "euc-jp" and "置き配" in text
+
+
+def test_extension_source(tmp_path, monkeypatch):
+    import json
+
+    from kawarabanya.rss import extensions
+
+    ext_dir = tmp_path / "extensions"
+    ext_dir.mkdir()
+    (ext_dir / "jsonapi.py").write_text(
+        "import json\n"
+        "def validate(options):\n"
+        "    if 'key' not in options:\n"
+        "        raise ValueError('key が必要です')\n"
+        "def parse(content, url, options):\n"
+        "    return [{'id': x['u'], 'link': x['u'], 'title': x['t'], 'published_parsed': None, 'summary': ''}\n"
+        "            for x in json.loads(content)[options['key']]]\n"
+        "def title(content):\n"
+        "    return 'JSON のサイト'\n", encoding="utf-8")
+    (ext_dir / "broken.py").write_text("def parse(content, url, options):\n    raise RuntimeError('壊れた')\n",
+                                       encoding="utf-8")
+    monkeypatch.setattr(extensions, "DIR", ext_dir)
+    monkeypatch.setattr(extensions, "_loaded", dict(extensions._loaded))
+    assert extensions.available() == ["html", "broken", "jsonapi"]
+
+    p = tmp_path / "genres.toml"
+    p.write_text('[news]\nfeeds = [\n  { url = "https://api.example/list", extension = "jsonapi", key = "items" },\n'
+                 '  { url = "https://b.example/", extension = "broken" },\n]\n', encoding="utf-8")
+    conn = db.connect(":memory:")
+    apply_genres(conn, load_genres(p))
+    feed = db.find_feed_by_url(conn, "https://api.example/list")
+    assert (feed.source_type, feed.option("jsonapi")) == ("jsonapi", {"key": "items"})
+
+    def handler(req):
+        return httpx.Response(200, content=json.dumps({"items": [{"u": "https://api.example/1", "t": "一つ目"}]}).encode())
+
+    results = asyncio.run(check_feeds(db.list_feeds(conn), GeneralConfig(), transport=httpx.MockTransport(handler)))
+    by_url = {r.feed.url: r for r in results}
+    ok = by_url["https://api.example/list"]
+    assert ok.status is Status.OK and ok.feed_title == "JSON のサイト" and ok.parsed_entries[0]["title"] == "一つ目"
+    bad = by_url["https://b.example/"]
+    assert bad.status is Status.NOT_FEED and "壊れた" in bad.error  # 拡張の例外は、そのフィードの失敗になる
+
+    p.write_text('[news]\nfeeds = [{ url = "https://api.example/list", extension = "jsonapi" }]\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="key が必要"):
+        load_genres(p)
+    p.write_text('[news]\nfeeds = [{ url = "https://x.example/", extension = "nope" }]\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="拡張 nope がありません"):
+        load_genres(p)

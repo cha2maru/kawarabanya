@@ -147,7 +147,7 @@ class Feed:
     last_modified: str | None
     initialized_at: str | None
     options: dict = field(default_factory=dict)
-    source_type: str = "rss"  # rss / html（HTML 取り込み）
+    source_type: str = "rss"  # rss / html（HTML 取り込み）/ 拡張の名前（設定は options[source_type]）
 
     def option(self, name: str, default: object = None) -> object:
         """フィード個別の設定（feeds option で設定）を返す。"""
