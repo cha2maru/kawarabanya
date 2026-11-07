@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS discord_channels (
 # 既存の DB に後から足した列（CREATE TABLE IF NOT EXISTS では追加されないため）
 ADDED_COLUMNS = {
     "feeds": {"latest_entry_at": "TEXT", "initialized_at": "TEXT"},
-    "items": {"notified_at": "TEXT", "discord_thread_id": "TEXT", "likes": "INTEGER", "likes_checked_at": "TEXT", "priority": "REAL"},
+    "items": {"notified_at": "TEXT", "discord_thread_id": "TEXT", "likes": "INTEGER", "likes_checked_at": "TEXT", "priority": "REAL", "subgenre": "TEXT"},
     "discord_channels": {"tags": "TEXT"},
 }
 

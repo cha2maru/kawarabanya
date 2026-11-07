@@ -118,7 +118,8 @@ async def _summarize(
     md_path: str | Path,
     priority: float | None = None,
 ) -> str:
-    """重要度を判定し、基準以上なら要約する。"summarized" / "low"（基準未満）/ "failed" を返す。"""
+    """サブジャンルと重要度を判定し、基準以上なら要約する。"summarized" / "low"（基準未満）/ "failed" を返す。"""
+    category = await _classify(conn, summarizer, genres, item_id, title, category, content_md)
     threshold = cfg.summarize.priority_threshold
     if threshold > 0:
         if priority is None:
@@ -136,6 +137,34 @@ async def _summarize(
     with conn:
         db.update_item(conn, item_id, summary=summary)
     return "summarized"
+
+
+async def _classify(
+    conn: sqlite3.Connection,
+    summarizer: Summarizer,
+    genres: dict[str, Genre] | None,
+    item_id: int,
+    title: str | None,
+    category: str | None,
+    content_md: str | None,
+) -> str | None:
+    """トップレベルのジャンルのフィードの記事を、LLM でサブジャンルに振り分けて items.subgenre に記録する。
+
+    サブジャンルに固定したフィード（genres.toml でサブジャンルの下に書いたもの）は判定しない。
+    振り分けたカテゴリ（なければ元のカテゴリ）を返す。
+    """
+    if not genres or not category or "/" in category:
+        return category
+    subs = [g for g in genres.values() if g.is_sub and g.top == category]
+    if not subs:
+        return category
+    result = await summarizer.classify(title, content_md, [(g.label, g.description) for g in subs])
+    if result is None or result[0] is None:
+        return category
+    sub = subs[result[0]].path
+    with conn:
+        db.update_item(conn, item_id, subgenre=sub)
+    return sub
 
 
 def load_genres_if_any(cfg: Config) -> dict[str, Genre] | None:

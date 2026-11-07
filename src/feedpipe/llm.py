@@ -32,6 +32,14 @@ DEFAULT_CRITERIA = (
     "C: 低い（セール・広告・小ネタ・ランキング）"
 )
 LEAD_CHARS = 200
+CLASSIFY_PROMPT = (
+    "あなたはニュースの編集者です。記事の見出しと冒頭を読み、最も当てはまる分類を 1 つ選びます。\n"
+    "{choices}\n"
+    "{letters} のいずれか 1 文字だけで答えてください。"
+)
+# 選択肢の記号（Discord のフォーラムのタグは 20 個までなので、サブジャンルも 20 個まで）
+CHOICE_LETTERS = "ABCDEFGHIJKLMNOPQRST"
+NONE_LETTER = "Z"
 TREND_PROMPT = (
     "あなたはニュース編集者です。今日のニュース見出しの一覧を読み、"
     "全体として目立つ傾向を日本語2文以内で述べてください。一覧にないことは書かないでください。"
@@ -147,30 +155,54 @@ class Summarizer:
         except (KeyError, IndexError, TypeError):
             return None
 
-    async def priority(self, title: str | None, markdown: str | None, criteria: str | None = None) -> float | None:
-        """見出しと冒頭から重要度を判定し、「A（高い）」の確率（0〜1）を返す。
+    async def _choose(self, system: str, title: str | None, markdown: str | None, letters: str, what: str) -> dict[str, float] | None:
+        """見出しと冒頭を渡して letters のどれか 1 文字だけを出させ、各文字の確率（合計 1）を返す。
 
-        文章を書かせず 1 トークン（A/B/C）だけを出させ、その確率を読む（Jev 風の判定）。
+        文章を書かせず 1 トークンだけを出させ、その確率を読む（Jev 風の判定）。
         出力が 1 トークンなので、時間はほぼ入力の読み込みだけ（CPU で 1〜2 秒）。
         """
         data = await self._chat(
             {
                 "messages": [
-                    {"role": "system", "content": PRIORITY_PROMPT.format(criteria=criteria or DEFAULT_CRITERIA)},
+                    {"role": "system", "content": system},
                     {"role": "user", "content": f"見出し: {title or '(無題)'}\n冒頭: {lead(markdown or '')}"},
                 ],
                 "temperature": 0,
                 "max_tokens": 1,
                 "logprobs": True,
-                "top_logprobs": 10,
-                "grammar": 'root ::= "A" | "B" | "C"',  # llama-server の文法制約で A/B/C の 1 文字に限る
+                "top_logprobs": 20,
+                # llama-server の文法制約で、選択肢の 1 文字に限る
+                "grammar": "root ::= " + " | ".join(f'"{c}"' for c in letters),
             },
-            f"重要度の判定（{title}）",
+            what,
         )
         try:
             top = data["choices"][0]["logprobs"]["content"][0]["top_logprobs"]
         except (KeyError, IndexError, TypeError):
             return None
-        probs = {t["token"]: math.exp(t["logprob"]) for t in top if t["token"] in ("A", "B", "C")}
+        probs = {t["token"]: math.exp(t["logprob"]) for t in top if t["token"] in letters}
         total = sum(probs.values())
-        return round(probs.get("A", 0) / total, 3) if total else None
+        return {k: v / total for k, v in probs.items()} if total else None
+
+    async def priority(self, title: str | None, markdown: str | None, criteria: str | None = None) -> float | None:
+        """見出しと冒頭から重要度を判定し、「A（高い）」の確率（0〜1）を返す。"""
+        system = PRIORITY_PROMPT.format(criteria=criteria or DEFAULT_CRITERIA)
+        probs = await self._choose(system, title, markdown, "ABC", f"重要度の判定（{title}）")
+        return round(probs.get("A", 0), 3) if probs else None
+
+    async def classify(
+        self, title: str | None, markdown: str | None, options: list[tuple[str, str]]
+    ) -> tuple[int | None, float] | None:
+        """記事が options（(名前, 説明) の並び）のどれに当てはまるかを選ばせる。
+
+        (選んだ番号, その確率) を返す。「どれにも当てはまらない」を選んだら番号は None。判定に失敗したら None。
+        """
+        letters = CHOICE_LETTERS[: len(options)] + NONE_LETTER
+        lines = [f"{c}: {name}" + (f"（{desc}）" if desc else "") for c, (name, desc) in zip(letters, options)]
+        lines.append(f"{NONE_LETTER}: どれにも当てはまらない")
+        system = CLASSIFY_PROMPT.format(choices="\n".join(lines), letters="・".join(letters))
+        probs = await self._choose(system, title, markdown, letters, f"サブジャンルの判定（{title}）")
+        if not probs:
+            return None
+        best = max(probs, key=probs.get)
+        return (None if best == NONE_LETTER else letters.index(best)), round(probs[best], 3)
