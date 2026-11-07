@@ -204,7 +204,7 @@ RSSHub で取れるサイトは、[RSSHub](https://docs.rsshub.app/) を動か�
 
 ```sh
 docker run -d --name rsshub --restart unless-stopped -p 127.0.0.1:1200:1200 diygod/rsshub
-uv run kawarabanya feeds add "http://127.0.0.1:1200/famitsu/category/news" --genre game --no-discover
+uv run kawarabanya feeds add "http://127.0.0.1:1200/famitsu/category/news" --genre game
 ```
 
 フィードを移すには URL の行を別のジャンルに移して `genres apply` → `discord setup --apply`。書かれていないフィードの記事は投稿されない（保存はする）。
