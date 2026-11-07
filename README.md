@@ -2,10 +2,25 @@
 
 RSS を全文 Markdown で保存し、Discord に通知するパイプライン（開発中）。設計は [DESIGN.md](DESIGN.md) を参照。
 
-## 使い方（P1: フィード管理）
+## 使い方
+
+### 記事の取り込み
 
 ```sh
-uv run feedpipe import-opml sample.opml      # OPML を取り込む（-v で除外した重複を表示）
+uv run feedpipe run                          # 新着を取得し、全文 Markdown を archive/ に保存
+uv run feedpipe run --backfill 3             # 初回のフィードは、既読化に加えて新しい順に 3 件保存
+uv run feedpipe run --category tech --no-fulltext
+uv run feedpipe feeds option ID no_fulltext true   # このフィードは元記事を取りに行かない
+```
+
+- **初回のフィードは既存記事を既読にするだけ**で保存しない（通知の殺到を防ぐため）。2 回目以降に増えた記事が保存される。
+- 保存先: `archive/{カテゴリ}/{年}/{月}/{日付}_{タイトル}.md`（Front Matter 付き）
+- 本文は元記事から trafilatura で抽出し、取れない・短すぎる場合はフィード内の本文を使う（Front Matter の `source` に記録）。
+
+### フィード管理
+
+```sh
+uv run feedpipe [-v] import-opml sample.opml # OPML を取り込む（-v で除外した重複を表示）
 uv run feedpipe check                        # 死活チェック（301/308 で移転していれば URL を更新）
 uv run feedpipe check --disable-dead         # 404/410・ホスト消滅・非フィードは即無効化
 uv run feedpipe feeds list [--all|--disabled] [--category tech]

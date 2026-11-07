@@ -153,8 +153,7 @@ feedpipe check [--disable-dead]        # 全フィードの死活チェック
 feedpipe feeds list [--disabled] [--category tech]
 feedpipe feeds add URL --category tech
 feedpipe feeds enable|disable ID
-feedpipe run [--dry-run] [--category X] [--no-notify] [--no-summary]
-feedpipe run --init                    # 初回: 既読化のみ（通知しない）
+feedpipe run [--category X] [--backfill N] [--no-fulltext]   # 初回のフィードは既読化のみ
 feedpipe retry                         # 途中で失敗した記事（未保存・未要約・未通知）を再処理
 ```
 
@@ -196,7 +195,7 @@ game = "env:DISCORD_WEBHOOK_GAME"
 | フェーズ | 内容 | 完了の目安 |
 |---|---|---|
 | P1 ✅ | プロジェクト雛形、SQLite、**OPML 取り込み/書き出し**、`check`（死活チェック） | feedly.opml を取り込み、生きているフィードが判明する |
-| P2 | rss ソース、dedupe、fulltext、markdown 保存、`run --init` | 新着記事が全文 Markdown で保存される |
+| P2 ✅ | rss ソース、dedupe、fulltext、markdown 保存、初回の既読化（`run` が自動で行う） | 新着記事が全文 Markdown で保存される |
 | P3 | Discord 通知（item/digest、カテゴリ別 Webhook、`retry`） | 新着が Discord に届く |
 | P4 | llama-server + LFM2.5-1.2B-JP で要約、カテゴリ別 on/off | 要約付きで通知される |
 | P5 | cron / systemd timer による定期実行、ログ | 放置で動き続ける |

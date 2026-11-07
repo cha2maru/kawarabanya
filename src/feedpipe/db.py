@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,6 +30,8 @@ CREATE TABLE IF NOT EXISTS feeds (
     latest_entry_at TEXT,
     fail_count INTEGER NOT NULL DEFAULT 0,
     options TEXT,
+    -- 初回取り込み（既存記事の既読化）を済ませた日時。NULL なら次の run で既読化だけ行う
+    initialized_at TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -49,6 +52,20 @@ CREATE TABLE IF NOT EXISTS items (
 """
 
 
+# 既存の DB に後から足した列（CREATE TABLE IF NOT EXISTS では追加されないため）
+ADDED_COLUMNS = {
+    "feeds": {"latest_entry_at": "TEXT", "initialized_at": "TEXT"},
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, columns in ADDED_COLUMNS.items():
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -62,6 +79,7 @@ def connect(path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn
 
@@ -81,6 +99,13 @@ class Feed:
     last_success_at: str | None
     latest_entry_at: str | None
     fail_count: int
+    etag: str | None
+    last_modified: str | None
+    initialized_at: str | None
+    options: dict = field(default_factory=dict)
+
+    def option(self, name: str, default: object = None) -> object:
+        return self.options.get(name, default)
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Feed:
@@ -98,6 +123,10 @@ class Feed:
             last_success_at=row["last_success_at"],
             latest_entry_at=row["latest_entry_at"],
             fail_count=row["fail_count"],
+            etag=row["etag"],
+            last_modified=row["last_modified"],
+            initialized_at=row["initialized_at"],
+            options=json.loads(row["options"]) if row["options"] else {},
         )
 
 
@@ -156,3 +185,47 @@ def set_enabled(
         (int(enabled), None if enabled else reason, int(enabled), feed_id),
     )
     return cur.rowcount > 0
+
+
+def insert_item(
+    conn: sqlite3.Connection,
+    feed_id: int,
+    key: str,
+    url: str | None,
+    title: str | None,
+    published: str | None,
+    status: str,
+) -> int | None:
+    """記事を登録する。登録済み（既読）なら None を返す。"""
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO items (feed_id, key, url, title, published, fetched_at, status)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (feed_id, key, url, title, published, now_iso(), status),
+    )
+    return cur.lastrowid if cur.rowcount else None
+
+
+def update_item(conn: sqlite3.Connection, item_id: int, **values: object) -> None:
+    cols = ", ".join(f"{k} = ?" for k in values)
+    conn.execute(f"UPDATE items SET {cols} WHERE id = ?", (*values.values(), item_id))
+
+
+def mark_initialized(conn: sqlite3.Connection, feed_id: int) -> None:
+    conn.execute("UPDATE feeds SET initialized_at = ? WHERE id = ?", (now_iso(), feed_id))
+
+
+def set_option(conn: sqlite3.Connection, feed_id: int, name: str, value: object) -> bool:
+    """フィード個別の設定を変える。value が None なら削除する。"""
+    feed = get_feed(conn, feed_id)
+    if feed is None:
+        return False
+    options = dict(feed.options)
+    if value is None:
+        options.pop(name, None)
+    else:
+        options[name] = value
+    conn.execute(
+        "UPDATE feeds SET options = ? WHERE id = ?",
+        (json.dumps(options, ensure_ascii=False) if options else None, feed_id),
+    )
+    return True

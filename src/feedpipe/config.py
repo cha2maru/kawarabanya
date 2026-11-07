@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
@@ -24,20 +24,36 @@ class GeneralConfig:
 
 
 @dataclass
+class FulltextConfig:
+    enabled: bool = True
+    # 元記事から抽出した本文がこの文字数より短ければ、フィードの本文と長い方を使う
+    min_length: int = 200
+    include_images: bool = True
+
+
+@dataclass
 class Config:
-    general: GeneralConfig
+    general: GeneralConfig = field(default_factory=GeneralConfig)
+    fulltext: FulltextConfig = field(default_factory=FulltextConfig)
     path: Path | None = None
+
+
+def _section(cls: type, raw: dict, name: str, path: Path):
+    known = {f.name for f in fields(cls)}
+    unknown = set(raw) - known
+    if unknown:
+        raise ValueError(f"{path}: [{name}] に不明なキーがあります: {', '.join(sorted(unknown))}")
+    return cls(**raw)
 
 
 def load_config(path: Path | None = None) -> Config:
     path = path or DEFAULT_CONFIG_PATH
     if not path.exists():
-        return Config(general=GeneralConfig())
+        return Config()
     with path.open("rb") as f:
         raw = tomllib.load(f)
-    known = {f.name for f in fields(GeneralConfig)}
-    general_raw = raw.get("general", {})
-    unknown = set(general_raw) - known
-    if unknown:
-        raise ValueError(f"{path}: [general] に不明なキーがあります: {', '.join(sorted(unknown))}")
-    return Config(general=GeneralConfig(**general_raw), path=path)
+    return Config(
+        general=_section(GeneralConfig, raw.get("general", {}), "general", path),
+        fulltext=_section(FulltextConfig, raw.get("fulltext", {}), "fulltext", path),
+        path=path,
+    )

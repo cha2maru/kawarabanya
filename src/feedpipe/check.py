@@ -1,4 +1,4 @@
-"""フィードの死活チェック。"""
+"""フィードの取得と死活チェック。"""
 
 from __future__ import annotations
 
@@ -7,9 +7,8 @@ import socket
 import sqlite3
 import time
 from calendar import timegm
-from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from urllib.parse import urlsplit
@@ -19,6 +18,7 @@ import httpx
 
 from . import db
 from .config import GeneralConfig
+from .fetcher import Fetcher
 
 PERMANENT_REDIRECTS = {301, 308}
 
@@ -55,6 +55,11 @@ class CheckResult:
     latest_entry: datetime | None = None
     error: str | None = None
     elapsed: float = 0.0
+    # 以下は取得（run）で使う
+    not_modified: bool = False  # 304 が返った
+    parsed_entries: list = field(default_factory=list)
+    etag: str | None = None
+    last_modified: str | None = None
 
 
 def _is_name_not_found(exc: BaseException) -> bool:
@@ -90,11 +95,23 @@ def _classify_http(code: int) -> Status:
     return Status.HTTP_ERROR
 
 
-async def check_feed(client: httpx.AsyncClient, feed: db.Feed) -> CheckResult:
+async def check_feed(
+    fetcher: Fetcher, feed: db.Feed, *, conditional: bool = False
+) -> CheckResult:
+    """フィードを取得して状態を判定する。
+
+    conditional=True なら前回の ETag / Last-Modified を送り、304 なら not_modified になる。
+    """
     started = time.monotonic()
     result = CheckResult(feed=feed, status=Status.NETWORK)
+    headers: dict[str, str] = {}
+    if conditional:
+        if feed.etag:
+            headers["If-None-Match"] = feed.etag
+        if feed.last_modified:
+            headers["If-Modified-Since"] = feed.last_modified
     try:
-        resp = await client.get(feed.url)
+        resp = await fetcher.get(feed.url, headers=headers)
     except httpx.TooManyRedirects as e:
         result.error = f"リダイレクトが多すぎます: {e}"
     except httpx.TimeoutException:
@@ -107,7 +124,10 @@ async def check_feed(client: httpx.AsyncClient, feed: db.Feed) -> CheckResult:
             result.error = f"{type(e).__name__}: {e}"
     else:
         result.http_status = resp.status_code
-        if resp.is_success:
+        if resp.status_code == 304:
+            result.status = Status.OK
+            result.not_modified = True
+        elif resp.is_success:
             # 移転先が正常に応答した場合だけ URL を更新対象にする
             if resp.history and all(h.status_code in PERMANENT_REDIRECTS for h in resp.history):
                 final = str(resp.url)
@@ -117,8 +137,11 @@ async def check_feed(client: httpx.AsyncClient, feed: db.Feed) -> CheckResult:
             if parsed.version:
                 result.status = Status.OK
                 result.feed_title = parsed.feed.get("title")
+                result.parsed_entries = parsed.entries
                 result.entries = len(parsed.entries)
                 result.latest_entry = _latest_entry(parsed.entries)
+                result.etag = resp.headers.get("etag")
+                result.last_modified = resp.headers.get("last-modified")
             else:
                 result.status = Status.NOT_FEED
                 result.error = f"フィードではありません（{resp.headers.get('content-type', '?')}）"
@@ -136,23 +159,10 @@ async def check_feeds(
     transport: httpx.AsyncBaseTransport | None = None,
     on_result: Callable[[CheckResult], None] | None = None,
 ) -> list[CheckResult]:
-    """全体の同時接続数と、ホストごとの同時接続数を制限しながらチェックする。"""
-    global_sem = asyncio.Semaphore(cfg.concurrency)
-    host_sems: defaultdict[str, asyncio.Semaphore] = defaultdict(
-        lambda: asyncio.Semaphore(cfg.per_host)
-    )
-
-    async with httpx.AsyncClient(
-        transport=transport,
-        follow_redirects=True,
-        timeout=cfg.timeout,
-        headers={"User-Agent": cfg.user_agent},
-    ) as client:
+    async with Fetcher(cfg, transport) as fetcher:
 
         async def one(feed: db.Feed) -> CheckResult:
-            host = urlsplit(feed.url).hostname or ""
-            async with global_sem, host_sems[host]:
-                r = await check_feed(client, feed)
+            r = await check_feed(fetcher, feed)
             if on_result:
                 on_result(r)
             return r
@@ -173,8 +183,12 @@ def apply_results(
     *,
     max_failures: int,
     disable_dead: bool = False,
+    store_cache: bool = False,
 ) -> ApplyStats:
-    """チェック結果を DB に反映する（URL 更新・失敗回数・自動無効化）。"""
+    """チェック結果を DB に反映する（URL 更新・失敗回数・自動無効化）。
+
+    store_cache=True なら ETag / Last-Modified を保存する（記事を取り込んだ run のときだけ）。
+    """
     stats = ApplyStats()
     now = db.now_iso()
     with conn:
@@ -192,7 +206,8 @@ def apply_results(
             if r.status.is_ok:
                 conn.execute(
                     "UPDATE feeds SET last_fetched_at = ?, last_success_at = ?, last_status = ?,"
-                    " last_error = NULL, fail_count = 0, latest_entry_at = ?,"
+                    " last_error = NULL, fail_count = 0,"
+                    " latest_entry_at = COALESCE(?, latest_entry_at),"
                     " title = COALESCE(title, ?) WHERE id = ?",
                     (
                         now,
@@ -203,6 +218,11 @@ def apply_results(
                         f.id,
                     ),
                 )
+                if store_cache and not r.not_modified:
+                    conn.execute(
+                        "UPDATE feeds SET etag = ?, last_modified = ? WHERE id = ?",
+                        (r.etag, r.last_modified, f.id),
+                    )
                 continue
 
             fail_count = f.fail_count + 1
