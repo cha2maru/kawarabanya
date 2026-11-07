@@ -242,3 +242,51 @@ def test_default_reaction_and_like_sync():
     assert likes == {"a": 2, "b": 0, "gone": None}
     assert notify.sync_likes(conn, client, interval_hours=6) == 0  # 6 時間以内は再確認しない
     assert notify.sync_likes(conn, client, interval_hours=0) == 3
+
+
+def test_digest_render_and_post(tmp_path):
+    import asyncio
+    from datetime import datetime
+
+    from feedpipe import digest
+
+    fake, client, conn = setup()
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn, ["tech"]), "feedpipe")
+    apply_plan(client, conn, plan, "feedpipe")
+    feed_id = db.list_feeds(conn, category="tech")[0].id
+    with conn:
+        for key, title, prio, likes in [("a", "小ネタ", 0.1, None), ("b", "大事件 [速報]", 0.95, 2), ("c", "判定なし", None, None)]:
+            iid = db.insert_item(conn, feed_id, key, None, title, ago(hours=2), "notified")
+            db.update_item(conn, iid, notified_at=ago(hours=2), discord_thread_id=f"t-{key}", priority=prio, likes=likes)
+
+    now = datetime.now(UTC)
+    content = asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24,
+                                               transport=httpx.MockTransport(fake.handler)))
+    lines = content.splitlines()
+    assert lines[0] == "**注目の記事**"
+    assert lines[1] == "- [大事件 ［速報］](https://discord.com/channels/1/t-b)  👍2"  # 重要度の高い順
+    assert lines[2] == "- [小ネタ](https://discord.com/channels/1/t-a)"
+    assert lines[3] == "ほか 1 件"
+    assert fake.posts[-1]["thread_name"].endswith("のまとめ（3 件）")
+    # 同じ日は二度投稿しない
+    assert asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24,
+                                               transport=httpx.MockTransport(fake.handler))) is None
+
+    many = [digest.DigestItem(f"記事{i}" * 20, f"t{i}", 0.5, None) for i in range(50)]
+    text = digest.render("傾向。", many, "1", top=50)
+    assert len(text) <= digest.MAX_CONTENT and text.endswith("件") and text.startswith("傾向。")
+
+
+def test_notify_writes_discord_link(tmp_path):
+    fake, client, conn = setup()
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn, ["tech"]), "feedpipe")
+    apply_plan(client, conn, plan, "feedpipe")
+    md = tmp_path / "a.md"
+    md.write_text('---\ntitle: "x"\n---\n\n# x\n\n本文\n')
+    feed_id = db.list_feeds(conn, category="tech")[0].id
+    with conn:
+        iid = db.insert_item(conn, feed_id, "a", "https://a", "x", ago(hours=1), "saved")
+        db.update_item(conn, iid, md_path=str(md))
+    fake.rate_limited_once = True
+    notify.notify_pending(conn, limit=5, max_age_days=3, transport=httpx.MockTransport(fake.handler), interval=0)
+    assert 'discord: "https://discord.com/channels/1/thread1"' in md.read_text()

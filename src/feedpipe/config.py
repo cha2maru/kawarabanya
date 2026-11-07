@@ -86,6 +86,16 @@ class DiscordConfig:
 
 
 @dataclass
+class DigestConfig:
+    enabled: bool = True
+    # この時刻（ローカル時刻の時）以降の最初の定期実行で、その日のまとめを投稿する
+    hour: int = 21
+    # まとめに載せる直近の時間数と、リンクを並べる件数
+    window_hours: int = 24
+    top: int = 10
+
+
+@dataclass
 class BotConfig:
     # 常駐中に `feedpipe run` を実行する間隔（分）。0 なら実行しない
     run_interval_minutes: int = 60
@@ -102,6 +112,7 @@ class Config:
     summarize: SummarizeConfig = field(default_factory=SummarizeConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
     bot: BotConfig = field(default_factory=BotConfig)
+    digest: DigestConfig = field(default_factory=DigestConfig)
     path: Path | None = None
 
 
@@ -125,5 +136,6 @@ def load_config(path: Path | None = None) -> Config:
         summarize=_section(SummarizeConfig, raw.get("summarize", {}), "summarize", path),
         discord=_section(DiscordConfig, raw.get("discord", {}), "discord", path),
         bot=_section(BotConfig, raw.get("bot", {}), "bot", path),
+        digest=_section(DigestConfig, raw.get("digest", {}), "digest", path),
         path=path,
     )

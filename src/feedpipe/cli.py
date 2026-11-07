@@ -218,7 +218,8 @@ def cmd_interests(cfg: Config, args: argparse.Namespace) -> int:
     conn = _open_db(cfg, args)
     since = (datetime.now(UTC) - timedelta(days=args.days)).isoformat(timespec="seconds")
     rows = conn.execute(
-        "SELECT f.category, f.title AS feed, i.title, i.likes FROM items i JOIN feeds f ON f.id = i.feed_id"
+        "SELECT f.category, f.title AS feed, i.title, i.likes, i.discord_thread_id FROM items i"
+        " JOIN feeds f ON f.id = i.feed_id"
         " WHERE i.status = 'notified' AND i.notified_at >= ?",
         (since,),
     ).fetchall()
@@ -243,9 +244,12 @@ def cmd_interests(cfg: Config, args: argparse.Namespace) -> int:
     table("feed", "フィード", limit=args.top)
     liked_titles = [r for r in rows if r["likes"]][-args.top:]
     if liked_titles:
+        guild = conn.execute("SELECT guild_id FROM discord_channels LIMIT 1").fetchone()
         print("\n最近 👍 した記事")
         for r in reversed(liked_titles):
             print(f"  [{r['category']}] {r['title']}")
+            if guild and r["discord_thread_id"]:
+                print(f"      {discord_api.post_url(guild[0], r['discord_thread_id'])}")
     return 0
 
 
@@ -516,6 +520,44 @@ def cmd_genres_apply(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+# --- digest ----------------------------------------------------------------
+
+
+def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
+    from datetime import UTC as _UTC
+
+    from . import digest
+
+    conn = _open_db(cfg, args)
+    now = datetime.now(_UTC)
+    if args.due and not (cfg.digest.enabled and digest.is_due(now, cfg.digest.hour)):
+        return 0
+    defs = _load_genres(cfg)
+    genre_list = args.genre or (
+        [g.path for g in defs.values() if not g.is_sub] if defs
+        else [r[0] for r in conn.execute("SELECT category FROM discord_channels ORDER BY category")]
+    )
+
+    async def go():
+        async with Summarizer(cfg.summarize) as summarizer:
+            out = {}
+            for g in genre_list:
+                out[g] = await digest.post_digest(
+                    conn, summarizer, g, now=now, top=cfg.digest.top,
+                    window_hours=cfg.digest.window_hours, dry_run=args.dry_run,
+                )
+            return out
+
+    results = asyncio.run(go())
+    posted = [g for g, c in results.items() if c]
+    for g in posted:
+        if args.dry_run:
+            print(f"===== {g} =====\n{results[g]}\n")
+    if posted or not args.due:
+        print(f"まとめ: {'表示' if args.dry_run else '投稿'} {len(posted)} 件（{', '.join(posted) or 'なし'}）")
+    return 0
+
+
 # --- bot -------------------------------------------------------------------
 
 
@@ -576,6 +618,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--category", help="このカテゴリだけ")
     s.add_argument("--dry-run", action="store_true", help="送らずに内容を表示する")
     s.set_defaults(func=cmd_notify)
+
+    s = sub.add_parser("digest", help="ジャンルごとの 1 日のまとめを投稿する（その日に投稿済みのジャンルは飛ばす）")
+    s.add_argument("--genre", nargs="+", help="このジャンルだけ")
+    s.add_argument("--due", action="store_true", help="[digest] hour を過ぎていなければ何もしない（Bot の定期実行用）")
+    s.add_argument("--dry-run", action="store_true", help="投稿せずに内容を表示する")
+    s.set_defaults(func=cmd_digest)
 
     s = sub.add_parser("bot", help="常駐 Bot を起動する（定期的に run を実行）")
     s.set_defaults(func=cmd_bot)

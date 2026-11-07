@@ -96,13 +96,17 @@ def read_body(path: str | Path) -> str:
     return text.strip()
 
 
-def add_summary(path: str | Path, summary: str) -> None:
-    """Front Matter に summary を書き込む（既にあれば置き換える）。"""
+def set_field(path: str | Path, key: str, value: str) -> None:
+    """Front Matter の key を書き込む（既にあれば置き換える）。"""
     path = Path(path)
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
         return
     fm, sep, rest = text[4:].partition("\n---\n")
-    lines = [ln for ln in fm.split("\n") if not ln.startswith("summary: ")]
-    lines.append(f"summary: {_yaml_str(summary)}")
+    lines = [ln for ln in fm.split("\n") if not ln.startswith(f"{key}: ")]
+    lines.append(f"{key}: {_yaml_str(value)}")
     path.write_text("---\n" + "\n".join(lines) + sep + rest, encoding="utf-8")
+
+
+def add_summary(path: str | Path, summary: str) -> None:
+    set_field(path, "summary", summary)

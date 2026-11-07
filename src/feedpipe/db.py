@@ -50,6 +50,15 @@ CREATE TABLE IF NOT EXISTS items (
     UNIQUE (feed_id, key)
 );
 
+-- 投稿済みの 1 日のまとめ（同じ日に二重に投稿しないため）
+CREATE TABLE IF NOT EXISTS digests (
+    genre TEXT NOT NULL,
+    day TEXT NOT NULL,          -- ローカル日付 YYYY-MM-DD
+    thread_id TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (genre, day)
+);
+
 -- feedpipe のカテゴリ → Discord のチャンネルと Webhook
 CREATE TABLE IF NOT EXISTS discord_channels (
     category TEXT PRIMARY KEY,

@@ -1,6 +1,6 @@
 # feedpipe 設計（v0.2）
 
-最終更新: 2026-11-07（重要度の判定を追加）
+最終更新: 2026-11-07（1 日のまとめ・投稿へのリンクを追加）
 
 ## 1. 目的と方針
 
@@ -15,7 +15,7 @@
 systemd --user: feedpipe-bot.service
 └─ feedpipe bot（常駐。discord.py で Gateway に接続）
    ├─ 子プロセス: scripts/llama-server.sh（llama.cpp + Qwen3.5-4B、OpenAI 互換 API :8080）
-   └─ 60 分ごとに子プロセス: feedpipe run
+   └─ 60 分ごとに子プロセス: feedpipe run → feedpipe digest --due（21 時以降に 1 日 1 回）
         取得 ─▶ 既読判定 ─▶ 全文抽出 ─▶ Markdown 保存 ─▶ 重要度判定 ─▶ 要約 ─▶ 投稿 ─▶ 👍 集計
         (httpx)  (SQLite)   (trafilatura) (archive/)     (LLM 1 トークン) (LLM)  (Webhook) (Bot API)
 
@@ -40,7 +40,7 @@ systemd --user: feedpipe-bot.service
 - 条件付き GET（ETag / Last-Modified）。全体 16・同一ホスト 2 の同時接続制限。
 - **初回のフィードは既存記事を既読にするだけ**（`--backfill N` で新しい順に N 件だけ保存）。フィード内の重複記事は先に除く。
 - 本文は元記事から trafilatura で Markdown 抽出。取れない・短すぎる（200 字未満）ときはフィードの本文と長い方を使い、Front Matter の `source` に記録する。
-- 保存先: `archive/{カテゴリ}/{年}/{月}/{日付}_{タイトル}.md`（Front Matter: title / url / feed / category / published / fetched / source / summary）。
+- 保存先: `archive/{カテゴリ}/{年}/{月}/{日付}_{タイトル}.md`（Front Matter: title / url / feed / category / published / fetched / source / summary / discord＝投稿へのリンク）。
 
 ### 3.3 重要度の判定と要約
 - **公開から 3 日以内の記事だけ**対象にする（投稿しない古い記事に CPU を使わない）。
@@ -55,7 +55,14 @@ systemd --user: feedpipe-bot.service
 - **1 記事 = 1 投稿**: スレッド名 = 記事タイトル、表示名 = フィード名、本文 = 要約（なければ本文の先頭 200 字）＋公開日時＋URL。メンションは無効化。
 - 公開から 3 日を過ぎた未通知の記事は投稿せず `stale` にする。1 回の実行で投稿するのは 30 件まで。
 - `discord setup` はジャンル構成に合わせてフォーラム・タグ・Webhook・既定リアクションを揃える（何度実行しても同じ結果）。`--prune` で対応しないフォーラムを削除する。
+- 投稿へのリンク（`https://discord.com/channels/{サーバー}/{スレッド}`）は、Markdown の Front Matter（`discord`）、1 日のまとめ、`interests` に載せる。
 - **👍 は「興味あり」の印**として集計するだけで、投稿の取捨選択には使わない（押されていない投稿は「見ていない」可能性があるので、興味なしとは扱わない）。投稿から 7 日以内の記事を 6 時間ごとに確認する。
+
+### 3.5 1 日のまとめ（digest）
+- 各ジャンルのフォーラムに「📰 MM/DD のまとめ（N 件）」を 1 日 1 回投稿する（`[digest] hour` 以降の最初の定期実行で。投稿済みの日は `digests` テーブルで飛ばす）。
+- 本文 = LLM が直近 24 時間の見出しから書く「今日の傾向」（2 文）＋ **重要度の高い順の投稿へのリンク**（上位 10 件、👍 の数付き）＋「ほか N 件」。2,000 字に収める。
+- 「主な話題」を LLM に箇条書きさせる案は、関係のない話題を 1 行に混ぜたので採らず、一覧はコードで作る。
+- run の後に続けて実行する（要約サーバーを run と取り合わないため）。
 
 ## 4. データ（SQLite）
 
@@ -63,7 +70,8 @@ systemd --user: feedpipe-bot.service
 |---|---|
 | `feeds` | url（移転で更新）/ original_url / title / category（= ジャンルのパス）/ enabled / disabled_reason / etag / last_modified / last_status / fail_count / latest_entry_at / initialized_at / options（JSON） |
 | `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ notified_at / discord_thread_id / likes / likes_checked_at |
-| `discord_channels` | category（トップレベルのジャンル）/ channel_id / webhook_url / tags（JSON: `feed:<id>` と `sub:<パス>` → タグ ID） |
+| `discord_channels` | category（トップレベルのジャンル）/ guild_id / channel_id / webhook_url / tags（JSON: `feed:<id>` と `sub:<パス>` → タグ ID） |
+| `digests` | genre / day（ローカル日付）/ thread_id — 投稿済みのまとめ |
 
 `items.status`: `seen`（初回の既読化）→ `new` → `saved` → `notified`。投稿しなかったものは `stale`、失敗は `error`。状態を記録するので、途中で落ちても次の実行で続きから処理する。列の追加は `db.ADDED_COLUMNS` で自動的に行う。
 
@@ -104,7 +112,7 @@ LFM（軽さ優先で最初に選んだ）は事実の誤りがあったため�
 
 ## 7. 今後の候補・未決事項
 
-1. **1 日のまとめ（ジャンルごとのダイジェスト）**: 見出しの一覧から「今日の傾向」と「主な話題 5 つ」を作る試作中。1 日 100 件を超えると全件の一覧は載せられない（Discord は 1 メッセージ 2,000 字、LLM の入力は 8,192 トークン）。
+1. **まとめの「今日の傾向」**: 見出しだけから書くので、芸能などの話題に引っ張られることがある（ジャンルごとの判定基準を書けば一覧の並びは改善する）。
 2. **重要度の基準の調整**: 0.8 は tech の 1 日分で決めた仮の値。👍 がたまったら、👍 の付いた記事の priority と照らして調整する。tech 以外のジャンルの判定基準も書く。
 3. **llama-server のスレッド数**: 8 → 16 で読み込みが速くなるかは未測定。
 4. **スラッシュコマンド**: `/feed add` など。次に作る機能が決まってから。

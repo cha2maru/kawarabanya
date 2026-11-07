@@ -90,6 +90,11 @@ class DiscordClient:
         return self.request("POST", f"/channels/{channel_id}/webhooks", {"name": name})
 
 
+def post_url(guild_id: str, thread_id: str) -> str:
+    """フォーラム投稿（スレッド）へのリンク。"""
+    return f"https://discord.com/channels/{guild_id}/{thread_id}"
+
+
 def invite_url(application_id: str) -> str:
     return (
         "https://discord.com/oauth2/authorize"

@@ -19,6 +19,7 @@ from .discord_api import (
     DiscordClient,
     DiscordError,
     count_likes,
+    post_url,
     send_webhook,
 )
 from .item import is_recent
@@ -49,6 +50,7 @@ class Pending:
     summary: str | None
     md_path: str | None
     webhook_url: str
+    guild_id: str | None
     tags: dict[str, str]
 
 
@@ -66,7 +68,7 @@ def pending_items(conn: sqlite3.Connection, category: str | None = None) -> tupl
     """通知待ちの記事と、送り先がないため送れない記事の数を返す。"""
     rows = conn.execute(
         "SELECT i.id, i.feed_id, f.title AS feed_title, f.category, i.title, i.url, i.published, i.fetched_at, i.summary,"
-        " i.md_path, d.webhook_url, d.tags"
+        " i.md_path, d.webhook_url, d.guild_id, d.tags"
         " FROM items i JOIN feeds f ON f.id = i.feed_id"
         # フォーラムはトップレベルのジャンル（"news/world" なら "news"）ごと
         " LEFT JOIN discord_channels d ON d.category = COALESCE(" + TOP + ", ?)"
@@ -87,6 +89,7 @@ def pending_items(conn: sqlite3.Connection, category: str | None = None) -> tupl
             summary=r["summary"],
             md_path=r["md_path"],
             webhook_url=r["webhook_url"],
+            guild_id=r["guild_id"],
             tags=json.loads(r["tags"]) if r["tags"] else {},
         )
         for r in rows
@@ -179,15 +182,14 @@ def notify_pending(
             stats.failed += 1
             stats.errors.append(f"{p.title}: {e}")
             continue
+        thread_id = (msg or {}).get("channel_id")
         with conn:
             db.update_item(
-                conn,
-                p.item_id,
-                status="notified",
-                notified_at=db.now_iso(),
-                discord_thread_id=(msg or {}).get("channel_id"),
-                error=None,
+                conn, p.item_id, status="notified", notified_at=db.now_iso(), discord_thread_id=thread_id, error=None
             )
+        if thread_id and p.guild_id and p.md_path and Path(p.md_path).exists():
+            # 保存した記事から Discord の投稿に飛べるようにする
+            markdown.set_field(p.md_path, "discord", post_url(p.guild_id, thread_id))
         stats.sent += 1
     return stats
 

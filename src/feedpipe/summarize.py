@@ -32,6 +32,10 @@ DEFAULT_CRITERIA = (
     "C: 低い（セール・広告・小ネタ・ランキング）"
 )
 LEAD_CHARS = 200
+TREND_PROMPT = (
+    "あなたはニュース編集者です。今日のニュース見出しの一覧を読み、"
+    "全体として目立つ傾向を日本語2文以内で述べてください。一覧にないことは書かないでください。"
+)
 
 CJK = r"぀-ヿ㐀-鿿！-｠"
 
@@ -111,6 +115,28 @@ class Summarizer:
                 "max_tokens": self.cfg.max_tokens,
             },
             f"要約（{title}）",
+        )
+        if data is None:
+            return None
+        try:
+            return clean_output(data["choices"][0]["message"]["content"]) or None
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    async def trend(self, titles: list[str]) -> str | None:
+        """見出しの一覧から、全体の傾向を 2 文で書かせる。"""
+        if not titles:
+            return None
+        data = await self._chat(
+            {
+                "messages": [
+                    {"role": "system", "content": TREND_PROMPT},
+                    {"role": "user", "content": "\n".join(f"- {t}" for t in titles)},
+                ],
+                "temperature": self.cfg.temperature,
+                "max_tokens": 200,
+            },
+            "傾向のまとめ",
         )
         if data is None:
             return None

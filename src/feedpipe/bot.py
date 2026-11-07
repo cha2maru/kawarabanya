@@ -40,8 +40,16 @@ class Bot(discord.Client):
 
     @tasks.loop(minutes=60)
     async def periodic_run(self) -> None:
-        # 要約で数十分かかることがあるので、イベントループを止めないよう別プロセスで実行する
-        cmd = [sys.executable, "-m", "feedpipe", *self.config_args, "run", "-q", *self.cfg.bot.run_args]
+        await self._feedpipe("run", "-q", *self.cfg.bot.run_args)
+        # 要約サーバーを run と取り合わないよう、run の後に続けて実行する
+        await self._feedpipe("digest", "--due")
+
+    async def _feedpipe(self, *args: str) -> None:
+        """feedpipe のサブコマンドを別プロセスで実行し、出力をログに流す。
+
+        要約で数十分かかることがあるので、イベントループを止めないよう別プロセスにする。
+        """
+        cmd = [sys.executable, "-m", "feedpipe", *self.config_args, *args]
         log.info("定期実行: %s", shlex.join(cmd[1:]))
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
@@ -49,9 +57,9 @@ class Bot(discord.Client):
         out, _ = await proc.communicate()
         for line in out.decode(errors="replace").splitlines():
             if line.strip():
-                log.info("run: %s", line)
+                log.info("%s: %s", args[0], line)
         if proc.returncode:
-            log.warning("run が終了コード %s で終わりました", proc.returncode)
+            log.warning("%s が終了コード %s で終わりました", args[0], proc.returncode)
 
     @periodic_run.before_loop
     async def _wait_ready(self) -> None:

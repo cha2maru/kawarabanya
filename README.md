@@ -33,11 +33,12 @@ journalctl --user -u feedpipe-bot -f         # ログ
 
 | コマンド | 内容 |
 |---|---|
-| `bot` | 常駐 Bot。60 分ごとに `run` を別プロセスで実行する |
+| `bot` | 常駐 Bot。60 分ごとに `run` と `digest --due` を別プロセスで実行する |
+| `digest [--genre X] [--due] [--dry-run]` | ジャンルごとの 1 日のまとめ（今日の傾向＋重要度順の投稿へのリンク）を投稿する |
 | `run [--category X] [--backfill N] [--no-fulltext] [--no-summary] [--no-notify]` | 取得 → 保存 → 重要度の判定 → 要約 → 投稿 → 👍 集計。初回のフィードは既存記事を既読にするだけ |
 | `summarize` | 保存済み・未投稿で要約のない最近の記事を、重要度を判定してから要約する |
 | `notify [--category X] [--limit N] [--dry-run]` | 保存済み・未投稿の記事を投稿する |
-| `likes` / `interests [--days 30]` | 👍 の数を取得する / ジャンル・フィード別の 👍 の割合を表示する |
+| `likes` / `interests [--days 30]` | 👍 の数を取得する / ジャンル・フィード別の 👍 の割合と、最近 👍 した記事（投稿へのリンク付き）を表示する |
 | `import-opml FILE` / `export-opml FILE [--all]` | OPML の取り込み・書き出し |
 | `check [--disable-dead]` | 死活チェック（移転していれば URL を更新） |
 | `feeds list\|add\|enable\|disable\|option` | フィードの管理（例: `feeds option ID no_fulltext true`） |
@@ -67,6 +68,8 @@ feeds = [ ... ]
 
 フィードを移すには URL の行を別のジャンルに移して `genres apply` → `discord setup --apply`。書かれていないフィードの記事は投稿されない（保存はする）。
 
+保存した Markdown の Front Matter には、投稿後に Discord の投稿へのリンク（`discord:`）が入る。
+
 ### config.toml（git 管理外。すべて省略可）
 
 ```toml
@@ -89,6 +92,12 @@ priority_threshold = 0.8     # 重要度（A の確率）がこれ以上の記�
 nsfw = true                  # フォーラムを年齢制限にする
 max_age_days = 3             # これより古い記事は投稿しない
 max_posts_per_run = 30
+
+[digest]
+enabled = true
+hour = 21                    # この時刻以降の最初の定期実行で、その日のまとめを投稿する
+window_hours = 24
+top = 10                     # まとめに並べる投稿へのリンクの数
 
 [bot]
 run_interval_minutes = 60    # 0 なら定期実行しない
