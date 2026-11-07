@@ -1,5 +1,5 @@
 import asyncio
-import time
+from datetime import datetime
 
 import httpx
 import pytest
@@ -32,7 +32,7 @@ def test_extract_list_items():
         "https://example.com/shop/item/9",
     ]  # 同じ URL は 1 件、リンクのない塊は飛ばす
     assert [e["title"] for e in es] == ["新作 [予約]", "発売日決定", "商品"]
-    assert time.strftime("%Y-%m-%d %H", es[1]["published_parsed"]) in ("2026-10-20 15", "2026-10-21 00")  # JST 0 時
+    assert es[1]["published_parsed"] == datetime(2026, 10, 21).astimezone().utctimetuple()  # ローカル時刻の 0 時
     assert es[2]["published_parsed"] is None
 
 
