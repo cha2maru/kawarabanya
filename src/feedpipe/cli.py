@@ -271,7 +271,7 @@ def _discord_client(cfg: Config) -> discord_api.DiscordClient:
 def cmd_discord_invite_url(cfg: Config, args: argparse.Namespace) -> int:
     client = _discord_client(cfg)
     print(discord_api.invite_url(client.application_id()))
-    print("権限: チャンネルを見る / メッセージを送信 / チャンネルの管理 / Webhook の管理", file=sys.stderr)
+    print("権限: チャンネルを見る / チャンネルの管理 / ウェブフックの管理", file=sys.stderr)
     return 0
 
 
