@@ -270,3 +270,15 @@ def test_title_tags_removed():
     conn = db.connect(":memory:")
     feed = db.get_feed(conn, db.insert_feed(conn, "https://x.example/feed", None, None, None))
     assert from_entry(feed, {"title": "『<b>アークナイツ</b>』新情報", "link": "https://x.example/1"}).title == "『アークナイツ』新情報"
+
+
+def test_duplicates_skipped(tmp_path):
+    conn, cfg = make(tmp_path)
+    db.insert_feed(conn, "https://site.example/feed?cat=main", "テスト（主要）", None, "news")  # 同じ記事を載せる別フィード
+    site = Site()
+    site.items = [("a", "記事A"), ("b", "記事A")]  # b は URL は違うが本文が同じ
+    reports = run(conn, cfg, site, backfill=2)
+    assert sum(len(r.saved) for r in reports) == 1 and sum(r.duplicates for r in reports) == 3
+    statuses = sorted(r[0] for r in conn.execute("SELECT status FROM items"))
+    assert statuses == ["duplicate", "duplicate", "duplicate", "saved"]
+    assert len(list((tmp_path / "archive").rglob("*.md"))) == 1

@@ -67,6 +67,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 - 条件付き GET（ETag / Last-Modified）。全体 16・同一ホスト 2 の同時接続制限。
 - **初回のフィードは既存記事を既読にするだけ**（`--backfill N` で新しい順に N 件だけ保存）。フィード内の重複記事は先に除く。
 - 本文は元記事から trafilatura で Markdown 抽出。取れない・短すぎる（200 字未満）ときはフィードの本文と長い方を使い、Front Matter の `source` に記録する。
+- **同じ記事は 1 件にまとめる**: 保存の前に、同じ URL か同じ本文（空白を除いた SHA-1、200 字以上のときだけ）の記事が保存済みなら、保存も投稿もせず `duplicate` にする（Yahoo!ニュース・トピックスは同じ記事を「主要」と「国内」などの複数のフィードに載せる。11/07 の投稿 176 件中 9 件が重複だった）。まとめは投稿した記事から作るので、まとめにも 1 件だけ載る。
 - 保存先: `archive/{カテゴリ}/{年}/{月}/{日付}_{タイトル}.md`（Front Matter: title / url / feed / category / published / fetched / source / summary / discord＝投稿へのリンク）。
 
 ### 3.3 重要度の判定と要約
@@ -99,11 +100,11 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 | テーブル | 主な列 |
 |---|---|
 | `feeds` | url（移転で更新）/ original_url / title / category（= ジャンルのパス）/ enabled / disabled_reason / etag / last_modified / last_status / fail_count / latest_entry_at / initialized_at / options（JSON） |
-| `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ subgenre（LLM が判定したサブジャンル）/ notified_at / discord_thread_id / likes / likes_checked_at |
+| `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ subgenre（LLM が判定したサブジャンル）/ content_hash（重複判定用の本文のハッシュ）/ notified_at / discord_thread_id / likes / likes_checked_at |
 | `discord_channels` | category（トップレベルのジャンル。まとめの投稿先は `#digest`）/ guild_id / channel_id / webhook_url / tags（JSON: `feed:<id>` と `sub:<パス>` → タグ ID） |
 | `digests` | genre / day（ローカル日付）/ thread_id（投稿したメッセージの ID）— 投稿済みのまとめ |
 
-`items.status`: `seen`（初回の既読化）→ `new` → `saved` → `notified`。投稿しなかったものは `stale`、失敗は `error`。状態を記録するので、途中で落ちても次の実行で続きから処理する。列の追加は `db.ADDED_COLUMNS` で自動的に行う。
+`items.status`: `seen`（初回の既読化）→ `new` → `saved` → `notified`。投稿しなかったものは `stale`、同じ記事が保存済みだったものは `duplicate`（error に元の記事の id）、失敗は `error`。状態を記録するので、途中で落ちても次の実行で続きから処理する。列の追加は `db.ADDED_COLUMNS` で自動的に行う。
 
 ## 5. 技術選定
 

@@ -118,7 +118,8 @@ def _print_report(r: FeedReport) -> None:
         print(f"[INIT] {r.feed.id:>4} {title} 既存 {r.check.entries} 件を既読化"
               + (f"（うち {len(r.saved)} 件を保存）" if r.saved else ""), flush=True)
     elif r.new:
-        print(f"[NEW ] {r.feed.id:>4} {title} 新着 {r.new} 件 / 保存 {len(r.saved)} 件", flush=True)
+        print(f"[NEW ] {r.feed.id:>4} {title} 新着 {r.new} 件 / 保存 {len(r.saved)} 件"
+              + (f" / 重複 {r.duplicates} 件" if r.duplicates else ""), flush=True)
     for it in r.saved:
         print(f"         + [{it.content_source}{' 要約' if it.summary else ''}] {it.title}")
     for it, err in r.errors:
@@ -150,8 +151,9 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
     inited = sum(1 for r in reports if r.initialized)
     saved = sum(len(r.saved) for r in reports)
     errors = sum(len(r.errors) for r in reports)
+    dups = sum(r.duplicates for r in reports)
     print(
-        f"\n結果: 保存 {saved} 件 / 記事エラー {errors} 件"
+        f"\n結果: 保存 {saved} 件 / 重複 {dups} 件 / 記事エラー {errors} 件"
         f"（フィード: 初回 {inited} / 更新なし {unchanged} / 取得失敗 {failed}）"
     )
     rc = 1 if errors else 0

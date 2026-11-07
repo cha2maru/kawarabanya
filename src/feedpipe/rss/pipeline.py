@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import re
 import sqlite3
 from collections import Counter
 from collections.abc import Callable
@@ -35,6 +37,7 @@ class FeedReport:
     initialized: bool = False  # 今回が初回（既存記事を既読化した）
     new: int = 0  # 未読だった記事の数
     saved: list[Item] = field(default_factory=list)
+    duplicates: int = 0  # 同じ URL・同じ本文の記事が保存済みだったため飛ばした数
     errors: list[tuple[Item, str]] = field(default_factory=list)
 
 
@@ -90,6 +93,12 @@ async def _process(
     try:
         await fill_content(fetcher, item, cfg.fulltext)
         fetched = datetime.now(UTC)
+        content_hash = _content_hash(item.content_md)
+        if dup := _find_duplicate(conn, item, content_hash):
+            with conn:
+                db.update_item(conn, item.id, status="duplicate", content_hash=content_hash, error=f"item {dup}")
+            report.duplicates += 1
+            return
         path = archive.save(Path(cfg.general.archive_dir), item, fetched)
     except Exception as e:  # 1 記事の失敗で全体を止めない
         log.exception("記事の処理に失敗: %s", item.url)
@@ -98,12 +107,32 @@ async def _process(
         report.errors.append((item, str(e)))
         return
     with conn:
-        db.update_item(conn, item.id, status="saved", md_path=str(path), error=None)
+        db.update_item(conn, item.id, status="saved", md_path=str(path), content_hash=content_hash, error=None)
     report.saved.append(item)
 
     if summarizer and is_recent(item.published, fetched, cfg.summarize.max_age_days):
         await _summarize(conn, summarizer, cfg, genres, item.id, item.title, item.feed.category, item.content_md, path)
         item.summary = conn.execute("SELECT summary FROM items WHERE id = ?", (item.id,)).fetchone()[0]
+
+
+# これより短い本文（取れなかった・概要だけ）は、別の記事でも同じになりうるので比べない
+MIN_DEDUP_CHARS = 200
+
+
+def _content_hash(markdown: str | None) -> str | None:
+    """本文の空白を除いたハッシュ。短すぎる本文は None。"""
+    text = re.sub(r"\s+", "", markdown or "")
+    return hashlib.sha1(text.encode()).hexdigest() if len(text) >= MIN_DEDUP_CHARS else None
+
+
+def _find_duplicate(conn: sqlite3.Connection, item: Item, content_hash: str | None) -> int | None:
+    """同じ URL か同じ本文の記事が保存済みなら、その id（Yahoo!ニュースは同じ記事を複数のフィードに載せる）。"""
+    row = conn.execute(
+        "SELECT id FROM items WHERE id != ? AND status IN ('saved', 'notified')"
+        " AND ((url = ? AND url IS NOT NULL) OR content_hash = ?) LIMIT 1",
+        (item.id, item.url, content_hash),
+    ).fetchone()
+    return row[0] if row else None
 
 
 async def _summarize(
