@@ -23,6 +23,7 @@ COMMANDS: dict[str, tuple[str, bool]] = {
     "opml_import": ("添付された OPML ファイルのサイトをまとめて追加する（genre で入れるジャンルを決められる）", True),
     "opml_export": ("登録しているサイトを OPML ファイルにして渡す", False),
     "genre_interest": ("ジャンル・サブジャンルの好き嫌いを変える（genre と level）", True),
+    "feed_interest": ("特定のサイトの好き嫌いを変える（feed にサイト名、level）", True),
     "genre_list": ("ジャンル・サブジャンルの一覧", False),
     "run_now": ("今すぐ記事を取り込む", True),
     "digest_now": ("今すぐまとめを投稿する（genre で絞れる）", True),
@@ -37,8 +38,9 @@ PROMPT = (
     "{commands}\n"
     "ジャンル（genre に書けるもの。「ジャンル / サブジャンル」の名前で言われたら左のキーにする）:\n"
     "{genres}\n"
-    "level: like = 好き・もっと見たい / normal = 普通に戻す / low = 興味がうすい・まとめに出さない / "
-    "mute = 要らない・投稿もしない\n"
+    "level: like = 好き・もっと見たい / normal = 普通に戻す / down = 優先度を下げる・まとめの下の方に / "
+    "low = 興味がうすい・まとめに出さない / mute = 要らない・投稿もしない\n"
+    "- サイト名を挙げて好き嫌い・優先度を言われたら feed_interest、ジャンルなら genre_interest\n"
     "- サイト名を言わずに「○○の記事」の好き嫌いを言われたら、feed_remove ではなく genre_interest にする\n"
     "- feed にはサイト名か URL だけを書く（ジャンルの名前は書かない）\n"
     "使わない引数は空文字にする。"
@@ -146,6 +148,17 @@ def build(
             if not genre or not level:
                 return Intent(command, error="ジャンルと好き嫌い（好き・普通・うすい・ミュート）を書いてください")
             return Intent(command, ["genres", "interest", genre, level], f"「{label}」を{INTEREST_LEVELS[level]}にする", confirm)
+        case "feed_interest":
+            level = (data or {}).get("level") or ""
+            query = (data or {}).get("feed") or ""
+            found = find_feeds(conn, query)
+            if not level or len(found) != 1:
+                names = "、".join(f.title or f.url for f in found[:5])
+                return Intent(command, error=f"サイト（{query or '?'}）と好き嫌いを 1 つに決められません" + (f": {names}" if names else ""))
+            f = found[0]
+            # normal は設定を消す（feeds option で値を省くと削除）
+            argv = ["feeds", "option", str(f.id), "interest"] + ([] if level == "normal" else [level])
+            return Intent(command, argv, f"「{f.title or f.url}」を{INTEREST_LEVELS[level]}にする", confirm)
         case "genre_list":
             return Intent(command, ["genres", "list"], "ジャンルの一覧")
         case "run_now":

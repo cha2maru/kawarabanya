@@ -16,7 +16,7 @@ description: kawarabanya を CLI で操作する（サイトの追加・削除�
 | サイトを外す | `feeds remove <ID か URL>`（ID は `feeds list` で調べる。記事と投稿は残る） |
 | OPML を取り込む / 書き出す | `import-opml FILE --genre auto` / `export-opml FILE` |
 | RSSHub で取れる？ | `feeds rsshub URL` |
-| ○○は好き / まとめに出さない / 要らない | `genres interest <ジャンルかサブジャンル> like / low / mute`（戻すときは `normal`） |
+| ○○は好き / 優先度を下げる / まとめに出さない / 要らない | ジャンルなら `genres interest <ジャンルかサブジャンル> like / down / low / mute`（戻すときは `normal`）。サイトなら `feeds option <ID> interest down`（戻すときは値を省く。サイトの設定がジャンルより優先） |
 | ジャンルの一覧 | `genres list` |
 | 今すぐ取り込む | `run`（数分〜数十分。バックグラウンドで実行して終わりを待つ） |
 | 今すぐまとめを出す / 直す | `digest`（前回のまとめ以降）/ `digest --update` |

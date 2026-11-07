@@ -87,6 +87,7 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 @Bot https://example.com/news をボードゲームに追加して   → feeds add … --genre hobby/boardgame（確認）
 @Bot GIGAZINE を外して                                    → feeds remove 182（確認）
 @Bot スポーツはまとめに出さなくていい                     → genres interest culture/sports low（確認）
+@Bot ボドゲーマのレビューは優先度下げて                  → feeds option 139 interest down（確認）
 @Bot（OPML を添付して）これ取り込んで                     → import-opml … --genre auto（確認）
 @Bot OPML ちょうだい                                       → export-opml（OPML ファイルを添付して返す）
 @Bot いまどうなってる？                                   → status
@@ -111,7 +112,7 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 | `feeds rsshub URL` | URL が RSSHub のどのルートで取れるかを調べる（RSSHub の radar ルールを jsDelivr から取って `data/` に 7 日置く。RSSHub は動かさなくてよい）。`feeds add` でフィードが見つからないときも案内する |
 | `feeds remove ID\|URL` | 無効にして genres.toml から外す（保存済みの記事と投稿は残す。`feeds add` で同じ URL を足すと有効に戻る） |
 | `feeds list\|enable\|disable\|option` | フィードの管理（例: `feeds option ID no_fulltext true`） |
-| `genres interest G like\|normal\|low\|mute` | ジャンル・サブジャンルの好き嫌いを genres.toml に書く |
+| `genres interest G like\|normal\|down\|low\|mute` | ジャンル・サブジャンルの好き嫌いを genres.toml に書く。サイトごとには `feeds option ID interest down`（値を省くと戻る。サイトの設定がジャンルより優先） |
 | `doctor` | 動かすのに必要なもの（設定・DB・Discord・MESSAGE CONTENT INTENT・要約サーバー・常駐サービス）がそろっているかを調べる。❌ があれば終了コード 1 |
 | `status` | 最後の取り込み・次のまとめ・要約サーバー・失敗中のフィード・記事の件数 |
 | `genres list` / `genres apply [--dry-run] [--disable-unassigned]` | ジャンルの一覧 / genres.toml の反映 |
@@ -146,7 +147,7 @@ feeds = [ ... ]              # サブジャンルの下に書いたフィード�
 
 [culture.sports]
 label = "スポーツ"
-interest = "low"             # 好き嫌い: like（まとめの上位に寄せる）/ low（投稿はするが、まとめに載せない）/ mute（投稿もしない）
+interest = "low"             # 好き嫌い: like（まとめの上位に寄せる）/ down（まとめの下の方に）/ low（投稿はするが、まとめに載せない）/ mute（投稿もしない）
                              # 書かなければ普通。サブジャンルに書かなければジャンルの値を受け継ぐ（digest = false は low の古い書き方）
 ```
 

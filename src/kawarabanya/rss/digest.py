@@ -39,7 +39,7 @@ class DigestItem:
     likes: int | None
 
 
-# 好き（interest = "like"）のジャンルの記事は、重要度にこれを足して並べる
+# 好き（like）の記事は重要度にこれを足し、低め（down）の記事は引いて並べる
 LIKE_BONUS = 0.3
 
 
@@ -48,20 +48,23 @@ def collect(
 ) -> list[DigestItem]:
     """since 以降に投稿したジャンルの記事を、重要度の高い順に返す（判定のないものは最後）。
 
-    levels（genres.interest_levels）で、うすい・ミュートの記事は除き、好きの記事は上に寄せる。
+    levels（genres.interest_levels）とサイトごとの interest（feeds option）で、うすい・ミュートの記事は除き、
+    好きの記事は上に、低めの記事は下に寄せる。
     """
     levels = levels or {}
     rows = conn.execute(
-        "SELECT COALESCE(i.subgenre, f.category) AS category, i.title, i.discord_thread_id, i.priority, i.likes FROM items i"
+        "SELECT COALESCE(i.subgenre, f.category) AS category, i.title, i.discord_thread_id, i.priority, i.likes,"
+        " json_extract(f.options, '$.interest') AS feed_interest FROM items i"
         " JOIN feeds f ON f.id = i.feed_id WHERE i.status = 'notified' AND i.notified_at >= ?",
         (since.isoformat(timespec="seconds"),),
     ).fetchall()
     scored = []
     for r in rows:
-        level = interest_of(levels, r["category"])
+        level = interest_of(levels, r["category"], r["feed_interest"])
         if top_genre(r["category"]) != genre or level in ("low", "mute"):
             continue
-        score = (r["priority"] if r["priority"] is not None else -1) + (LIKE_BONUS if level == "like" else 0)
+        bonus = {"like": LIKE_BONUS, "down": -LIKE_BONUS}.get(level, 0)
+        score = (r["priority"] if r["priority"] is not None else -1) + bonus
         scored.append((score, DigestItem(r["title"] or "(無題)", r["discord_thread_id"], r["priority"], r["likes"])))
     return [it for _, it in sorted(scored, key=lambda x: -x[0])]
 

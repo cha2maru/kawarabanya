@@ -169,8 +169,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_genres_apply)
     s = gs.add_parser("interest", help="ジャンル・サブジャンルの好き嫌いを変える")
     s.add_argument("genre", help="news、culture/sports など")
-    s.add_argument("level", choices=["like", "normal", "low", "mute"],
-                   help="like: まとめの上位に / normal / low: まとめに載せない / mute: 投稿もしない")
+    s.add_argument("level", choices=["like", "normal", "down", "low", "mute"],
+                   help="like: まとめの上位に / normal / down: まとめの下の方に / low: まとめに載せない / mute: 投稿もしない")
     s.set_defaults(func=cmd_genres_interest)
     s = gs.add_parser("suggest", help="当てはまるサブジャンルのなかった記事から、新しいサブジャンルを LLM に考えさせる")
     s.add_argument("--apply", action="store_true", help="genres.toml に追加し、Discord のタグも作る")

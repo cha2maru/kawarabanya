@@ -78,3 +78,11 @@ def test_guess_genre_options(tmp_path):
     assert asyncio.run(go(["プラモの新作"])) == "hobby"  # B = ホビー
     assert "B: ホビー（例: VAPE）" in seen[0]  # サブジャンルの名前を手がかりに添える
     assert asyncio.run(go([])) == "hobby"  # 見出しが取れなくてもサイト名で選ぶ
+
+
+def test_feed_interest_intent(tmp_path):
+    conn, genres = make(tmp_path)
+    it = ask(conn, genres, "GIGAZINE は優先度下げて", command="feed_interest", feed="gigazine", level="down")
+    assert it.argv == ["feeds", "option", "1", "interest", "down"] and it.confirm
+    assert ask(conn, genres, "x", command="feed_interest", feed="gigazine", level="normal").argv == ["feeds", "option", "1", "interest"]
+    assert ask(conn, genres, "x", command="feed_interest", feed="nothing", level="down").error

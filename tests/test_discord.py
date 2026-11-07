@@ -408,3 +408,28 @@ def test_pending_items_follow_item_genre(tmp_path):
     stats = notify.notify_pending(conn, limit=5, max_age_days=3, levels={"tech/ai": "mute"}, interval=0)
     assert stats.muted == 1 and stats.sent == 0
     assert conn.execute("SELECT status FROM items WHERE id = ?", (m,)).fetchone()[0] == "muted"
+
+
+def test_feed_interest_down_and_mute(tmp_path):
+    from kawarabanya.rss import digest
+
+    _fake, client, conn = setup()
+    a = db.list_feeds(conn, category="tech")[0].id
+    b = db.insert_feed(conn, "https://b.example/f", "B", None, "tech")
+    apply_plan(client, conn, make_plan(client, {"id": "1", "name": "srv"}, feeds_by_category(conn, ["tech"]), "kawarabanya"),
+               "kawarabanya")
+    with conn:
+        for key, fid, prio in [("x", a, 0.9), ("y", b, 0.7)]:
+            iid = db.insert_item(conn, fid, key, None, key, ago(hours=1), "notified")
+            db.update_item(conn, iid, notified_at=ago(hours=1), discord_thread_id=f"t-{key}", priority=prio)
+    since = datetime.now(UTC) - timedelta(hours=24)
+    assert [i.title for i in digest.collect(conn, "tech", since)] == ["x", "y"]
+    db.set_option(conn, a, "interest", "down")  # サイトごとの低め: 0.9 - 0.3 < 0.7
+    assert [i.title for i in digest.collect(conn, "tech", since)] == ["y", "x"]
+    db.set_option(conn, a, "interest", "low")
+    assert [i.title for i in digest.collect(conn, "tech", since, {"tech": "like"})] == ["y"]  # サイトの設定が優先
+
+    with conn:
+        db.insert_item(conn, a, "m", "https://m", "ミュート", ago(hours=1), "saved")
+    db.set_option(conn, a, "interest", "mute")
+    assert notify.notify_pending(conn, limit=5, max_age_days=3, interval=0).muted == 1

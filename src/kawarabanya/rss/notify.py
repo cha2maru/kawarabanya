@@ -176,7 +176,8 @@ def notify_pending(
     old = [p for p in items if not is_recent(p.published, p.fetched_at, max_age_days)]
     items = [p for p in items if p not in old]
     stats.stale = len(old)
-    muted = [p for p in items if interest_of(levels or {}, p.subgenre or p.category) == "mute"]
+    feed_levels = dict(conn.execute("SELECT id, json_extract(options, '$.interest') FROM feeds").fetchall())
+    muted = [p for p in items if interest_of(levels or {}, p.subgenre or p.category, feed_levels.get(p.feed_id)) == "mute"]
     items = [p for p in items if p not in muted]
     stats.muted = len(muted)
     if not dry_run:

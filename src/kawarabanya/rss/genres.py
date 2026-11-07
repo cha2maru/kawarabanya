@@ -35,6 +35,7 @@ RESERVED = {"label", "description", "feeds", "priority", "interest", "digest"}
 INTEREST_LEVELS = {
     "like": "好き（まとめの上位に寄せる）",
     "normal": "普通",
+    "down": "低め（まとめには載せるが、下の方に並べる）",
     "low": "うすい（投稿はするが、まとめに載せない）",
     "mute": "ミュート（投稿もしない）",
 }
@@ -78,8 +79,10 @@ def interest_levels(genres: dict[str, Genre] | None) -> dict[str, str]:
     return {p: g.interest for p, g in (genres or {}).items() if g.interest}
 
 
-def interest_of(levels: dict[str, str], category: str | None) -> str:
-    """記事のカテゴリ（"news/world"）の好き嫌い。サブジャンル → ジャンルの順に探し、なければ normal。"""
+def interest_of(levels: dict[str, str], category: str | None, feed_level: object = None) -> str:
+    """記事の好き嫌い。サイト（feeds option の interest）→ サブジャンル → ジャンルの順に探し、なければ normal。"""
+    if feed_level in INTEREST_LEVELS:
+        return feed_level
     if not category:
         return "normal"
     return levels.get(category) or levels.get(top_genre(category) or "") or "normal"
