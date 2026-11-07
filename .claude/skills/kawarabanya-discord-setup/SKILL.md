@@ -22,7 +22,7 @@ Developer Portal とサーバーの設定は、利用者にしかできない（
 |---|---|
 | メンションしても「本文が読めませんでした」 | MESSAGE CONTENT INTENT がオフ（3）。オンにしたら Bot を再起動する（`systemctl --user restart kawarabanya-bot`） |
 | メンションしても何も起きない | Bot が止まっている（`journalctl --user -u kawarabanya-bot -n 50`）か、持ち主以外が頼んでいる（頼めるのはサーバーの持ち主だけ） |
-| `discord setup` で 403 / Missing Access | Bot のロールに権限が足りない。`discord invite-url` の URL で招待し直すか、サーバー設定 → ロール → Bot のロールで「チャンネルの管理・ウェブフックの管理・スレッドの管理・メッセージを送る」をオン |
+| `discord setup` で 403 / Missing Access | Bot のロールに権限が足りない。`discord invite-url` の URL で招待し直すか、サーバー設定 → ロール → Bot のロールで「チャンネルの管理・ウェブフックの管理・スレッドの管理・メッセージを送る・スレッドでメッセージを送る」をオン |
 | タグの付け直し（`discord retag`）が 403 | Bot のロールに「スレッドの管理」 |
 | フォーラムが作れない | サーバーの「コミュニティ」が無効 |
 

@@ -20,7 +20,7 @@ from kawarabanya.core.config import Config
 from kawarabanya.core.llm import CHOICE_LETTERS, Summarizer
 from kawarabanya.rss import archive
 from kawarabanya.rss.fulltext import fill_content
-from kawarabanya.rss.genres import Genre, load_genres, priority_criteria
+from kawarabanya.rss.genres import Genre, keyword_tops, load_genres, priority_criteria
 from kawarabanya.rss.item import Item, from_entry, is_recent
 from kawarabanya.rss.sources.check import CheckResult, apply_results, check_feed
 from kawarabanya.rss.sources.fetcher import Fetcher
@@ -246,6 +246,8 @@ async def classify_item(
 
     フィードのジャンル（RSS の URL の分類）とは別のジャンルのサブジャンルも選べる（MOVE_P 以上のとき）。
     どれにも当てはまらなければ items.subgenre はトップレベルのジャンル（"news"）にする（新しいサブジャンルの候補）。
+    タイトルに genres.toml の keywords の語があれば、先にそのジャンルのサブジャンルだけから選ばせる。
+    外れたら全サブジャンルから選び直す（「ゴジラのフィギュア」のように語のジャンルと違う記事があるため）。
     サブジャンルに固定したフィード（genres.toml でサブジャンルの下に書いたもの）は判定しない。
     allow_move=False なら、フィードのジャンルの中だけで選ぶ（投稿済みの記事はフォーラムを移せないので）。
     振り分けたカテゴリ（判定できなければ元のカテゴリ）を返す。
@@ -253,6 +255,19 @@ async def classify_item(
     if not genres or not category or "/" in category:
         return category
     subs = [g for g in genres.values() if g.is_sub and (allow_move or g.top == category)]
+    hits = keyword_tops(genres, title) if allow_move else keyword_tops(genres, title) & {category}
+
+    async def choose(candidates: list[Genre]) -> tuple[int | None, float] | None:
+        options = [(f"{genres[g.top].label if g.top in genres else g.top} / {g.label}", g.description) for g in candidates]
+        return await summarizer.classify(title, content_md, options)
+
+    if narrowed := [g for g in subs if g.top in hits]:
+        result = await choose(narrowed)
+        if result and result[0] is not None and result[1] >= MATCH_P:
+            path = narrowed[result[0]].path
+            with conn:
+                db.update_item(conn, item_id, subgenre=path)
+            return path
     if len(subs) > len(CHOICE_LETTERS):
         # 1 回で選べる数（51）を超えたら、先にジャンルを選ばせ、その中のサブジャンルから選ばせる
         tops = [g for g in genres.values() if not g.is_sub and any(s.top == g.path for s in subs)]
@@ -261,16 +276,15 @@ async def classify_item(
         subs = [g for g in subs if g.top == top]
     if not subs:
         return category
-    options = [(f"{genres[g.top].label if g.top in genres else g.top} / {g.label}", g.description) for g in subs]
-    result = await summarizer.classify(title, content_md, options)
+    result = await choose(subs)
     if result is None:
         return category
     idx, p = result
     sub = subs[idx] if idx is not None else None
-    if sub and p >= (MATCH_P if sub.top == category else MOVE_P):
+    if sub and p >= (MATCH_P if sub.top == category or sub.top in hits else MOVE_P):
         path = sub.path
     else:
-        path = category  # どれにも当てはまらない
+        path = hits.copy().pop() if len(hits) == 1 else category  # どれにも当てはまらない
     with conn:
         db.update_item(conn, item_id, subgenre=path)
     return path

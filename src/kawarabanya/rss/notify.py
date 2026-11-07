@@ -24,7 +24,7 @@ from kawarabanya.core.discord_api import (
 )
 from kawarabanya.core.llm import Summarizer
 from kawarabanya.rss import archive
-from kawarabanya.rss.genres import Genre, interest_of
+from kawarabanya.rss.genres import Genre, interest_of, top_genre
 from kawarabanya.rss.item import is_recent
 from kawarabanya.rss.pipeline import classify_item
 
@@ -286,6 +286,51 @@ async def retag_posts(
             raise
         changed += 1
     return changed, len(rows)
+
+
+def move_post(conn: sqlite3.Connection, client: DiscordClient, item_id: int, path: str) -> str:
+    """記事を別のジャンル・サブジャンルに移し、結果の説明を返す。
+
+    同じフォーラムの中ならタグを付け替える。投稿済みのスレッドはフォーラムを移せないので、別のジャンルへは
+    新しいフォーラムに投稿してから元の投稿を消す（投稿を失わない順番。URL は変わり、👍 は引き継げない）。
+    """
+    r = conn.execute(
+        "SELECT i.*, f.title AS feed_title, f.category FROM items i JOIN feeds f ON f.id = i.feed_id WHERE i.id = ?",
+        (item_id,),
+    ).fetchone()
+    if r is None:
+        raise ValueError(f"記事 {item_id} がありません")
+    thread = r["discord_thread_id"]
+    if r["status"] != "notified" or not thread:
+        with conn:
+            db.update_item(conn, item_id, subgenre=path)
+        return f"{r['title']}: {path} にしました（投稿前の記事）"
+    top = top_genre(path) or UNCATEGORIZED
+    channel = conn.execute("SELECT webhook_url, guild_id, tags FROM discord_channels WHERE category = ?", (top,)).fetchone()
+    if channel is None:
+        raise ValueError(f"{top}: フォーラムが未登録です（kawarabanya discord setup --apply）")
+    tags = json.loads(channel["tags"]) if channel["tags"] else {}
+    if top == (top_genre(r["subgenre"] or r["category"]) or UNCATEGORIZED):
+        client.request("PATCH", f"/channels/{thread}", {"applied_tags": [t for t in [tags.get(f"sub:{path}")] if t]})
+        with conn:
+            db.update_item(conn, item_id, subgenre=path)
+        return f"{r['title']}: タグを {path} に付け替えました"
+    p = Pending(
+        item_id=item_id, feed_id=r["feed_id"], feed_title=r["feed_title"], category=r["category"], subgenre=path,
+        title=r["title"], url=r["url"], published=r["published"], fetched_at=r["fetched_at"], summary=r["summary"],
+        md_path=r["md_path"], webhook_url=channel["webhook_url"], guild_id=channel["guild_id"], tags=tags,
+    )
+    new_thread = (send_webhook(p.webhook_url, build_payload(p)) or {}).get("channel_id")
+    with conn:
+        db.update_item(conn, item_id, subgenre=path, discord_thread_id=new_thread, likes=0, likes_checked_at=None)
+    if new_thread and p.guild_id and p.md_path and Path(p.md_path).exists():
+        archive.set_field(p.md_path, "discord", post_url(p.guild_id, new_thread))
+    try:
+        client.request("DELETE", f"/channels/{thread}")
+    except DiscordError as e:
+        if "HTTP 404" not in str(e):  # 投稿が消えていれば、消す必要がない
+            return f"{r['title']}: {path} に投稿しましたが、元の投稿を消せませんでした（{e}）"
+    return f"{r['title']}: {path} に移しました"
 
 
 def delete_duplicate_posts(conn: sqlite3.Connection, client: DiscordClient, *, apply: bool = False) -> list[sqlite3.Row]:

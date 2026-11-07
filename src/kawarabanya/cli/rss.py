@@ -521,6 +521,29 @@ def cmd_genres_interest(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_genres_keyword(cfg: Config, args: argparse.Namespace) -> int:
+    """genres keyword: 振り分けの候補を絞る語を genres.toml に書く。"""
+    defs = _require_genres(cfg)
+    if args.genre not in defs:
+        print(f"{args.genre}: genres.toml にありません", file=sys.stderr)
+        return 1
+    genres.add_keyword(cfg.general.genres_file, args.genre, args.word)
+    print(f"{args.word} → {args.genre}（{defs[args.genre].label}）")
+    return 0
+
+
+def cmd_items_move(cfg: Config, args: argparse.Namespace) -> int:
+    """items move: 記事を別のジャンルに移す（--keyword があれば語も登録する）。"""
+    defs = _require_genres(cfg)
+    if args.genre not in defs:
+        print(f"{args.genre}: genres.toml にありません", file=sys.stderr)
+        return 1
+    if args.keyword:
+        genres.add_keyword(cfg.general.genres_file, args.genre, args.keyword)
+    print(notify.move_post(_open_db(cfg, args), _discord_client(cfg), args.id, args.genre))
+    return 0
+
+
 def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     """status: 最後の取り込み・次のまとめ・要約サーバー・フィードと記事の状態を表示する。"""
     import httpx

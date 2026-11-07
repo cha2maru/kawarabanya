@@ -54,7 +54,7 @@ def message(me, author_id, owner_id, content, attachments=()):
     return SimpleNamespace(
         author=SimpleNamespace(bot=False, id=author_id), guild=guild, mentions=[me], role_mentions=[],
         content=f"<@1> {content}", attachments=list(attachments), id=42,
-        channel=SimpleNamespace(typing=Typing), reply=reply,
+        channel=SimpleNamespace(id=7, typing=Typing), reply=reply,
     ), replies
 
 

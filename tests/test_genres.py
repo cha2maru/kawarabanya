@@ -1,7 +1,7 @@
 import pytest
 
 from kawarabanya.core import db
-from kawarabanya.rss.genres import apply_genres, load_genres
+from kawarabanya.rss.genres import add_keyword, apply_genres, keyword_tops, load_genres
 
 TOML = """
 [news]
@@ -238,3 +238,24 @@ def test_feeds_add_readd_and_no_duplicate_line(tmp_path, capsys):
     assert "有効に戻しました" in capsys.readouterr().out
     assert genres.load_genres(p)["tech"].feeds.count("https://a.example/feed") == 1
     assert add("https://a.example/feed") == 1  # 有効なら登録済み
+
+
+def test_keywords_normalize_and_boundaries(tmp_path):
+    p = tmp_path / "genres.toml"
+    p.write_text('[tech]\nlabel = "テック"\n[tech.net]\nlabel = "ネット"\n[news]\nlabel = "ニュース"\n', encoding="utf-8")
+    add_keyword(p, "tech", "Ｃｌｏｕｄｆｌａｒｅ")
+    add_keyword(p, "tech", "cloudflare")  # 登録済み
+    add_keyword(p, "tech/net", "Go")
+    add_keyword(p, "news", "ゴジラ")
+    defs = load_genres(p)
+    assert defs["tech"].keywords == ["Cloudflare"]
+
+    def tops(title):
+        return keyword_tops(defs, title)
+
+    assert tops("米Ｃｌｏｕｄｆｌａｒｅで障害") == {"tech"}
+    assert tops("CLOUDFLAREの障害") == {"tech"}
+    assert tops("Googleの新機能") == set()
+    assert tops("Goの新版") == {"tech"}
+    assert tops("新作ゴジラ公開") == {"news"}
+    assert tops(None) == set()

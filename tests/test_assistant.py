@@ -86,3 +86,26 @@ def test_feed_interest_intent(tmp_path):
     assert it.argv == ["feeds", "option", "1", "interest", "down"] and it.confirm
     assert ask(conn, genres, "x", command="feed_interest", feed="gigazine", level="normal").argv == ["feeds", "option", "1", "interest"]
     assert ask(conn, genres, "x", command="feed_interest", feed="nothing", level="down").error
+
+
+def post_row(conn):
+    conn.execute("INSERT OR IGNORE INTO items (id, feed_id, key, title, fetched_at, status, discord_thread_id, subgenre)"
+                 " VALUES (5, 1, 'k', 'ゴジラの新作', 'x', 'notified', '777', 'tech')")
+    return assistant.find_post(conn, 777)
+
+
+def test_genre_assign(tmp_path):
+    conn, genres = make(tmp_path)
+    word = ask(conn, genres, "Ｃｌｏｕｄｆｌａｒｅはtech", command="genre_assign", genre="tech", word="Ｃｌｏｕｄｆｌａｒｅ")
+    assert word.argv == ["genres", "keyword", "Cloudflare", "tech"] and word.confirm
+    # 投稿のスレッドでは、その記事を移し、語があれば一緒に登録する
+    data = {"command": "genre_assign", "genre": "hobby/vape", "word": "これ"}
+    move = assistant.build(data, "これはVAPE", conn, genres, post=post_row(conn))
+    assert move.argv == ["items", "move", "5", "hobby/vape"] and "引き継げません" in move.summary
+    data = {"command": "genre_assign", "genre": "hobby/vape", "word": "ゴジラ"}
+    assert assistant.build(data, "ゴジラはVAPE", conn, genres, post=post_row(conn)).argv[-2:] == ["--keyword", "ゴジラ"]
+    # 依頼にない語、ジャンルの名前そのものは語にしない。スレッドの外で語がなければ断る
+    assert ask(conn, genres, "これはVAPE", command="genre_assign", genre="hobby/vape", word="VAPE").error
+    assert ask(conn, genres, "これはテック", command="genre_assign", genre="tech", word="Cloudflare").error
+    assert ask(conn, genres, "Cloudflare", command="genre_assign", word="Cloudflare").error
+    assert assistant.find_post(conn, 1) is None

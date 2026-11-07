@@ -90,6 +90,9 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 @Bot ボドゲーマのレビューは優先度下げて                  → feeds option 139 interest down（確認）
 @Bot（OPML を添付して）これ取り込んで                     → import-opml … --genre auto（確認）
 @Bot OPML ちょうだい                                       → export-opml（OPML ファイルを添付して返す）
+@Bot Cloudflareはtech                                     → genres keyword Cloudflare tech（確認）
+@Bot これは映画（記事の投稿のスレッドで）                 → items move 123 culture/movie（確認）
+@Bot Cloudflareはtech（記事の投稿のスレッドで）           → items move 123 tech --keyword Cloudflare（確認）
 @Bot いまどうなってる？                                   → status
 @Bot 何ができるの？                                       → 例の一覧
 ```
@@ -115,6 +118,8 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 | `genres interest G like\|normal\|down\|low\|mute` | ジャンル・サブジャンルの好き嫌いを genres.toml に書く。サイトごとには `feeds option ID interest down`（値を省くと戻る。サイトの設定がジャンルより優先） |
 | `doctor` | 動かすのに必要なもの（設定・DB・Discord・MESSAGE CONTENT INTENT・要約サーバー・常駐サービス）がそろっているかを調べる。❌ があれば終了コード 1 |
 | `status` | 最後の取り込み・次のまとめ・要約サーバー・失敗中のフィード・記事の件数 |
+| `genres keyword 語 G` | タイトルにこの語がある記事の振り分けの候補を、ジャンル `G` のサブジャンルに絞る（genres.toml の `keywords` に書く）。全角・半角と大文字・小文字は区別しない。作品名やブランド名のような固有名詞に使う |
+| `items move ID G [--keyword 語]` | 記事を別のジャンルに移す。同じジャンルの中ならタグを付け替え、別のジャンルなら新しいフォーラムに投稿して元の投稿を消す（URL は変わり、👍 は引き継げない。「スレッドの管理」が必要） |
 | `genres list` / `genres apply [--dry-run] [--disable-unassigned]` | ジャンルの一覧 / genres.toml の反映 |
 | `genres suggest [--apply] [--days 7] [--due]` | どのサブジャンルにも当てはまらなかった記事から、新しいサブジャンルを LLM に決めさせる（案は振り分け直して確かめる）。タグの上限（20）を超えるジャンルは似たサブジャンルを先にまとめる。`--apply` で genres.toml に反映し、Discord のタグを揃えて付け直す（Bot はまとめの時刻ごとに自動で実行する） |
 | `discord setup [--apply] [--prune]` / `channels` / `test GENRE` / `guilds` / `invite-url` | フォーラム・タグ・Webhook の管理 |
@@ -140,6 +145,7 @@ priority = "A: 高い（…） B: 普通（…） C: 低い（…）"   # 重要
 [tech.ai]                    # サブジャンル = フォーラムのタグ。記事ごとにローカル LLM が全サブジャンルから振り分ける
 label = "AI"
 description = "生成 AI・機械学習・AI サービス"   # LLM が判定する手がかり
+keywords = ["ChatGPT"]       # タイトルにこの語があれば、振り分けの候補をこのジャンルに絞る（`genres keyword` でも足せる）
 
 [hobby.boardgame]
 label = "ボードゲーム"

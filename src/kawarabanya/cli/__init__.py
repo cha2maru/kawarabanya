@@ -21,10 +21,12 @@ from kawarabanya.cli.rss import (
     cmd_feeds_rsshub,
     cmd_genres_apply,
     cmd_genres_interest,
+    cmd_genres_keyword,
     cmd_genres_list,
     cmd_genres_suggest,
     cmd_import_opml,
     cmd_interests,
+    cmd_items_move,
     cmd_likes,
     cmd_notify,
     cmd_run,
@@ -160,6 +162,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("ids", type=int, nargs="+")
     s.set_defaults(func=lambda c, a: _cmd_set_enabled(c, a, False))
 
+    its = sub.add_parser("items", help="記事の管理").add_subparsers(dest="items_command", required=True)
+    s = its.add_parser("move", help="記事を別のジャンルに移す（別のジャンルなら投稿し直し、元の投稿は消える）")
+    s.add_argument("id", type=int)
+    s.add_argument("genre", help="tech、culture/movie など")
+    s.add_argument("--keyword", help="この語も genres keyword で登録する")
+    s.set_defaults(func=cmd_items_move)
+
     gs = sub.add_parser("genres", help="ジャンル（genres.toml）の管理").add_subparsers(dest="genres_command", required=True)
     s = gs.add_parser("list", help="ジャンルの一覧とフィード数")
     s.set_defaults(func=cmd_genres_list)
@@ -172,6 +181,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("level", choices=["like", "normal", "down", "low", "mute"],
                    help="like: まとめの上位に / normal / down: まとめの下の方に / low: まとめに載せない / mute: 投稿もしない")
     s.set_defaults(func=cmd_genres_interest)
+    s = gs.add_parser("keyword", help="タイトルにこの語がある記事の振り分けの候補を、このジャンルに絞る")
+    s.add_argument("word", help="Cloudflare などの固有名詞")
+    s.add_argument("genre", help="tech、culture/movie など")
+    s.set_defaults(func=cmd_genres_keyword)
     s = gs.add_parser("suggest", help="当てはまるサブジャンルのなかった記事から、新しいサブジャンルを LLM に考えさせる")
     s.add_argument("--apply", action="store_true", help="genres.toml に追加し、Discord のタグも作る")
     s.add_argument("--days", type=int, default=7, help="直近この日数の記事から考える（既定 7）")

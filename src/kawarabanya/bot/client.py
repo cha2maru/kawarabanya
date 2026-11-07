@@ -163,10 +163,12 @@ class Bot(discord.Client):
         conn = db.connect(self.db_path)
         try:
             genres = load_genres_if_any(self.cfg) or {}
+            post = assistant.find_post(conn, message.channel.id)  # フォーラムの投稿への返信は、スレッドの中に届く
             async with message.channel.typing():
-                data = (await assistant.interpret(self.summarizer, text, genres, attachment and attachment.filename)
-                        if self.summarizer else None)
-            intent = assistant.build(data, text, conn, genres, str(saved) if saved else None, str(export))
+                data = (await assistant.interpret(
+                    self.summarizer, text, genres, attachment and attachment.filename, post and post["title"]
+                ) if self.summarizer else None)
+            intent = assistant.build(data, text, conn, genres, str(saved) if saved else None, str(export), post)
         finally:
             conn.close()
         if intent.attach:
@@ -242,7 +244,10 @@ class ConfirmView(discord.ui.View):
         await self._finish(interaction, f"**{self.intent.summary}** を実行中…{waiting}")
         content, files = await self.bot.run_requested(self.intent)
         # ボタン操作の応答は 15 分で切れるので、Bot のメッセージとして書き換える（取り込みの順番待ちで超えうる）
-        await interaction.message.edit(content=content, attachments=files, view=None)
+        try:
+            await interaction.message.edit(content=content, attachments=files, view=None)
+        except discord.NotFound:  # 記事を別のフォーラムに移すと、この返事のあるスレッドごと消える
+            log.info("%s", content)
 
     @discord.ui.button(label="やめる", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:

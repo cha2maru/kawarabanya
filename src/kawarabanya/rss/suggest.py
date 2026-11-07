@@ -23,7 +23,7 @@ from kawarabanya.core import db
 from kawarabanya.core.llm import CHOICE_LETTERS, Summarizer
 from kawarabanya.rss import archive
 from kawarabanya.rss.forums import MAX_TAGS
-from kawarabanya.rss.genres import Genre, section_re, set_key, top_genre
+from kawarabanya.rss.genres import Genre, load_genres, section_re, set_key, top_genre
 from kawarabanya.rss.pipeline import MATCH_P
 
 # この件数以上の記事がまとまるときだけ作る
@@ -258,12 +258,18 @@ def apply(
     path = Path(genres_file)
     text = path.read_text(encoding="utf-8")
     day = datetime.now().strftime("%Y-%m-%d")
+    defs = load_genres(path)
+    kept_words: dict[str, list[str]] = {}  # 統合で消えるサブジャンルの keywords を、残す方に引き継ぐ
     for mg in merges:
         for removed in mg.removed:
             text = section_re(removed).sub("", text, count=1)
         keep = f"{mg.genre}/{mg.key}"
+        words = [w for p in (keep, *mg.removed) if p in defs for w in defs[p].keywords]
+        kept_words[keep] = list(dict.fromkeys(words))
         if m := section_re(keep).search(text):
             sec = set_key(set_key(m.group(0), "label", mg.label), "description", mg.description)
+            if words:
+                sec = set_key(sec, "keywords", kept_words[keep])
             text = text[: m.start()] + sec + text[m.end():]
         # 追加の案どうし・追加の案への統合は、追加の案を書き換える
         for s in suggestions:
@@ -280,6 +286,7 @@ def apply(
             f"\n\n[{s.genre}.{s.key}]  # {day} kawarabanya genres suggest が追加\n"
             f"label = {json.dumps(s.label, ensure_ascii=False)}\n"
             f"description = {json.dumps(s.description, ensure_ascii=False)}\n"
+            + (f"keywords = {json.dumps(kept_words[s.path], ensure_ascii=False)}\n" if kept_words.get(s.path) else "")
         )
     path.write_text(text, encoding="utf-8")
     with conn:

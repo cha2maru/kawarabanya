@@ -7,6 +7,7 @@
 
     priority = "A: ... B: ... C: ..."   # 重要度の判定基準（省略可）
     interest = "low"            # 好き嫌い: like（まとめの上位に寄せる）/ low（まとめに載せない）/ mute（投稿もしない）
+    keywords = ["Cloudflare"]   # タイトルにこの語があれば、振り分けの候補をこのジャンルに絞る
 
     feeds に { url = ..., item = ..., ... } と書くと HTML 取り込み（rss/sources/htmlsource.py）、
     { url = ..., extension = "名前", ... } と書くとサイト別の拡張（rss/sources/extensions.py）
@@ -24,13 +25,14 @@ import json
 import re
 import sqlite3
 import tomllib
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from kawarabanya.core import db
 from kawarabanya.rss.sources import extensions
 
-RESERVED = {"label", "description", "feeds", "priority", "interest", "digest"}
+RESERVED = {"label", "description", "feeds", "priority", "interest", "digest", "keywords"}
 # 好き嫌い（interest）。書かなければ normal（サブジャンルはジャンルの値を受け継ぐ）
 INTEREST_LEVELS = {
     "like": "好き（まとめの上位に寄せる）",
@@ -54,6 +56,8 @@ class Genre:
     priority: str = ""
     # 好き嫌い（INTEREST_LEVELS のキー）。None なら書いていない
     interest: str | None = None
+    # タイトルにあれば振り分けの候補をこのジャンルに絞る語
+    keywords: list[str] = field(default_factory=list)
 
     @property
     def top(self) -> str:
@@ -134,6 +138,7 @@ def load_genres(path: str | Path) -> dict[str, Genre]:
             sources=sources,
             priority=table.get("priority", ""),
             interest=_interest(table, gpath, path),
+            keywords=table.get("keywords", []),
         )
         for sub_key, sub in table.items():
             if sub_key in RESERVED:
@@ -243,7 +248,7 @@ def _edit_section(file: str | Path, gpath: str, edit) -> None:
     path.write_text(text[: m.start()] + edit(m.group(0)) + text[m.end():], encoding="utf-8")
 
 
-def set_key(section: str, name: str, value: str | None) -> str:
+def set_key(section: str, name: str, value: str | list[str] | None) -> str:
     """節の name = ... を value（JSON 文字列として書く）にする。None なら消す。"""
     pattern = re.compile(rf"^{name}\s*=.*\n?", re.MULTILINE)
     if value is None:
@@ -261,6 +266,32 @@ def set_interest(file: str | Path, gpath: str, level: str) -> None:
         raise ValueError(f"好き嫌いは {' / '.join(INTEREST_LEVELS)} のどれかです: {level}")
     _edit_section(file, gpath, lambda sec: set_key(set_key(sec, "digest", None), "interest",
                                                    None if level == "normal" else level))
+
+
+def normalize_word(text: str) -> str:
+    """全角の英数字を半角にそろえ（NFKC）、大文字と小文字を区別しない形にする。"""
+    return unicodedata.normalize("NFKC", text).casefold()
+
+
+def has_word(title: str, word: str) -> bool:
+    """title に語があるか。英数字の語は、Go が Google に当たらないよう前後が英数字でないときだけ一致させる。"""
+    w = normalize_word(word)
+    before = r"(?<![a-z0-9])" if re.match(r"[a-z0-9]", w) else ""
+    after = r"(?![a-z0-9])" if re.search(r"[a-z0-9]$", w) else ""
+    return re.search(before + re.escape(w) + after, normalize_word(title)) is not None
+
+
+def keyword_tops(genres: dict[str, Genre], title: str | None) -> set[str]:
+    """タイトルに keywords の語があるジャンル（トップレベル）。"""
+    return {g.top for g in genres.values() if title and any(has_word(title, w) for w in g.keywords)}
+
+
+def add_keyword(file: str | Path, gpath: str, word: str) -> None:
+    """ジャンル・サブジャンルの keywords に語を足す（半角にそろえる。登録済みなら何もしない）。"""
+    word = unicodedata.normalize("NFKC", word).strip()
+    words = load_genres(file)[gpath].keywords
+    if normalize_word(word) not in map(normalize_word, words):
+        _edit_section(file, gpath, lambda sec: set_key(sec, "keywords", [*words, word]))
 
 
 def add_feed_url(file: str | Path, gpath: str, url: str, comment: str | None = None) -> None:
