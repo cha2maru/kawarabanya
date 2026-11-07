@@ -10,7 +10,7 @@ import sqlite3
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -111,6 +111,9 @@ async def _process(
     report.saved.append(item)
 
     if summarizer and is_recent(item.published, fetched, cfg.summarize.max_age_days):
+        if cfg.summarize.same_story_threshold > 0 and await _same_story(conn, summarizer, cfg, item):
+            report.duplicates += 1
+            return
         await _summarize(conn, summarizer, cfg, genres, item.id, item.title, item.feed.category, item.content_md, path)
         item.summary = conn.execute("SELECT summary FROM items WHERE id = ?", (item.id,)).fetchone()[0]
 
@@ -133,6 +136,56 @@ def _find_duplicate(conn: sqlite3.Connection, item: Item, content_hash: str | No
         (item.id, item.url, content_hash),
     ).fetchone()
     return row[0] if row else None
+
+
+# 見出しの 2 文字ずつの集合の重なり（Jaccard 係数）がこれ以上の記事だけ、LLM で同じ出来事か判定する。
+# 11/07 の 235 件で 0.15 → 候補 27 組（同じ出来事 15 組はすべて A の確率 0.94 以上、別の 12 組は 0.48 以下）
+SAME_STORY_TITLE_SIM = 0.15
+SAME_STORY_HOURS = 48
+# 見出しの末尾の媒体名（「：朝日新聞」「（共同通信） - Yahoo!ニュース」）
+TITLE_SOURCE = re.compile(r"\s*(?:[-|｜：]\s*[^-|｜：]{1,20}|[（(][^）)]{1,15}[）)])\s*$")
+
+
+def _title_bigrams(title: str | None) -> set[str]:
+    t = title or ""
+    for _ in range(2):
+        t = TITLE_SOURCE.sub("", t)
+    t = re.sub(r"[\W_]+", "", t)
+    return {t[i:i + 2] for i in range(len(t) - 1)}
+
+
+async def _same_story(conn: sqlite3.Connection, summarizer: Summarizer, cfg: Config, item: Item) -> bool:
+    """見出しの似た直近の記事と同じ出来事かを LLM で判定し、後の方を duplicate にする。item が後なら True。
+
+    転載先ごとに本文が違う記事（朝日と時事、Yahoo!ニュースのトピックスと元記事など）を 1 件にする。
+    残すのは先に保存した方（投稿済みは消さない）なので、同時に処理した 2 件が互いを判定しても同じ側が残る。
+    """
+    mine = _title_bigrams(item.title)
+    if not mine:
+        return False
+    since = (datetime.now(UTC) - timedelta(hours=SAME_STORY_HOURS)).isoformat(timespec="seconds")
+    rows = conn.execute(
+        "SELECT id, title, md_path, status FROM items WHERE id != ? AND status IN ('saved', 'notified')"
+        " AND fetched_at >= ?",
+        (item.id, since),
+    ).fetchall()
+    for r in rows:
+        theirs = _title_bigrams(r["title"])
+        if not theirs or len(mine & theirs) / len(mine | theirs) < SAME_STORY_TITLE_SIM:
+            continue
+        body = archive.read_body(r["md_path"]) if r["md_path"] and Path(r["md_path"]).exists() else ""
+        p = await summarizer.same_story((item.title, item.content_md), (r["title"], body))
+        if p is None or p < cfg.summarize.same_story_threshold:
+            continue
+        with conn:
+            if r["status"] == "notified" or r["id"] < item.id:
+                db.update_item(conn, item.id, status="duplicate", error=f"same story: item {r['id']}")
+                return True
+            conn.execute(
+                "UPDATE items SET status = 'duplicate', error = ? WHERE id = ? AND status = 'saved'",
+                (f"same story: item {item.id}", r["id"]),
+            )
+    return False
 
 
 async def _summarize(

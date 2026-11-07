@@ -50,6 +50,7 @@ def make(tmp_path: Path):
     conn = db.connect(":memory:")
     db.insert_feed(conn, "https://site.example/feed", "テスト", None, "tech/sub")
     cfg = Config(general=GeneralConfig(archive_dir=str(tmp_path / "archive")))
+    cfg.summarize.same_story_threshold = 0  # 記事A〜C は見出しが似ているので、同じ出来事の判定は個別のテストで
     return conn, cfg
 
 
@@ -282,3 +283,38 @@ def test_duplicates_skipped(tmp_path):
     statuses = sorted(r[0] for r in conn.execute("SELECT status FROM items"))
     assert statuses == ["duplicate", "duplicate", "duplicate", "saved"]
     assert len(list((tmp_path / "archive").rglob("*.md"))) == 1
+
+
+def test_same_story(tmp_path):
+    import json as _json
+    import math
+
+    from feedpipe.llm import Summarizer
+    from feedpipe.rss.pipeline import _title_bigrams
+
+    assert _title_bigrams("自民、退席の石破氏らに説明要求（共同通信） - Yahoo!ニュース") == _title_bigrams("自民退席の石破氏らに説明要求")
+
+    def llm(request: httpx.Request) -> httpx.Response:
+        body = _json.loads(request.content)
+        user = body["messages"][1]["content"]
+        if body["grammar"] == 'root ::= "A" | "B"':  # 記事A と 記事B は同じ出来事、記事C は別
+            p_a = 0.95 if "記事C" not in user else 0.1
+            top = [{"token": "A", "logprob": math.log(p_a)}, {"token": "B", "logprob": math.log(1 - p_a)}]
+        else:  # 重要度の判定: すべて低い
+            top = [{"token": "C", "logprob": math.log(0.9)}, {"token": "A", "logprob": math.log(0.1)}]
+        return httpx.Response(200, json={"choices": [{"message": {"content": "A"},
+                                                      "logprobs": {"content": [{"top_logprobs": top}]}}]})
+
+    conn, cfg = make(tmp_path)
+    cfg.summarize.same_story_threshold = 0.9
+    cfg.summarize.max_age_days = 100000
+
+    async def go():
+        async with Summarizer(cfg.summarize, transport=httpx.MockTransport(llm)) as s:
+            return await run_feeds(conn, db.list_feeds(conn), cfg, backfill=3, summarizer=s,
+                                   transport=httpx.MockTransport(Site().handler))
+
+    [r] = asyncio.run(go())
+    assert r.duplicates == 1
+    statuses = dict(conn.execute("SELECT key, status FROM items").fetchall())
+    assert statuses == {"a": "duplicate", "b": "saved", "c": "saved"}  # 先に登録した（新しい順なので）記事B を残す

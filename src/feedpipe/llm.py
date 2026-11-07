@@ -40,6 +40,10 @@ CLASSIFY_PROMPT = (
 # 選択肢の記号（Discord のフォーラムのタグは 20 個までなので、サブジャンルも 20 個まで）
 CHOICE_LETTERS = "ABCDEFGHIJKLMNOPQRST"
 NONE_LETTER = "Z"
+SAME_STORY_PROMPT = (
+    "2 つのニュース記事が、同じ出来事（同じ事件・発表・話題）を報じたものかを判定します。"
+    "同じなら A、関連はあっても別の出来事なら B を 1 文字だけ答えてください。"
+)
 TREND_PROMPT = (
     "あなたはニュース編集者です。今日のニュース見出しの一覧を読み、"
     "全体として目立つ傾向を日本語2文以内で述べてください。一覧にないことは書かないでください。"
@@ -54,6 +58,10 @@ def prepare_input(title: str | None, markdown: str, max_chars: int) -> str:
     body = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", body)
     body = re.sub(r"\n{3,}", "\n\n", body).strip()[:max_chars]
     return f"タイトル: {title or '(無題)'}\n\n本文:\n{body}"
+
+
+def _headline(title: str | None, markdown: str | None) -> str:
+    return f"見出し: {title or '(無題)'}\n冒頭: {lead(markdown or '')}"
 
 
 def lead(markdown: str, chars: int = LEAD_CHARS) -> str:
@@ -155,8 +163,8 @@ class Summarizer:
         except (KeyError, IndexError, TypeError):
             return None
 
-    async def _choose(self, system: str, title: str | None, markdown: str | None, letters: str, what: str) -> dict[str, float] | None:
-        """見出しと冒頭を渡して letters のどれか 1 文字だけを出させ、各文字の確率（合計 1）を返す。
+    async def _choose(self, system: str, user: str, letters: str, what: str) -> dict[str, float] | None:
+        """user（見出しと冒頭など）を渡して letters のどれか 1 文字だけを出させ、各文字の確率（合計 1）を返す。
 
         文章を書かせず 1 トークンだけを出させ、その確率を読む（Jev 風の判定）。
         出力が 1 トークンなので、時間はほぼ入力の読み込みだけ（CPU で 1〜2 秒）。
@@ -165,7 +173,7 @@ class Summarizer:
             {
                 "messages": [
                     {"role": "system", "content": system},
-                    {"role": "user", "content": f"見出し: {title or '(無題)'}\n冒頭: {lead(markdown or '')}"},
+                    {"role": "user", "content": user},
                 ],
                 "temperature": 0,
                 "max_tokens": 1,
@@ -187,7 +195,15 @@ class Summarizer:
     async def priority(self, title: str | None, markdown: str | None, criteria: str | None = None) -> float | None:
         """見出しと冒頭から重要度を判定し、「A（高い）」の確率（0〜1）を返す。"""
         system = PRIORITY_PROMPT.format(criteria=criteria or DEFAULT_CRITERIA)
-        probs = await self._choose(system, title, markdown, "ABC", f"重要度の判定（{title}）")
+        probs = await self._choose(system, _headline(title, markdown), "ABC", f"重要度の判定（{title}）")
+        return round(probs.get("A", 0), 3) if probs else None
+
+    async def same_story(
+        self, a: tuple[str | None, str | None], b: tuple[str | None, str | None]
+    ) -> float | None:
+        """2 つの記事（(見出し, 本文)）が同じ出来事を報じたものである確率（0〜1）。判定に失敗したら None。"""
+        user = f"記事1: {a[0] or '(無題)'}\n{lead(a[1] or '', 300)}\n\n記事2: {b[0] or '(無題)'}\n{lead(b[1] or '', 300)}"
+        probs = await self._choose(SAME_STORY_PROMPT, user, "AB", f"同じ出来事の判定（{a[0]}）")
         return round(probs.get("A", 0), 3) if probs else None
 
     async def classify(
@@ -201,7 +217,7 @@ class Summarizer:
         lines = [f"{c}: {name}" + (f"（{desc}）" if desc else "") for c, (name, desc) in zip(letters, options)]
         lines.append(f"{NONE_LETTER}: どれにも当てはまらない")
         system = CLASSIFY_PROMPT.format(choices="\n".join(lines), letters="・".join(letters))
-        probs = await self._choose(system, title, markdown, letters, f"サブジャンルの判定（{title}）")
+        probs = await self._choose(system, _headline(title, markdown), letters, f"サブジャンルの判定（{title}）")
         if not probs:
             return None
         best = max(probs, key=probs.get)

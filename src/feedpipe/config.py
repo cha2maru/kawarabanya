@@ -66,6 +66,8 @@ class SummarizeConfig:
     max_age_days: int = 3
     # 要約の前に重要度（A の確率）を判定し、これ以上の記事だけ要約する。0 なら判定せず全件要約する
     priority_threshold: float = 0.8
+    # 見出しの似た直近の記事と同じ出来事かを判定し、確率がこれ以上なら後の方を投稿しない。0 なら判定しない
+    same_story_threshold: float = 0.9
 
 
 @dataclass

@@ -120,6 +120,7 @@ model = "Qwen3.5-4B"
 max_age_days = 3             # 公開からこの日数以内の記事だけ要約する
 max_input_chars = 1000       # 要約に渡す本文の文字数
 priority_threshold = 0.8     # 重要度（A の確率）がこれ以上の記事だけ要約する。0 なら全件
+same_story_threshold = 0.9   # 見出しの似た直近の記事と同じ出来事である確率がこれ以上なら、後の方を投稿しない。0 なら判定しない
 
 [discord]
 nsfw = true                  # フォーラムを年齢制限にする
