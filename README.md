@@ -233,6 +233,8 @@ uvx ruff check src tests                           # 規則は pyproject.toml �
 uv run --with pdoc pdoc kawarabanya -o docs/api   # API ドキュメント（docstring から HTML）
 ```
 
+[Claude Code](https://claude.com/claude-code) を使うなら、`.claude/skills/` のスキル（`kawarabanya-install`・`kawarabanya-discord-setup`・`kawarabanya-ops`）が、インストール・Discord の準備・日々の操作を案内する（「インストールして」「サイトを追加して」などと頼む）。
+
 コードの構成と依存の向き（`cli`・`bot` → `rss` → `core`）、書き方は [docs/CODING.md](docs/CODING.md)。Discord から頼めることを足すときは `src/kawarabanya/bot/assistant.py` の `COMMANDS` に、サイト別の取り込みは `extensions/` に足す。
 
 ## ライセンス
