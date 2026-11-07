@@ -74,9 +74,13 @@ feeds = [
 
 priority = "A: 高い（…） B: 普通（…） C: 低い（…）"   # 重要度の判定基準（省略可）
 
-[hobby.boardgame]            # サブジャンル = フォーラムのタグ
+[tech.ai]                    # サブジャンル = フォーラムのタグ。記事ごとにローカル LLM が振り分ける
+label = "AI"
+description = "生成 AI・機械学習・AI サービス"   # LLM が判定する手がかり
+
+[hobby.boardgame]
 label = "ボードゲーム"
-feeds = [ ... ]
+feeds = [ ... ]              # サブジャンルの下に書いたフィードは、判定せずにこのサブジャンルになる
 ```
 
 RSS のないサイトは、`feeds` に URL の代わりにテーブルを書くと一覧ページから記事を取り込む（HTML 取り込み）:

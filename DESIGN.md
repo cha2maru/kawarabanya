@@ -16,7 +16,7 @@ systemd --user: feedpipe-bot.service
 └─ feedpipe bot（常駐。discord.py で Gateway に接続）
    ├─ 子プロセス: scripts/llama-server.sh（llama.cpp + Qwen3.5-4B、OpenAI 互換 API :8080）
    └─ 60 分ごとに子プロセス: feedpipe run → feedpipe digest --due（21 時以降に 1 日 1 回）
-        取得 ─▶ 既読判定 ─▶ 全文抽出 ─▶ Markdown 保存 ─▶ 重要度判定 ─▶ 要約 ─▶ 投稿 ─▶ 👍 集計
+        取得 ─▶ 既読判定 ─▶ 全文抽出 ─▶ Markdown 保存 ─▶ サブジャンル・重要度判定 ─▶ 要約 ─▶ 投稿 ─▶ 👍 集計
         (httpx)  (SQLite)   (trafilatura) (archive/)     (LLM 1 トークン) (LLM)  (Webhook) (Bot API)
 
 設定・データ:
@@ -71,6 +71,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 
 ### 3.3 重要度の判定と要約
 - **公開から 3 日以内の記事だけ**対象にする（投稿しない古い記事に CPU を使わない）。
+- **サブジャンルの判定（Jev 風）**: トップレベルのジャンルのフィードの記事は、そのジャンルのサブジャンル（`label`＋`description`）を A〜T、「どれにも当てはまらない」を Z として 1 文字で選ばせ、`items.subgenre` に記録する（1 件 約 1.5 秒）。サブジャンルの下に書いた（固定した）フィードは判定しない。判定したサブジャンルの重要度の基準を、次の判定に使う。
 - **重要度の判定（Jev 風）**: 見出し＋冒頭 200 字を渡し、A（高い）/ B / C の 1 トークンだけを文法制約で出させて、A の確率を `items.priority` に記録する（1 件 約 1.5 秒）。判定基準はジャンルごとに `genres.toml` の `priority` で変えられる。ラベルの割合は偏る（tech では A が 7 割）ので、ラベルではなく確率で選ぶ。
 - **A の確率が 0.8 以上の記事だけ要約する**（`priority_threshold`。0 なら全件）。tech の 1 日分では約 3 割。判定に失敗したときは取りこぼさないよう要約する。
 - 要約: 本文の先頭 1,000 字を渡し、2〜3 文・120 字程度で要約させる（1 件 約 9 秒）。思考モードは切る。日本語と英数字の間の余分な空白は除く。
@@ -78,7 +79,8 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 - サーバーに繋がらなければ、その回は判定・要約なしで続ける（後から `summarize` で補える）。
 
 ### 3.4 Discord
-- **ジャンル 1 つ = フォーラム 1 つ**（親カテゴリ「feedpipe」の下。年齢制限オン）。**サブジャンルとフィード名はフォーラムのタグ**（上限 20 個、名前は 20 字）。
+- **ジャンル 1 つ = フォーラム 1 つ**（親カテゴリ「feedpipe」の下。年齢制限オン）。**フォーラムのタグはサブジャンルだけ**（上限 20 個、名前は 20 字）。フィード名はタグにせず、投稿者名で示す（フィードが 20 を超えるとタグが足りなくなるため）。
+- 投稿のタグは記事のサブジャンル（`items.subgenre`、なければフィードを固定したサブジャンル）。
 - **1 記事 = 1 投稿**: スレッド名 = 記事タイトル、表示名 = フィード名、本文 = 要約（なければ本文の先頭 200 字）＋公開日時＋URL。メンションは無効化。
 - 公開から 3 日を過ぎた未通知の記事は投稿せず `stale` にする。1 回の実行で投稿するのは 30 件まで。
 - `discord setup` はジャンル構成に合わせてフォーラム・タグ・Webhook・既定リアクションを揃える（何度実行しても同じ結果）。`--prune` で対応しないフォーラムを削除する。
@@ -97,7 +99,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 | テーブル | 主な列 |
 |---|---|
 | `feeds` | url（移転で更新）/ original_url / title / category（= ジャンルのパス）/ enabled / disabled_reason / etag / last_modified / last_status / fail_count / latest_entry_at / initialized_at / options（JSON） |
-| `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ notified_at / discord_thread_id / likes / likes_checked_at |
+| `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ subgenre（LLM が判定したサブジャンル）/ notified_at / discord_thread_id / likes / likes_checked_at |
 | `discord_channels` | category（トップレベルのジャンル。まとめの投稿先は `#digest`）/ guild_id / channel_id / webhook_url / tags（JSON: `feed:<id>` と `sub:<パス>` → タグ ID） |
 | `digests` | genre / day（ローカル日付）/ thread_id（投稿したメッセージの ID）— 投稿済みのまとめ |
 
@@ -146,4 +148,4 @@ LFM（軽さ優先で最初に選んだ）は事実の誤りがあったため�
 4. **スラッシュコマンド**: `/feed add` など。次に作る機能が決まってから。
 5. **WSL2 での常駐**: Windows が起動している間だけ動く。WSL の起動時に自動で立ち上げるには `loginctl enable-linger` が必要。
 6. **プロジェクト名**: Bot 全体の名前にするか（今は `feedpipe`）。
-7. タグ名が 20 字で途中から切れる（必要なら genres.toml でフィードごとの短い名前を指定できるようにする）。
+7. サブジャンルの判定の精度（実データ 14 件の目視では妥当。どれにも当てはまらない記事はタグなし）。

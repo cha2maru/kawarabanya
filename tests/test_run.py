@@ -218,3 +218,49 @@ def test_summarize_skips_old_and_unavailable(tmp_path):
     [r], available = asyncio.run(go2())
     assert [i.title for i in r.saved] == ["記事D"] and r.saved[0].summary is None
     assert available is False
+
+
+def test_classify_subgenre(tmp_path):
+    import json as _json
+    import math
+
+    from feedpipe.llm import Summarizer
+
+    (tmp_path / "genres.toml").write_text(
+        '[tech]\nfeeds = ["https://site.example/feed"]\n'
+        '[tech.ai]\nlabel = "AI"\ndescription = "生成 AI・機械学習"\n[tech.gadget]\nlabel = "ガジェット"\n',
+        encoding="utf-8",
+    )
+    calls = []
+
+    def llm(request: httpx.Request) -> httpx.Response:
+        body = _json.loads(request.content)
+        calls.append(body)
+        user = body["messages"][1]["content"]
+        if "Z" in body.get("grammar", ""):  # サブジャンルの判定: 記事C は B（ガジェット）、それ以外は Z
+            best = "B" if "記事C" in user else "Z"
+            top = [{"token": best, "logprob": math.log(0.8)}, {"token": "A", "logprob": math.log(0.2)}]
+        else:  # 重要度の判定: すべて低い
+            top = [{"token": "C", "logprob": math.log(0.9)}, {"token": "A", "logprob": math.log(0.1)}]
+        return httpx.Response(200, json={"choices": [{"message": {"content": "A"},
+                                                      "logprobs": {"content": [{"top_logprobs": top}]}}]})
+
+    conn, cfg = make(tmp_path)
+    conn.execute("UPDATE feeds SET category = 'tech'")
+    cfg.general.genres_file = str(tmp_path / "genres.toml")
+    cfg.summarize.max_age_days = 100000
+
+    async def go():
+        async with Summarizer(cfg.summarize, transport=httpx.MockTransport(llm)) as s:
+            return await run_feeds(conn, db.list_feeds(conn), cfg, backfill=2, summarizer=s,
+                                   transport=httpx.MockTransport(Site().handler))
+
+    asyncio.run(go())
+    classify = [c for c in calls if "Z" in c.get("grammar", "")]
+    assert len(classify) == 2
+    assert "A: AI（生成 AI・機械学習）" in classify[0]["messages"][0]["content"]
+    assert classify[0]["grammar"] == 'root ::= "A" | "B" | "Z"'
+    assert dict(conn.execute("SELECT key, subgenre FROM items WHERE status != 'seen'").fetchall()) == {
+        "b": None,  # どれにも当てはまらない
+        "c": "tech/gadget",
+    }

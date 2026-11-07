@@ -21,7 +21,7 @@ class FakeDiscord:
         self.channels = [
             {"id": "10", "type": 4, "name": "feedpipe"},
             {"id": "11", "type": GUILD_FORUM, "name": "tech", "parent_id": "10",
-             "available_tags": [{"id": "t1", "name": "既存フィード"}]},
+             "available_tags": [{"id": "t1", "name": "AI"}, {"id": "t2", "name": "既存フィード"}]},
             {"id": "12", "type": GUILD_FORUM, "name": "news"},  # 親カテゴリが違うので別物
         ]
         self.webhooks: dict[str, list] = {"11": [{"id": "w11", "name": "feedpipe", "token": "k11"}]}
@@ -105,12 +105,12 @@ def setup():
     return fake, client, conn
 
 
-def test_tag_name_strips_after_truncation():
-    feed = db.Feed(id=1, url="u", original_url="u", title="はてなブックマーク - キーワード - コミティア", site_url=None,
-                   category=None, enabled=True, disabled_reason=None, last_status=None, last_error=None,
-                   last_success_at=None, latest_entry_at=None, fail_count=0, etag=None, last_modified=None,
-                   initialized_at=None)
-    assert discord_api.tag_name(feed) == "はてなブックマーク - キーワード -"
+def tech_genres(tmp_path):
+    from feedpipe.rss.genres import load_genres
+
+    g = tmp_path / "genres.toml"
+    g.write_text('[tech]\n[tech.ai]\nlabel = "AI"\n[tech.security]\nlabel = "セキュリティ"\n', encoding="utf-8")
+    return load_genres(g)
 
 
 def test_channel_name():
@@ -121,40 +121,43 @@ def test_channel_name():
     assert channel_name(None) == "uncategorized"
 
 
-def test_plan_and_apply_forums():
+def test_plan_and_apply_forums(tmp_path):
     fake, client, conn = setup()
     guild = discord_api.resolve_guild(client, None)
-    plan = make_plan(client, guild, discord_api.feeds_by_category(conn), "feedpipe")
+    plan = make_plan(client, guild, discord_api.feeds_by_category(conn), "feedpipe", tech_genres(tmp_path))
     assert plan.parent_id == "10"
     assert [(p.name, p.exists) for p in plan.channels] == [("news", False), ("tech", True), ("ホビー", False)]
     tech = plan.channels[1]
-    assert tech.missing_tags() == ["新フィード"]
-    assert tech.extra_tags() == []
+    # タグはサブジャンルだけ。フィード名の古いタグは消す
+    assert tech.wanted_tags() == ["AI", "セキュリティ"]
+    assert tech.missing_tags() == ["セキュリティ"]
+    assert [t["name"] for t in tech.extra_tags()] == ["既存フィード"]
 
     created = apply_plan(client, conn, plan, "feedpipe", nsfw=True)
     assert [p.name for p in created] == ["news", "ホビー"]
     hobby = next(c for c in fake.channels if c["name"] == "ホビー")
     assert hobby["type"] == GUILD_FORUM and hobby["parent_id"] == "10"
     assert hobby["nsfw"] is True
-    assert [t["name"] for t in hobby["available_tags"]] == ["ホビー誌"]
+    assert hobby["available_tags"] == []  # サブジャンルのないジャンルはタグなし
     tech_ch = next(c for c in fake.channels if c["id"] == "11")
-    assert [t["name"] for t in tech_ch["available_tags"]] == ["既存フィード", "新フィード"]
-    assert tech_ch["available_tags"][0]["id"] == "t1"  # 既存のタグを消さない
+    assert [t["name"] for t in tech_ch["available_tags"]] == ["AI", "セキュリティ"]
+    assert tech_ch["available_tags"][0]["id"] == "t1"  # 残すタグは id を保つ
     assert tech_ch["nsfw"] is True  # 既存のフォーラムも年齢制限にそろえる
 
     rows = {r["category"]: r for r in conn.execute("SELECT * FROM discord_channels")}
     assert rows["tech"]["webhook_url"] == "https://discord.com/api/webhooks/w11/k11"  # 既存を再利用
-    assert len(json.loads(rows["tech"]["tags"])) == 2
+    assert set(json.loads(rows["tech"]["tags"])) == {"sub:tech/ai", "sub:tech/security"}
 
     # もう一度実行しても作り直さない
-    again = make_plan(client, guild, discord_api.feeds_by_category(conn), "feedpipe")
-    assert all(p.exists and not p.missing_tags() and p.nsfw for p in again.channels)
+    again = make_plan(client, guild, discord_api.feeds_by_category(conn), "feedpipe", tech_genres(tmp_path))
+    assert all(p.exists and not p.missing_tags() and not p.extra_tags() and p.nsfw for p in again.channels)
     assert apply_plan(client, conn, again, "feedpipe", nsfw=True) == []
 
 
 def test_notify_posts_forum_threads(tmp_path):
     fake, client, conn = setup()
-    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "feedpipe")
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "feedpipe",
+                     tech_genres(tmp_path))
     apply_plan(client, conn, plan, "feedpipe")
 
     md = tmp_path / "a.md"
@@ -162,7 +165,7 @@ def test_notify_posts_forum_threads(tmp_path):
     feed_id = db.find_feed_by_url(conn, "https://6tech.example/既存フィード").id
     with conn:
         a = db.insert_item(conn, feed_id, "a", "https://a", "記事1", ago(hours=5), "saved")
-        db.update_item(conn, a, md_path=str(md))
+        db.update_item(conn, a, md_path=str(md), subgenre="tech/ai")  # LLM が判定したサブジャンル
         b = db.insert_item(conn, feed_id, "b", "https://b", "記事2", ago(hours=1), "saved")
         db.update_item(conn, b, summary="LLM の要約 @everyone")
         db.insert_item(conn, feed_id, "c", "https://c", "既読", None, "seen")
@@ -175,7 +178,8 @@ def test_notify_posts_forum_threads(tmp_path):
     p1, p2 = fake.posts
     assert p1["thread_name"] == "記事1"
     assert p1["username"] == "既存フィード"
-    assert p1["applied_tags"] == ["t1"]
+    assert p1["applied_tags"] == ["t1"]  # 記事のサブジャンル（AI）のタグ
+    assert "applied_tags" not in p2  # サブジャンルが決まらなかった記事はタグなし
     assert p1["content"].startswith("本文の 先頭 です。リンク 20~50% a_b")
     assert "🕒 " in p1["content"]
     assert p1["content"].endswith("https://a")
@@ -204,35 +208,26 @@ def test_subgenre_tags(tmp_path):
     fake.channels = []
     client = DiscordClient("TOKEN", transport=httpx.MockTransport(fake.handler))
     conn = db.connect(":memory:")
-    fid = db.insert_feed(conn, "https://w.example/rss", "世界ニュース", None, "news/world")
-    db.insert_feed(conn, "https://d.example/rss", "国内ニュース", None, "news")
+    fixed = db.insert_feed(conn, "https://w.example/rss", "世界ニュース", None, "news/world")  # サブジャンルに固定
+    top = db.insert_feed(conn, "https://d.example/rss", "国内ニュース", None, "news")
     g = tmp_path / "genres.toml"
     g.write_text('[news]\ndescription = "総合"\n[news.world]\nlabel = "国際"\n', encoding="utf-8")
 
     plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "feedpipe",
                      load_genres(g))
     [pc] = plan.channels  # news/world も news のフォーラムにまとまる
-    assert pc.name == "news" and pc.wanted_tags() == ["国際", "国内ニュース", "世界ニュース"]
+    assert pc.name == "news" and pc.wanted_tags() == ["国際"]
     apply_plan(client, conn, plan, "feedpipe")
     forum = next(c for c in fake.channels if c["type"] == GUILD_FORUM)
     assert forum["topic"] == "総合"
 
     with conn:
-        db.insert_item(conn, fid, "k", "https://w.example/1", "記事", ago(hours=1), "saved")
+        db.insert_item(conn, fixed, "k", "https://w.example/1", "固定", ago(hours=2), "saved")
+        i = db.insert_item(conn, top, "m", "https://d.example/1", "判定", ago(hours=1), "saved")
+        db.update_item(conn, i, subgenre="news/world")
     notify.notify_pending(conn, limit=5, max_age_days=3, transport=httpx.MockTransport(fake.handler), interval=0)
-    tag_by_name = {t["name"]: t["id"] for t in forum["available_tags"]}
-    assert fake.posts[-1]["applied_tags"] == [tag_by_name["国際"], tag_by_name["世界ニュース"]]
-
-
-def test_removes_unused_tags():
-    fake, client, conn = setup()
-    tech = next(c for c in fake.channels if c["id"] == "11")
-    tech["available_tags"].append({"id": "old", "name": "消えたフィード"})
-    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn, ["tech"]), "feedpipe")
-    assert [t["name"] for t in plan.channels[0].extra_tags()] == ["消えたフィード"]
-    apply_plan(client, conn, plan, "feedpipe")
-    assert [t["name"] for t in tech["available_tags"]] == ["既存フィード", "新フィード"]
-    assert tech["available_tags"][0]["id"] == "t1"  # 残すタグは id を保つ
+    [tag] = [t["id"] for t in forum["available_tags"]]
+    assert [p["applied_tags"] for p in fake.posts] == [[tag], [tag]]
 
 
 def test_default_reaction_and_like_sync():

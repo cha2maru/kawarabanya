@@ -8,7 +8,6 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
 
 import httpx
 
@@ -143,13 +142,6 @@ MAX_TAGS = 20  # フォーラムに付けられるタグの上限
 MAX_TAG_CHARS = 20
 
 
-def tag_name(feed: db.Feed) -> str:
-    """フィードのフォーラムタグ名（タイトルを 20 字に切る）。"""
-    name = (feed.title or urlsplit(feed.url).hostname or "feed").strip()
-    # Discord は末尾の空白を落として保存するので、切った後にも strip しないと名前が一致しない
-    return name[:MAX_TAG_CHARS].strip()
-
-
 @dataclass
 class PlannedChannel:
     """setup で用意する 1 つのフォーラム（ジャンル）の予定と、既存の状態。"""
@@ -169,12 +161,12 @@ class PlannedChannel:
         return self.channel_id is not None
 
     def _all_tags(self) -> list[str]:
-        """付けたいタグを、上限を考えずにすべて返す（サブジャンル → フィード名の順、重複なし）。"""
+        """付けたいタグ（サブジャンルの表示名、重複なし）を、上限を考えずにすべて返す。"""
         subs = [label[:MAX_TAG_CHARS].strip() for label in self.subgenres.values()]
-        return list(dict.fromkeys([*subs, *(tag_name(f) for f in self.feeds)]))
+        return list(dict.fromkeys(subs))
 
     def wanted_tags(self) -> list[str]:
-        """サブジャンル → フィード名の順のタグ（重複除去、上限 20 個）。"""
+        """サブジャンルのタグ（上限 20 個）。"""
         return self._all_tags()[:MAX_TAGS]
 
     def missing_tags(self) -> list[str]:
@@ -291,9 +283,8 @@ def apply_plan(
                 pc.existing_tags, pc.nsfw = ch.get("available_tags", []), bool(ch.get("nsfw"))
 
         tag_ids = {t["name"]: t["id"] for t in pc.existing_tags}
-        # 投稿時に付けるタグ: "sub:<サブジャンル>" と "feed:<フィード ID>" → タグ ID
-        feed_tags = {f"feed:{f.id}": tag_ids[n] for f in pc.feeds if (n := tag_name(f)) in tag_ids}
-        feed_tags |= {
+        # 投稿時に付けるタグ: "sub:<サブジャンル>" → タグ ID（記事のサブジャンルは LLM が判定する）
+        feed_tags = {
             f"sub:{path}": tag_ids[label[:MAX_TAG_CHARS].strip()]
             for path, label in pc.subgenres.items()
             if label[:MAX_TAG_CHARS].strip() in tag_ids
