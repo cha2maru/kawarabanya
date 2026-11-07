@@ -103,7 +103,7 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 | `check [--disable-dead]` | 死活チェック（移転していれば URL を更新） |
 | `feeds add URL [--genre G\|auto] [--title T] [--no-discover]` | サイトかフィードの URL から登録する（`--genre auto` なら LLM がジャンルを決める）。ページ内の案内（`<link rel="alternate">`）やよくある場所（/feed など）から RSS を探し、genres.toml の `G` にも書き足す。初回は既存の記事を既読にするだけ |
 | `feeds rsshub URL` | URL が RSSHub のどのルートで取れるかを調べる（RSSHub の radar ルールを jsDelivr から取って `data/` に 7 日置く。RSSHub は動かさなくてよい）。`feeds add` でフィードが見つからないときも案内する |
-| `feeds remove ID\|URL` | 無効にして genres.toml から外す（保存済みの記事と投稿は残す） |
+| `feeds remove ID\|URL` | 無効にして genres.toml から外す（保存済みの記事と投稿は残す。`feeds add` で同じ URL を足すと有効に戻る） |
 | `feeds list\|enable\|disable\|option` | フィードの管理（例: `feeds option ID no_fulltext true`） |
 | `genres interest G like\|normal\|low\|mute` | ジャンル・サブジャンルの好き嫌いを genres.toml に書く |
 | `doctor` | 動かすのに必要なもの（設定・DB・Discord・MESSAGE CONTENT INTENT・要約サーバー・常駐サービス）がそろっているかを調べる。❌ があれば終了コード 1 |

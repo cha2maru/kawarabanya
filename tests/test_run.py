@@ -5,7 +5,7 @@ from pathlib import Path
 import httpx
 
 from kawarabanya.core import db
-from kawarabanya.core.config import Config, GeneralConfig
+from kawarabanya.core.config import Config, GeneralConfig, SummarizeConfig
 from kawarabanya.rss import archive
 from kawarabanya.rss.item import Item, from_entry
 from kawarabanya.rss.pipeline import run_feeds
@@ -357,3 +357,46 @@ def test_sitemap_source_fills_titles(tmp_path):
     titles = dict(conn.execute("SELECT url, title FROM items").fetchall())
     assert titles == {"https://site.example/b": "ニュースの見出し",  # news:title
                       "https://site.example/a": "ページの題 a"}  # なければ記事ページの <title>
+
+
+def test_classify_two_steps_when_too_many_subgenres(tmp_path, monkeypatch):
+    import json as _json
+    import math
+
+    import pytest
+
+    from kawarabanya.core.llm import Summarizer
+    from kawarabanya.rss import pipeline
+    from kawarabanya.rss.genres import load_genres
+
+    (tmp_path / "genres.toml").write_text(
+        '[tech]\nlabel = "テック"\n[tech.ai]\nlabel = "AI"\n[tech.gadget]\nlabel = "ガジェット"\n'
+        '[culture]\nlabel = "カルチャー"\n[culture.movie]\nlabel = "映画"\n', encoding="utf-8")
+    genres = load_genres(tmp_path / "genres.toml")
+    monkeypatch.setattr(pipeline, "CHOICE_LETTERS", "AB")  # 1 回で選べるのは 2 個まで → サブジャンル 3 個は 2 段階
+    asked = []
+
+    def llm(req):
+        body = _json.loads(req.content)
+        asked.append(body["messages"][0]["content"])
+        best = "B" if "カルチャー" in asked[-1] and "映画" not in asked[-1] else "A"  # 1 回目はジャンル、2 回目は映画
+        top = [{"token": best, "logprob": math.log(0.9)}, {"token": "Z", "logprob": math.log(0.1)}]
+        return httpx.Response(200, json={"choices": [{"message": {"content": best},
+                                                      "logprobs": {"content": [{"top_logprobs": top}]}}]})
+
+    conn, _ = make(tmp_path)
+    item = db.insert_item(conn, 1, "x", None, "ゴジラの新作映画", None, "saved")
+
+    async def go():
+        async with Summarizer(SummarizeConfig(), transport=httpx.MockTransport(llm)) as s:
+            return await pipeline.classify_item(conn, s, genres, item, "ゴジラの新作映画", "tech", "本文")
+
+    assert asyncio.run(go()) == "culture/movie"
+    assert "B: カルチャー" in asked[0] and "A: カルチャー / 映画" in asked[1] and len(asked) == 2
+
+    async def too_many():
+        async with Summarizer(SummarizeConfig(), transport=httpx.MockTransport(llm)) as s:
+            return await s.classify("t", "b", [(str(i), "") for i in range(60)])
+
+    with pytest.raises(ValueError, match="選択肢は"):
+        asyncio.run(too_many())  # 黙って選択肢を捨てない

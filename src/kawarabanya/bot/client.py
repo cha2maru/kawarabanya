@@ -163,7 +163,11 @@ class Bot(discord.Client):
 
     async def run_requested(self, intent: assistant.Intent) -> tuple[str, list[discord.File]]:
         """依頼されたコマンドを（定期実行と重ならないよう順番に）実行し、返事の本文と添付ファイルを返す。"""
-        async with self._lock:
+        # 変更するコマンドだけ定期処理と順番にする（状態・一覧は、数十分かかる取り込みを待たずに返す）
+        if intent.confirm:
+            async with self._lock:
+                rc, out = await self._kawarabanya(*intent.argv)
+        else:
             rc, out = await self._kawarabanya(*intent.argv)
         out = out.strip() or "（出力なし）"
         if len(out) > MAX_OUTPUT:
@@ -211,7 +215,8 @@ class ConfirmView(discord.ui.View):
         waiting = "（定期実行が終わるのを待っています）" if self.bot._lock.locked() else ""
         await self._finish(interaction, f"**{self.intent.summary}** を実行中…{waiting}")
         content, files = await self.bot.run_requested(self.intent)
-        await interaction.edit_original_response(content=content, attachments=files)
+        # ボタン操作の応答は 15 分で切れるので、Bot のメッセージとして書き換える（取り込みの順番待ちで超えうる）
+        await interaction.message.edit(content=content, attachments=files, view=None)
 
     @discord.ui.button(label="やめる", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:

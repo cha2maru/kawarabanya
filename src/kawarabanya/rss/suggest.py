@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from kawarabanya.core import db
-from kawarabanya.core.llm import Summarizer
+from kawarabanya.core.llm import CHOICE_LETTERS, Summarizer
 from kawarabanya.rss import archive
 from kawarabanya.rss.forums import MAX_TAGS
 from kawarabanya.rss.genres import Genre, section_re, set_key, top_genre
@@ -148,6 +148,8 @@ async def verify(
 ) -> Suggestion | None:
     """新しいサブジャンルを足した一覧で s の記事を振り分け直し、実際にそこを選んだ記事だけを残す。"""
     options = _options(genres, [(s.genre, s.label, s.description)])
+    if len(options) > len(CHOICE_LETTERS):  # 1 回で選べる数を超えたら、案のジャンルの中だけで比べる
+        options = _options({p: g for p, g in genres.items() if g.top == s.genre}, [(s.genre, s.label, s.description)])
     kept = []
     for item_id in s.item_ids:
         r = rows[item_id]

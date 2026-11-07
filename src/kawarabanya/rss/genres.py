@@ -262,6 +262,7 @@ def set_interest(file: str | Path, gpath: str, level: str) -> None:
 
 def add_feed_url(file: str | Path, gpath: str, url: str, comment: str | None = None) -> None:
     """ジャンルの feeds の末尾に URL を書き足す（feeds がなければ作る。1 行の feeds = [...] は複数行に直す）。"""
+    comment = " ".join((comment or "").split())  # 改行がコメントの外に出ると TOML が壊れる
     line = f"  {json.dumps(url)},{f'  # {comment}' if comment else ''}\n"
 
     def edit(sec: str) -> str:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import socket
 import sqlite3
-import time
 from calendar import timegm
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -50,7 +49,6 @@ class CheckResult:
     """フィード 1 件を取得した結果。run では取得した記事と ETag なども運ぶ。"""
     feed: db.Feed
     status: Status
-    http_status: int | None = None
     # 恒久的なリダイレクト（301/308 のみ）の最終 URL。一時的なリダイレクトは None。
     moved_to: str | None = None
     feed_title: str | None = None
@@ -58,7 +56,6 @@ class CheckResult:
     # フィード内で最も新しい記事の日時（日付のない記事しかなければ None）
     latest_entry: datetime | None = None
     error: str | None = None
-    elapsed: float = 0.0
     # 以下は取得（run）で使う
     not_modified: bool = False  # 304 が返った
     parsed_entries: list = field(default_factory=list)
@@ -108,7 +105,6 @@ async def check_feed(
 
     conditional=True なら前回の ETag / Last-Modified を送り、304 なら not_modified になる。
     """
-    started = time.monotonic()
     result = CheckResult(feed=feed, status=Status.NETWORK)
     ext = None
     if feed.source_type != "rss":  # HTML 取り込み・サイト別の拡張
@@ -119,7 +115,6 @@ async def check_feed(
             return result
     if ext and ext.fetch:  # 自分で取得する拡張（sitemap など）
         await _check_with_fetch(fetcher, feed, ext, result)
-        result.elapsed = time.monotonic() - started
         return result
     headers: dict[str, str] = {}
     if conditional:
@@ -140,7 +135,6 @@ async def check_feed(
         else:
             result.error = f"{type(e).__name__}: {e}"
     else:
-        result.http_status = resp.status_code
         if resp.status_code == 304:
             result.status = Status.OK
             result.not_modified = True
@@ -173,7 +167,6 @@ async def check_feed(
         else:
             result.status = _classify_http(resp.status_code)
             result.error = f"HTTP {resp.status_code}"
-    result.elapsed = time.monotonic() - started
     return result
 
 
@@ -190,7 +183,6 @@ async def _check_with_fetch(fetcher: Fetcher, feed: db.Feed, ext: extensions.Ext
     try:
         entries = await ext.fetch(fetcher, feed.url, feed.option(feed.source_type) or {})
     except httpx.HTTPStatusError as e:
-        result.http_status = e.response.status_code
         result.status, result.error = _classify_http(e.response.status_code), f"HTTP {e.response.status_code}"
     except httpx.HTTPError as e:
         result.error = f"{type(e).__name__}: {e}"

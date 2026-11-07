@@ -214,3 +214,27 @@ def test_edit_genres_toml(tmp_path):
     assert g["news"].feeds == ["https://b.example/rss"] and g["tech"].interest is None
     text = p.read_text(encoding="utf-8")
     assert text.startswith("# 手書きのコメント") and "digest" not in text and "# B" in text
+
+
+def test_feeds_add_readd_and_no_duplicate_line(tmp_path, capsys):
+    import argparse
+
+    from kawarabanya.cli.rss import cmd_feeds_add, cmd_feeds_remove
+    from kawarabanya.core.config import Config, GeneralConfig
+    from kawarabanya.rss import genres
+
+    p = tmp_path / "genres.toml"
+    p.write_text('[tech]\nlabel = "テック"\nfeeds = [\n  "https://in-toml.example/feed",\n]\n', encoding="utf-8")
+    cfg = Config(general=GeneralConfig(db=str(tmp_path / "k.db"), genres_file=str(p)))
+
+    def add(url, title=None):
+        return cmd_feeds_add(cfg, argparse.Namespace(url=url, genre="tech", title=title, no_discover=True, db=None))
+
+    assert add("https://a.example/feed", "名前\n改行あり") == 0
+    assert add("https://in-toml.example/feed") == 0  # genres.toml にはあるが DB にない → 2 行目を書かない
+    assert genres.load_genres(p)["tech"].feeds == ["https://in-toml.example/feed", "https://a.example/feed"]
+    assert cmd_feeds_remove(cfg, argparse.Namespace(id="https://a.example/feed", db=None)) == 0
+    assert add("https://a.example/feed") == 0  # 外したサイトは有効に戻す
+    assert "有効に戻しました" in capsys.readouterr().out
+    assert genres.load_genres(p)["tech"].feeds.count("https://a.example/feed") == 1
+    assert add("https://a.example/feed") == 1  # 有効なら登録済み

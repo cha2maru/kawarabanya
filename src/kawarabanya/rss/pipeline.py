@@ -17,7 +17,7 @@ import httpx
 
 from kawarabanya.core import db
 from kawarabanya.core.config import Config
-from kawarabanya.core.llm import Summarizer
+from kawarabanya.core.llm import CHOICE_LETTERS, Summarizer
 from kawarabanya.rss import archive
 from kawarabanya.rss.fulltext import fill_content
 from kawarabanya.rss.genres import Genre, load_genres, priority_criteria
@@ -253,6 +253,12 @@ async def classify_item(
     if not genres or not category or "/" in category:
         return category
     subs = [g for g in genres.values() if g.is_sub and (allow_move or g.top == category)]
+    if len(subs) > len(CHOICE_LETTERS):
+        # 1 回で選べる数（51）を超えたら、先にジャンルを選ばせ、その中のサブジャンルから選ばせる
+        tops = [g for g in genres.values() if not g.is_sub and any(s.top == g.path for s in subs)]
+        first = await summarizer.classify(title, content_md, [(g.label, g.description) for g in tops])
+        top = tops[first[0]].path if first and first[0] is not None and first[1] >= MOVE_P else category
+        subs = [g for g in subs if g.top == top]
     if not subs:
         return category
     options = [(f"{genres[g.top].label if g.top in genres else g.top} / {g.label}", g.description) for g in subs]

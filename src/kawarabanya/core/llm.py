@@ -239,6 +239,8 @@ class Summarizer:
 
         (選んだ番号, その確率) を返す。「どれにも当てはまらない」を選んだら番号は None。判定に失敗したら None。
         """
+        if len(options) > len(CHOICE_LETTERS):
+            raise ValueError(f"選択肢は {len(CHOICE_LETTERS)} 個までです（{len(options)} 個）")
         letters = CHOICE_LETTERS[: len(options)] + NONE_LETTER
         lines = [f"{c}: {name}" + (f"（{desc}）" if desc else "") for c, (name, desc) in zip(letters, options, strict=False)]
         lines.append(f"{NONE_LETTER}: どれにも当てはまらない")

@@ -11,6 +11,7 @@ import json
 import logging
 import sqlite3
 from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -131,7 +132,7 @@ def migrate(conn: sqlite3.Connection, path: Path | None = None) -> list[str]:
         return []
     if path is not None and current > 0:
         backup = path.with_name(f"{path.name}.bak-v{current}")
-        with sqlite3.connect(backup) as dst:
+        with closing(sqlite3.connect(backup)) as dst:
             conn.backup(dst)
         log.info("DB を版 %d から上げる前にバックアップしました: %s", current, backup)
     applied = []

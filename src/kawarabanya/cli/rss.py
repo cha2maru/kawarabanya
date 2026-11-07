@@ -336,7 +336,8 @@ def cmd_feeds_add(cfg: Config, args: argparse.Namespace) -> int:
             print("  ほかの手: genres.toml に HTML 取り込みか、extension = \"sitemap\"（サイトマップ）を書く", file=sys.stderr)
             return 1
         url, title = found[0], title or found[1] or None
-    if existing := db.find_feed_by_url(conn, url):
+    existing = db.find_feed_by_url(conn, url)
+    if existing and existing.enabled:
         print(f"登録済みです: {existing.id} {existing.title or ''} {existing.url}（{existing.category or '-'}）", file=sys.stderr)
         return 1
     if args.genre == placement.AUTO:
@@ -350,11 +351,19 @@ def cmd_feeds_add(cfg: Config, args: argparse.Namespace) -> int:
             args.genre = asyncio.run(guess())
             print(f"LLM が選んだジャンル: {args.genre or '決められませんでした（ジャンルなしで登録）'}")
     with conn:
-        feed_id = db.insert_feed(conn, url, title, None, args.genre)
-    if args.genre and defs is not None:
+        if existing:  # feeds remove で外したサイト → 有効に戻す（記事の既読も残っている）
+            feed_id = existing.id
+            db.set_enabled(conn, feed_id, True)
+            conn.execute("UPDATE feeds SET category = ? WHERE id = ?", (args.genre, feed_id))
+        else:
+            feed_id = db.insert_feed(conn, url, title, None, args.genre)
+    # genres.toml に同じ URL を 2 回書くと読めなくなる（Bot も止まる）ので、書いてあれば足さない
+    written = {u for g in (defs or {}).values() for u in g.feeds}
+    if args.genre and defs is not None and url not in written:
         genres.add_feed_url(cfg.general.genres_file, args.genre, url, title)
-    print(f"追加しました: {feed_id} {title or ''} {url}（{args.genre or 'ジャンルなし'}）")
-    print("次の取り込みでは既存の記事を既読にするだけで、それ以降の新着から投稿します")
+    print(f"{'有効に戻しました' if existing else '追加しました'}: {feed_id} {title or ''} {url}（{args.genre or 'ジャンルなし'}）")
+    if not existing:
+        print("次の取り込みでは既存の記事を既読にするだけで、それ以降の新着から投稿します")
     return 0
 
 
