@@ -13,6 +13,10 @@
 
 設計と実測値は [DESIGN.md](DESIGN.md)、コードの書き方は [docs/CODING.md](docs/CODING.md)。
 
+> [!WARNING]
+> **開発途中のツールです。** 手順・設定・DB の形は予告なく変わります。また、作者の環境（Ubuntu / WSL2・個人の Discord サーバー 1 つ）でしか試していません。
+> **インストールから設定まで、[Claude Code](https://claude.com/claude-code) などの AI コーディングエージェントの手助けを受けながら進めてください。** このリポジトリには、手順と注意点をまとめた Claude Code のスキル（`.claude/skills/`）があります。リポジトリを複製したフォルダで Claude Code を起動し、「インストールして」「Discord の準備をして」と頼むと、それに沿って進めます。下の手順は、その中身を人が読める形にしたものです。
+
 ## 必要なもの
 
 - Linux（Ubuntu・WSL2 で動作を確認）と [uv](https://docs.astral.sh/uv/)（Python 3.12 は uv が用意する）
@@ -22,6 +26,8 @@
 ## クイックスタート
 
 ### 1. インストール
+
+Claude Code を使う場合は、複製したフォルダで `claude` を起動して「インストールして」と頼めば、以下の 1〜5 を順に案内する。
 
 ```sh
 git clone <このリポジトリ> kawarabanya && cd kawarabanya
