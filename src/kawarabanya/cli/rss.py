@@ -156,6 +156,7 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
         f"\n結果: 保存 {saved} 件 / 重複 {dups} 件 / 記事エラー {errors} 件"
         f"（フィード: 初回 {inited} / 更新なし {unchanged} / 取得失敗 {failed}）"
     )
+    db.set_state(conn, "run_at", datetime.now(UTC).isoformat(timespec="seconds"))
     rc = 1 if errors else 0
     if not args.no_notify and conn.execute("SELECT 1 FROM discord_channels LIMIT 1").fetchone():
         rc |= _notify(cfg, conn)
@@ -254,15 +255,48 @@ def cmd_feeds_list(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def cmd_feeds_add(cfg: Config, args: argparse.Namespace) -> int:
-    """feeds add: フィードを 1 件登録する。"""
+    """feeds add: サイトかフィードの URL からフィードを探して登録し、genres.toml の --genre にも書き足す。"""
+    from ..rss.discover import discover
+
     conn = _open_db(cfg, args)
-    if existing := db.find_feed_by_url(conn, args.url):
-        print(f"登録済みです: {existing.id} {existing.url}", file=sys.stderr)
+    defs = _load_genres(cfg)
+    if args.genre and defs is not None and args.genre not in defs:
+        print(f"{args.genre}: genres.toml にないジャンルです（{', '.join(g for g in defs if '/' not in g)}）", file=sys.stderr)
+        return 1
+    url, title = args.url, args.title
+    if not args.no_discover:
+        found = asyncio.run(discover(args.url, cfg.general))
+        if found is None:
+            print(f"{args.url}: フィードが見つかりません（RSS のないサイトは genres.toml に HTML 取り込みを書く）", file=sys.stderr)
+            return 1
+        url, title = found[0], title or found[1] or None
+    if existing := db.find_feed_by_url(conn, url):
+        print(f"登録済みです: {existing.id} {existing.title or ''} {existing.url}（{existing.category or '-'}）", file=sys.stderr)
         return 1
     with conn:
-        feed_id = db.insert_feed(conn, args.url, args.title, None, args.category)
-    print(f"追加しました: {feed_id} {args.url}")
+        feed_id = db.insert_feed(conn, url, title, None, args.genre)
+    if args.genre and defs is not None:
+        genres.add_feed_url(cfg.general.genres_file, args.genre, url, title)
+    print(f"追加しました: {feed_id} {title or ''} {url}（{args.genre or 'ジャンルなし'}）")
+    print("次の取り込みでは既存の記事を既読にするだけで、それ以降の新着から投稿します")
     return 0
+
+
+def cmd_feeds_remove(cfg: Config, args: argparse.Namespace) -> int:
+    """feeds remove: フィードを無効にし、genres.toml から外す（保存済みの記事と投稿は残す）。"""
+    conn = _open_db(cfg, args)
+    feed = db.get_feed(conn, args.id) if args.id.isdigit() else db.find_feed_by_url(conn, args.id)
+    if feed is None:
+        print(f"{args.id}: 見つかりません", file=sys.stderr)
+        return 1
+    with conn:
+        db.set_enabled(conn, feed.id, False, "removed")
+    removed = 0
+    if _load_genres(cfg) is not None:
+        removed = genres.remove_feed_urls(cfg.general.genres_file, [feed.url, feed.original_url])
+    print(f"外しました: {feed.id} {feed.title or ''} {feed.url}（genres.toml から {removed} 行）")
+    return 0
+
 
 def cmd_feeds_option(cfg: Config, args: argparse.Namespace) -> int:
     """feeds option: フィード個別の設定を変える（値は JSON として解釈し、だめなら文字列）。"""
@@ -365,6 +399,50 @@ def cmd_genres_apply(cfg: Config, args: argparse.Namespace) -> int:
     elif r.unassigned:
         print("未割り当てのフィードの記事は投稿されません（--disable-unassigned で取得も止められます）")
     return 0
+
+def cmd_genres_interest(cfg: Config, args: argparse.Namespace) -> int:
+    """genres interest: ジャンル・サブジャンルの好き嫌いを genres.toml に書く。"""
+    defs = _require_genres(cfg)
+    if args.genre not in defs:
+        print(f"{args.genre}: genres.toml にありません", file=sys.stderr)
+        return 1
+    genres.set_interest(cfg.general.genres_file, args.genre, args.level)
+    print(f"{args.genre}（{defs[args.genre].label}）: {genres.INTEREST_LEVELS[args.level]}")
+    return 0
+
+
+def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
+    """status: 最後の取り込み・次のまとめ・要約サーバー・フィードと記事の状態を表示する。"""
+    import httpx
+
+    from ..rss import digest, suggest
+
+    conn = _open_db(cfg, args)
+    now = datetime.now(UTC)
+
+    def local(iso: str | None) -> str:
+        return datetime.fromisoformat(iso).astimezone().strftime("%m/%d %H:%M") if iso else "-"
+
+    print(f"最後の取り込み: {local(db.get_state(conn, 'run_at'))}")
+    if cfg.digest.enabled and (nxt := digest.next_slot(now, cfg.digest.times)):
+        print(f"次のまとめ: {nxt:%m/%d %H:%M}")
+    try:
+        ok = httpx.get(cfg.summarize.endpoint.rstrip("/").removesuffix("/v1") + "/health", timeout=3).is_success
+    except httpx.HTTPError:
+        ok = False
+    print(f"要約サーバー: {'動いています' if ok else '応答がありません'}")
+    feeds = db.list_feeds(conn, enabled=True)
+    failing = [f for f in feeds if f.fail_count]
+    print(f"フィード: 有効 {len(feeds)} 件 / 取得に失敗中 {len(failing)} 件")
+    for f in failing[:5]:
+        print(f"  - {f.id} {f.title or f.url}（{f.fail_count} 回: {f.last_status}）")
+    counts = dict(conn.execute("SELECT status, COUNT(*) FROM items GROUP BY status").fetchall())
+    print(f"記事: 投稿待ち {counts.get('saved', 0)} 件 / 投稿済み {counts.get('notified', 0)} 件"
+          f" / 重複 {counts.get('duplicate', 0)} 件 / ミュート {counts.get('muted', 0)} 件")
+    if (defs := _load_genres(cfg)) is not None:
+        print(f"どのサブジャンルにも当てはまらない記事（7 日）: {len(suggest.unmatched_items(conn, defs, 7))} 件")
+    return 0
+
 
 def cmd_genres_suggest(cfg: Config, args: argparse.Namespace) -> int:
     """genres suggest: 当てはまるサブジャンルのなかった記事から、新しいサブジャンルを LLM に決めさせる。

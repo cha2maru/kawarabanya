@@ -327,6 +327,7 @@ def test_digest_render_and_post(tmp_path):
     jst = timezone(timedelta(hours=9))
     assert digest.last_slot(datetime(2026, 11, 8, 7, 0, tzinfo=jst), ["06:30", "18:30"]) == datetime(2026, 11, 8, 6, 30, tzinfo=jst).astimezone()
     assert digest.last_slot(datetime(2026, 11, 8, 5, 0, tzinfo=jst), ["06:30", "18:30"]) == datetime(2026, 11, 7, 18, 30, tzinfo=jst).astimezone()
+    assert digest.next_slot(datetime(2026, 11, 8, 20, 0, tzinfo=jst), ["06:30", "18:30"]) == datetime(2026, 11, 9, 6, 30, tzinfo=jst).astimezone()
 
     # 興味のうすいサブジャンル（digest = false）は載せない
     since = datetime.now(UTC) - timedelta(hours=24)

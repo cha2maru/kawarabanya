@@ -105,3 +105,28 @@ def test_auto_disable_after_max_failures():
     assert not deny.enabled
     assert deny.disabled_reason == "fail_x3:forbidden"
     assert db.get_feed(conn, ids["ok"]).fail_count == 0
+
+
+def test_discover_feed():
+    import asyncio
+
+    import httpx
+
+    from kawarabanya.config import GeneralConfig
+    from kawarabanya.rss.discover import discover
+
+    rss = b'<?xml version="1.0"?><rss version="2.0"><channel><title>Site</title><item><title>a</title><link>https://s.example/a</link></item></channel></rss>'
+
+    def handler(req):
+        if req.url.path == "/news":
+            return httpx.Response(200, text='<html><head><link rel="alternate" type="application/rss+xml" href="/news/feed.xml"></head></html>')
+        if req.url.path in ("/news/feed.xml", "/blog/index.rdf", "/f"):
+            return httpx.Response(200, content=rss)
+        return httpx.Response(404)
+
+    t = httpx.MockTransport(handler)
+    run = lambda u: asyncio.run(discover(u, GeneralConfig(), transport=t))
+    assert run("https://s.example/news") == ("https://s.example/news/feed.xml", "Site")  # ページ内の案内
+    assert run("https://s.example/blog") == ("https://s.example/blog/index.rdf", "Site")  # よくある場所
+    assert run("https://s.example/f") == ("https://s.example/f", "Site")  # フィードそのもの
+    assert run("https://s.example/none") is None

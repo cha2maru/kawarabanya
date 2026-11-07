@@ -177,13 +177,22 @@ def _posted(conn: sqlite3.Connection, genre: str, day: str) -> str | None:
     return row[0] if row else None
 
 
-def last_slot(now: datetime, times: list[str]) -> datetime | None:
-    """now 以前で最も新しい投稿時刻（times は "HH:MM"、ローカル時刻）。times が空なら None。"""
+def _slots(now: datetime, times: list[str], days: tuple[int, ...]) -> list[datetime]:
     local = now.astimezone()
-    slots = [
-        datetime.combine(day, time(*map(int, t.split(":"))), local.tzinfo)
-        for day in (local.date() - timedelta(days=1), local.date())
+    return [
+        datetime.combine(local.date() + timedelta(days=d), time(*map(int, t.split(":"))), local.tzinfo)
+        for d in days
         for t in times
     ]
-    past = [s for s in slots if s <= local]
+
+
+def last_slot(now: datetime, times: list[str]) -> datetime | None:
+    """now 以前で最も新しい投稿時刻（times は "HH:MM"、ローカル時刻）。times が空なら None。"""
+    past = [s for s in _slots(now, times, (-1, 0)) if s <= now]
     return max(past) if past else None
+
+
+def next_slot(now: datetime, times: list[str]) -> datetime | None:
+    """now より後で最も早い投稿時刻。times が空なら None。"""
+    future = [s for s in _slots(now, times, (0, 1)) if s > now]
+    return min(future) if future else None

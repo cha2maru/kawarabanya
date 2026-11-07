@@ -189,3 +189,26 @@ def test_merge_subgenres_over_limit(tmp_path, monkeypatch):
     answer["merges"] = []  # まとめきれない → 足さない
     keep, merges = asyncio.run(go())
     assert (keep, merges) == ([], [])
+
+
+def test_edit_genres_toml(tmp_path):
+    from kawarabanya.rss import genres
+
+    p = tmp_path / "genres.toml"
+    p.write_text('# 手書きのコメント\n[news]\nlabel = "ニュース"\nfeeds = [\n  "https://a.example/feed",  # A\n'
+                 '  { url = "https://h.example/", item = "li" },\n]\n\n[news.world]\nlabel = "国際"\ndigest = false\n\n'
+                 '[tech]\nlabel = "テック"\n', encoding="utf-8")
+    genres.add_feed_url(p, "news", "https://b.example/rss", "B")
+    genres.add_feed_url(p, "tech", "https://c.example/rss")  # feeds がなければ作る
+    genres.set_interest(p, "news/world", "mute")  # digest = false を置き換える
+    genres.set_interest(p, "tech", "like")
+    g = genres.load_genres(p)
+    assert g["news"].feeds == ["https://a.example/feed", "https://h.example/", "https://b.example/rss"]
+    assert g["tech"].feeds == ["https://c.example/rss"]
+    assert (g["news/world"].interest, g["tech"].interest) == ("mute", "like")
+    assert genres.remove_feed_urls(p, ["https://a.example/feed", "https://h.example/"]) == 2
+    genres.set_interest(p, "tech", "normal")  # normal は書かない
+    g = genres.load_genres(p)
+    assert g["news"].feeds == ["https://b.example/rss"] and g["tech"].interest is None
+    text = p.read_text(encoding="utf-8")
+    assert text.startswith("# 手書きのコメント") and "digest" not in text and "# B" in text

@@ -18,7 +18,9 @@ from .rss import (
     cmd_feeds_add,
     cmd_feeds_list,
     cmd_feeds_option,
+    cmd_feeds_remove,
     cmd_genres_apply,
+    cmd_genres_interest,
     cmd_genres_list,
     cmd_genres_suggest,
     cmd_import_opml,
@@ -26,6 +28,7 @@ from .rss import (
     cmd_likes,
     cmd_notify,
     cmd_run,
+    cmd_status,
     cmd_summarize,
 )
 from .server import (
@@ -98,6 +101,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--day", help="--delete で、この日（YYYY-MM-DD）のまとめをすべて消す")
     s.set_defaults(func=cmd_digest)
 
+    s = sub.add_parser("status", help="最後の取り込み・次のまとめ・要約サーバー・フィードと記事の状態")
+    s.set_defaults(func=cmd_status)
+
     s = sub.add_parser("bot", help="常駐 Bot を起動する（定期的に run を実行）")
     s.set_defaults(func=cmd_bot)
 
@@ -118,11 +124,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--category")
     s.set_defaults(func=cmd_feeds_list)
 
-    s = feeds.add_parser("add", help="追加")
+    s = feeds.add_parser("add", help="サイトかフィードの URL から登録する（RSS を自動で探し、genres.toml にも書く）")
     s.add_argument("url")
+    s.add_argument("--genre", help="ジャンルかサブジャンル（news、hobby/boardgame など）")
     s.add_argument("--title")
-    s.add_argument("--category")
+    s.add_argument("--no-discover", action="store_true", help="フィードを探さず、URL をそのまま登録する")
     s.set_defaults(func=cmd_feeds_add)
+
+    s = feeds.add_parser("remove", help="無効にして genres.toml から外す（保存済みの記事と投稿は残す）")
+    s.add_argument("id", help="フィードの ID か URL")
+    s.set_defaults(func=cmd_feeds_remove)
 
     s = feeds.add_parser("option", help="フィード個別の設定（例: no_fulltext true）。値を省略すると削除")
     s.add_argument("id", type=int)
@@ -145,6 +156,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dry-run", action="store_true", help="DB を更新しない")
     s.add_argument("--disable-unassigned", action="store_true", help="genres.toml にないフィードを無効にする")
     s.set_defaults(func=cmd_genres_apply)
+    s = gs.add_parser("interest", help="ジャンル・サブジャンルの好き嫌いを変える")
+    s.add_argument("genre", help="news、culture/sports など")
+    s.add_argument("level", choices=["like", "normal", "low", "mute"],
+                   help="like: まとめの上位に / normal / low: まとめに載せない / mute: 投稿もしない")
+    s.set_defaults(func=cmd_genres_interest)
     s = gs.add_parser("suggest", help="当てはまるサブジャンルのなかった記事から、新しいサブジャンルを LLM に考えさせる")
     s.add_argument("--apply", action="store_true", help="genres.toml に追加し、Discord のタグも作る")
     s.add_argument("--days", type=int, default=7, help="直近この日数の記事から考える（既定 7）")

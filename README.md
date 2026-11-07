@@ -37,7 +37,7 @@ journalctl --user -u kawarabanya-bot -f         # ログ
 
 ```sh
 docker run -d --name rsshub --restart unless-stopped -p 127.0.0.1:1200:1200 diygod/rsshub
-uv run kawarabanya feeds add "http://127.0.0.1:1200/github/repos/DIYgod" --category tech   # genres.toml にも URL を書く
+uv run kawarabanya feeds add "http://127.0.0.1:1200/github/repos/DIYgod" --genre tech --no-discover   # genres.toml にも書く
 ```
 
 ルートの一覧は `curl http://127.0.0.1:1200/api/namespace`。ルートによっては API キーなどの設定（環境変数）が要る。
@@ -56,7 +56,11 @@ uv run kawarabanya feeds add "http://127.0.0.1:1200/github/repos/DIYgod" --categ
 | `likes` / `interests [--days 30]` | 👍 の数を取得する / ジャンル・フィード別の 👍 の割合と、最近 👍 した記事（投稿へのリンク付き）を表示する |
 | `import-opml FILE` / `export-opml FILE [--all]` | OPML の取り込み・書き出し |
 | `check [--disable-dead]` | 死活チェック（移転していれば URL を更新） |
-| `feeds list\|add\|enable\|disable\|option` | フィードの管理（例: `feeds option ID no_fulltext true`） |
+| `feeds add URL [--genre G] [--title T] [--no-discover]` | サイトかフィードの URL から登録する。ページ内の案内（`<link rel="alternate">`）やよくある場所（/feed など）から RSS を探し、genres.toml の `G` にも書き足す。初回は既存の記事を既読にするだけ |
+| `feeds remove ID\|URL` | 無効にして genres.toml から外す（保存済みの記事と投稿は残す） |
+| `feeds list\|enable\|disable\|option` | フィードの管理（例: `feeds option ID no_fulltext true`） |
+| `genres interest G like\|normal\|low\|mute` | ジャンル・サブジャンルの好き嫌いを genres.toml に書く |
+| `status` | 最後の取り込み・次のまとめ・要約サーバー・失敗中のフィード・記事の件数 |
 | `genres list` / `genres apply [--dry-run] [--disable-unassigned]` | ジャンルの一覧 / genres.toml の反映 |
 | `genres suggest [--apply] [--days 7] [--due]` | どのサブジャンルにも当てはまらなかった記事から、新しいサブジャンルを LLM に決めさせる（案は振り分け直して確かめる）。タグの上限（20）を超えるジャンルは似たサブジャンルを先にまとめる。`--apply` で genres.toml に反映し、Discord のタグを揃えて付け直す（Bot はまとめの時刻ごとに自動で実行する） |
 | `discord setup [--apply] [--prune]` / `channels` / `test GENRE` / `guilds` / `invite-url` | フォーラム・タグ・Webhook の管理 |
