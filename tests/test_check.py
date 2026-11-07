@@ -153,3 +153,41 @@ def test_rsshub_match():
     assert [(x.route, x.matched) for x in routes] == [("/ex/tag/ai", True), ("/ex/all", True)]
     assert match("https://sub.example.com/tag/ai", rules) == []  # サブドメインが違う
     assert match("https://notexample.com/", rules) == []
+
+
+def test_db_migrations(tmp_path, monkeypatch):
+    import sqlite3
+
+    import pytest
+
+    from kawarabanya.core import db
+
+    path = tmp_path / "k.db"
+    conn = db.connect(path)
+    assert db.schema_version(conn) == len(db.MIGRATIONS)
+    conn.close()
+
+    # 開発中の古い DB（列が足りない・版 0）も版 1 にそろう
+    old = tmp_path / "old.db"
+    with sqlite3.connect(old) as c:
+        c.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, feed_id INTEGER, key TEXT, url TEXT, title TEXT,"
+                  " published TEXT, fetched_at TEXT, status TEXT, md_path TEXT, summary TEXT, error TEXT)")
+    conn = db.connect(old)
+    assert "subgenre" in {r["name"] for r in conn.execute("PRAGMA table_info(items)")}
+    conn.close()
+
+    # 新しいマイグレーション: 既存の DB はバックアップしてから 1 回だけ適用する
+    calls = []
+    monkeypatch.setattr(db, "MIGRATIONS", [*db.MIGRATIONS, ("列の追加", lambda c: calls.append(1)
+                                                                or c.execute("ALTER TABLE feeds ADD COLUMN memo TEXT"))])
+    conn = db.connect(path)
+    assert calls == [1] and db.schema_version(conn) == len(db.MIGRATIONS)
+    assert (tmp_path / f"k.db.bak-v{len(db.MIGRATIONS) - 1}").exists()
+    conn.close()
+    db.connect(path).close()
+    assert calls == [1]
+
+    # コードより新しい DB は開かない
+    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:1])
+    with pytest.raises(ValueError, match="新しい"):
+        db.connect(path)

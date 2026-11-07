@@ -1,15 +1,23 @@
-"""SQLite による状態管理（フィード・記事）。"""
+"""SQLite による状態管理（フィード・記事）と、DB のマイグレーション。
+
+DB の版は PRAGMA user_version。connect が MIGRATIONS のうち未適用のものを番号順に 1 回ずつ適用する
+（既存の DB なら、その前に <DB>.bak-v<旧版> にバックアップを取る）。
+スキーマを変えるときは MIGRATIONS の末尾に関数を足す（SCHEMA と既存のマイグレーションは変えない）。
+"""
 
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+log = logging.getLogger(__name__)
 
+# 版 1 のテーブル（ここは変えない。変えるときは MIGRATIONS に足す）
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS feeds (
     id INTEGER PRIMARY KEY,
@@ -78,21 +86,62 @@ CREATE TABLE IF NOT EXISTS discord_channels (
 """
 
 
-# 既存の DB に後から足した列（CREATE TABLE IF NOT EXISTS では追加されないため）
+# 版 1 より前（0.1 の開発中）に後から足した列。版 1 のマイグレーションで、なければ足す
 ADDED_COLUMNS = {
     "feeds": {"latest_entry_at": "TEXT", "initialized_at": "TEXT"},
-    "items": {"notified_at": "TEXT", "discord_thread_id": "TEXT", "likes": "INTEGER", "likes_checked_at": "TEXT", "priority": "REAL", "subgenre": "TEXT", "content_hash": "TEXT"},
+    "items": {
+        "notified_at": "TEXT", "discord_thread_id": "TEXT", "likes": "INTEGER", "likes_checked_at": "TEXT",
+        "priority": "REAL", "subgenre": "TEXT", "content_hash": "TEXT",
+    },
     "discord_channels": {"tags": "TEXT"},
 }
 
 
-def _migrate(conn: sqlite3.Connection) -> None:
-    """ADDED_COLUMNS のうち、既存の DB にまだない列を追加する。"""
+def _v1(conn: sqlite3.Connection) -> None:
+    """版 1: テーブルを作り、開発中に後から足した列をそろえる。"""
+    conn.executescript(SCHEMA)
     for table, columns in ADDED_COLUMNS.items():
         existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
         for name, decl in columns.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
+# (説明, 関数)。i 番目（0 始まり）を適用すると版が i + 1 になる。末尾に足すだけで、並びも中身も変えない
+MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
+    ("テーブルの作成（0.1）", _v1),
+]
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    """DB の版（PRAGMA user_version）。"""
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def migrate(conn: sqlite3.Connection, path: Path | None = None) -> list[str]:
+    """未適用のマイグレーションを番号順に適用し、適用したものの説明を返す。
+
+    path があり、既存の DB（版 1 以上）を上げるときは、先に path.bak-v<旧版> にバックアップを取る。
+    DB の版がこのコードより新しければ ValueError（古い kawarabanya で新しい DB を壊さないため）。
+    """
+    current, latest = schema_version(conn), len(MIGRATIONS)
+    if current > latest:
+        raise ValueError(f"DB の版 {current} はこの kawarabanya（版 {latest} まで）より新しいです。kawarabanya を更新してください")
+    if current == latest:
+        return []
+    if path is not None and current > 0:
+        backup = path.with_name(f"{path.name}.bak-v{current}")
+        with sqlite3.connect(backup) as dst:
+            conn.backup(dst)
+        log.info("DB を版 %d から上げる前にバックアップしました: %s", current, backup)
+    applied = []
+    for version, (desc, fn) in enumerate(MIGRATIONS[current:], start=current + 1):
+        with conn:
+            fn(conn)
+            conn.execute(f"PRAGMA user_version = {version}")
+        log.info("DB のマイグレーション: 版 %d（%s）", version, desc)
+        applied.append(desc)
+    return applied
 
 
 def get_state(conn: sqlite3.Connection, key: str) -> str | None:
@@ -113,7 +162,7 @@ def now_iso() -> str:
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
-    """DB を開き、テーブルの作成と列の追加を行う。親ディレクトリがなければ作る。"""
+    """DB を開き、未適用のマイグレーションを適用する。親ディレクトリがなければ作る。"""
     path = Path(path)
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -121,9 +170,7 @@ def connect(path: str | Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
-    conn.executescript(SCHEMA)
-    _migrate(conn)
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    migrate(conn, None if str(path) == ":memory:" else path)
     return conn
 
 

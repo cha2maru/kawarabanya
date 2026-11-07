@@ -8,6 +8,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from kawarabanya.cli.doctor import cmd_doctor
 from kawarabanya.cli.rss import (
     _cmd_set_enabled,
     cmd_check,
@@ -102,6 +103,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--delete", action="store_true", help="ジャンルごとに最後のまとめを削除する")
     s.add_argument("--day", help="--delete で、この日（YYYY-MM-DD）のまとめをすべて消す")
     s.set_defaults(func=cmd_digest)
+
+    s = sub.add_parser("doctor", help="動かすのに必要なもの（設定・DB・Discord・要約サーバー）がそろっているかを調べる")
+    s.set_defaults(func=cmd_doctor)
 
     s = sub.add_parser("status", help="最後の取り込み・次のまとめ・要約サーバー・フィードと記事の状態")
     s.set_defaults(func=cmd_status)

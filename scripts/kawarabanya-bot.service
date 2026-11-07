@@ -1,6 +1,5 @@
-# systemd のユーザーサービス。インストール:
-#   cp scripts/kawarabanya-bot.service ~/.config/systemd/user/
-#   systemctl --user daemon-reload && systemctl --user enable --now kawarabanya-bot
+# systemd のユーザーサービス。インストール: scripts/install.sh --service
+#（%h/workspace/rss をこのリポジトリの場所に置き換えて ~/.config/systemd/user/ に置く）
 # ログ: journalctl --user -u kawarabanya-bot -f
 [Unit]
 Description=kawarabanya Discord bot

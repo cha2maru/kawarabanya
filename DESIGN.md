@@ -4,6 +4,8 @@
 
 ## 1. 目的と方針
 
+- 名前: kawarabanya（瓦版屋）。旧名 feedpipe は同名のプロジェクトがあったため 2026-11-07 に改名した。そのころ作った Discord のカテゴリと Webhook は、手元の config.toml の `[discord] parent_category` / `webhook_name` を `"feedpipe"` にして使い続けている（Webhook が変わると投稿済みのまとめを書き換えられない）。
+
 - **個人用 Discord サーバーを管理する総合 Bot**。今ある機能は RSS（全文 Markdown 保存 → 要約 → Discord フォーラムに投稿）で、機能は今後足していく。
 - 個人運用（利用者 1 人・サーバー 1 つ）なので、複数ユーザー・複数サーバーへの対応はしない。
 - **軽さ優先**: SQLite + TOML + 1 プロセスの Bot。DB サーバー・Docker は使わない。LLM は CPU で動くローカルモデル。
@@ -135,7 +137,15 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 | `digests` | genre / day（投稿したローカル日時。11/07 までは日付）/ thread_id（投稿したメッセージの ID）/ created_at — 投稿済みのまとめ |
 | `state` | key / value — 定期処理の最後の実行時刻など（`run_at` / `suggest_at`） |
 
-`items.status`: `seen`（初回の既読化）→ `new` → `saved` → `notified`。投稿しなかったものは `stale`、ミュートのジャンルの記事は `muted`、同じ記事が保存済みだったものは `duplicate`（error に元の記事の id）、失敗は `error`。状態を記録するので、途中で落ちても次の実行で続きから処理する。列の追加は `db.ADDED_COLUMNS` で自動的に行う。
+`items.status`: `seen`（初回の既読化）→ `new` → `saved` → `notified`。投稿しなかったものは `stale`、ミュートのジャンルの記事は `muted`、同じ記事が保存済みだったものは `duplicate`（error に元の記事の id）、失敗は `error`。状態を記録するので、途中で落ちても次の実行で続きから処理する。
+
+### 4.1 マイグレーション
+- DB の版は `PRAGMA user_version`。`core/db.py` の `MIGRATIONS`（説明と関数の並び）のうち未適用のものを、`connect` が番号順に 1 回ずつ適用する。版 1 は 0.1 のテーブル一式（開発中に後から足した列もそろえる）。
+- スキーマを変えるときは `MIGRATIONS` の末尾に関数を足すだけ（`SCHEMA` と既存のマイグレーションは変えない）。既存の DB を上げる前に `<DB>.bak-v<旧版>` へ SQLite の backup API でバックアップを取る。コードより新しい版の DB は開かない（古い版で新しい DB を壊さないため）。
+
+### 4.2 インストールと環境チェック
+- `scripts/install.sh`: uv の依存・設定の見本のコピー（あれば上書きしない）・環境チェック。`--llm` で llama.cpp（CPU 版のリリース）と Qwen3.5-4B Q4_K_M を `~/.local` に入れ（libgomp がなく sudo も使えなければ、パッケージから取り出して llama.cpp の横に置く）、`--service` で systemd のユーザーサービスを登録する。何度実行してもよい。
+- `kawarabanya doctor`: Python・config.toml・genres.toml・拡張・DB の版・保存先・Discord（トークン・MESSAGE CONTENT INTENT〈`/applications/@me` の flags〉・サーバー・フォーラム）・要約サーバー・常駐サービスを順に調べる。❌ があれば終了コード 1。
 
 ## 5. 技術選定
 
