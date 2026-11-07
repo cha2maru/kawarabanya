@@ -259,15 +259,20 @@ def test_digest_render_and_post(tmp_path):
             iid = db.insert_item(conn, feed_id, key, None, title, ago(hours=2), "notified")
             db.update_item(conn, iid, notified_at=ago(hours=2), discord_thread_id=f"t-{key}", priority=prio, likes=likes)
 
+    fake.channels.append({"id": "50", "type": 0, "name": "ニュース", "parent_id": "999"})  # feedpipe の外
+    ch = discord_api.find_text_channel(client, "1", "ニュース")
+    discord_api.register_webhook(client, conn, discord_api.DIGEST_KEY, "1", ch["id"], ch["name"], "feedpipe")
+
     now = datetime.now(UTC)
     content = asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24,
                                                transport=httpx.MockTransport(fake.handler)))
     lines = content.splitlines()
-    assert lines[0] == "**注目の記事**"
-    assert lines[1] == "- [大事件 ［速報］](https://discord.com/channels/1/t-b)  👍2"  # 重要度の高い順
-    assert lines[2] == "- [小ネタ](https://discord.com/channels/1/t-a)"
-    assert lines[3] == "ほか 1 件"
-    assert fake.posts[-1]["thread_name"].endswith("のまとめ（3 件）")
+    assert lines[0].startswith("## 📰 tech ") and lines[0].endswith("のまとめ（3 件）")
+    assert lines[1] == "**注目の記事**"
+    assert lines[2] == "- [大事件 ［速報］](https://discord.com/channels/1/t-b)  👍2"  # 重要度の高い順
+    assert lines[3] == "- [小ネタ](https://discord.com/channels/1/t-a)"
+    assert lines[4] == "ほか 1 件"
+    assert "thread_name" not in fake.posts[-1]  # テキストチャンネルへの普通のメッセージ
     # 同じ日は二度投稿しない
     assert asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24,
                                                transport=httpx.MockTransport(fake.handler))) is None

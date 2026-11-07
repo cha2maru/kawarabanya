@@ -395,6 +395,11 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
         print(f"             タグ: {tags or '-'}")
         if pc.tag_overflow:
             print(f"             ※タグの上限 {discord_api.MAX_TAGS} 個を超える {pc.tag_overflow} フィードはタグなしで投稿します")
+    digest_ch = None
+    if cfg.digest.enabled:
+        digest_ch = discord_api.find_text_channel(client, guild["id"], cfg.digest.channel)
+        state = "既存" if digest_ch else "見つかりません（Discord で作ってください。まとめは投稿されません）"
+        print(f"  まとめ      #{cfg.digest.channel}（{state}）")
     for c in plan.orphans:
         print(f"  {'削除' if args.prune else '未使用'}      💬{c['name']}（どのジャンルにも対応しません）")
     if not args.apply:
@@ -405,9 +410,13 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
         for c in plan.orphans:
             client.request("DELETE", f"/channels/{c['id']}")
         print(f"未使用のフォーラムを {len(plan.orphans)} 件削除しました")
+    if digest_ch:
+        discord_api.register_webhook(
+            client, conn, discord_api.DIGEST_KEY, guild["id"], digest_ch["id"], digest_ch["name"], cfg.discord.webhook_name
+        )
     if genre_defs and not args.categories:
         # ジャンルに対応しなくなった送り先を消す（未割り当てのフィードが古いフォーラムに投稿されないように）
-        names = [pc.category for pc in plan.channels]
+        names = [pc.category for pc in plan.channels] + [discord_api.DIGEST_KEY]
         with conn:
             conn.execute(
                 f"DELETE FROM discord_channels WHERE category NOT IN ({','.join('?' * len(names))})", names

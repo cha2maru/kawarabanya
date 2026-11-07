@@ -34,7 +34,7 @@ journalctl --user -u feedpipe-bot -f         # ログ
 | コマンド | 内容 |
 |---|---|
 | `bot` | 常駐 Bot。60 分ごとに `run` と `digest --due` を別プロセスで実行する |
-| `digest [--genre X] [--due] [--dry-run]` | ジャンルごとの 1 日のまとめ（今日の傾向＋重要度順の投稿へのリンク）を投稿する |
+| `digest [--genre X] [--due] [--dry-run]` | ジャンルごとの 1 日のまとめ（今日の傾向＋重要度順の投稿へのリンク）を #ニュース に投稿する |
 | `run [--category X] [--backfill N] [--no-fulltext] [--no-summary] [--no-notify]` | 取得 → 保存 → 重要度の判定 → 要約 → 投稿 → 👍 集計。初回のフィードは既存記事を既読にするだけ |
 | `summarize` | 保存済み・未投稿で要約のない最近の記事を、重要度を判定してから要約する |
 | `notify [--category X] [--limit N] [--dry-run]` | 保存済み・未投稿の記事を投稿する |
@@ -95,6 +95,7 @@ max_posts_per_run = 30
 
 [digest]
 enabled = true
+channel = "ニュース"         # まとめを投稿するテキストチャンネル（サーバー内を名前で探す。事前に作っておく）
 hour = 21                    # この時刻以降の最初の定期実行で、その日のまとめを投稿する
 window_hours = 24
 top = 10                     # まとめに並べる投稿へのリンクの数

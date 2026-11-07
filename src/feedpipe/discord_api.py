@@ -33,6 +33,8 @@ LIKE_EMOJI = "👍"
 DEFAULT_REACTION = {"emoji_id": None, "emoji_name": LIKE_EMOJI}
 
 UNCATEGORIZED = "uncategorized"
+# discord_channels で、1 日のまとめの投稿先（テキストチャンネル）を表すキー
+DIGEST_KEY = "#digest"
 
 
 class DiscordError(Exception):
@@ -278,21 +280,43 @@ def apply_plan(
             if label[:MAX_TAG_CHARS].strip() in tag_ids
         }
 
-        hook = next((w for w in client.webhooks(pc.channel_id) if w.get("name") == webhook_name and w.get("token")), None)
-        if hook is None:
-            hook = client.create_webhook(pc.channel_id, webhook_name)
-        url = f"https://discord.com/api/webhooks/{hook['id']}/{hook['token']}"
-        with conn:
-            conn.execute(
-                "INSERT INTO discord_channels"
-                " (category, guild_id, channel_id, channel_name, webhook_url, tags, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)"
-                " ON CONFLICT(category) DO UPDATE SET guild_id = excluded.guild_id,"
-                " channel_id = excluded.channel_id, channel_name = excluded.channel_name,"
-                " webhook_url = excluded.webhook_url, tags = excluded.tags",
-                (pc.category, guild_id, pc.channel_id, pc.name, url, json.dumps(feed_tags), db.now_iso()),
-            )
+        register_webhook(client, conn, pc.category, guild_id, pc.channel_id, pc.name, webhook_name, feed_tags)
     return created
+
+
+def register_webhook(
+    client: DiscordClient,
+    conn: sqlite3.Connection,
+    category: str,
+    guild_id: str,
+    channel_id: str,
+    channel_name: str,
+    webhook_name: str,
+    tags: dict | None = None,
+) -> None:
+    """チャンネルの Webhook を（なければ作って）用意し、category との対応を DB に保存する。"""
+    hook = next((w for w in client.webhooks(channel_id) if w.get("name") == webhook_name and w.get("token")), None)
+    if hook is None:
+        hook = client.create_webhook(channel_id, webhook_name)
+    url = f"https://discord.com/api/webhooks/{hook['id']}/{hook['token']}"
+    with conn:
+        conn.execute(
+            "INSERT INTO discord_channels"
+            " (category, guild_id, channel_id, channel_name, webhook_url, tags, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(category) DO UPDATE SET guild_id = excluded.guild_id,"
+            " channel_id = excluded.channel_id, channel_name = excluded.channel_name,"
+            " webhook_url = excluded.webhook_url, tags = excluded.tags",
+            (category, guild_id, channel_id, channel_name, url, json.dumps(tags or {}), db.now_iso()),
+        )
+
+
+def find_text_channel(client: DiscordClient, guild_id: str, name: str) -> dict | None:
+    """サーバー内のテキストチャンネルを名前で探す（カテゴリは問わない）。"""
+    found = [c for c in client.channels(guild_id) if c["type"] == GUILD_TEXT and c["name"] == channel_name(name)]
+    if len(found) > 1:
+        raise DiscordError(f"#{name} という名前のテキストチャンネルが {len(found)} 個あります。1 つにしてください")
+    return found[0] if found else None
 
 
 def feeds_by_category(conn: sqlite3.Connection, only: list[str] | None = None) -> dict[str, list[db.Feed]]:

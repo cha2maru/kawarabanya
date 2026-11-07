@@ -88,6 +88,8 @@ class DiscordConfig:
 @dataclass
 class DigestConfig:
     enabled: bool = True
+    # まとめを投稿するテキストチャンネルの名前（サーバー内で探す。カテゴリは問わない）
+    channel: str = "ニュース"
     # この時刻（ローカル時刻の時）以降の最初の定期実行で、その日のまとめを投稿する
     hour: int = 21
     # まとめに載せる直近の時間数と、リンクを並べる件数

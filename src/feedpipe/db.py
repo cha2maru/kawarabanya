@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS items (
 CREATE TABLE IF NOT EXISTS digests (
     genre TEXT NOT NULL,
     day TEXT NOT NULL,          -- ローカル日付 YYYY-MM-DD
-    thread_id TEXT,
+    thread_id TEXT,             -- 投稿したメッセージの ID
     created_at TEXT NOT NULL,
     PRIMARY KEY (genre, day)
 );

@@ -1,4 +1,4 @@
-"""ジャンルごとの 1 日のまとめを、そのジャンルのフォーラムに投稿する。
+"""ジャンルごとの 1 日のまとめを、まとめ用のテキストチャンネル（既定 #ニュース）に投稿する。
 
 まとめ = LLM が見出しの一覧から書く「今日の傾向」（2 文）＋ 重要度の高い順の投稿へのリンク。
 一覧は LLM に書かせない（関係のない話題を 1 行に混ぜることがあったため）。
@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 import httpx
 
 from . import db
-from .discord_api import post_url, send_webhook
+from .discord_api import DIGEST_KEY, post_url, send_webhook
 from .genres import top_genre
 from .summarize import Summarizer
 
@@ -50,14 +50,14 @@ def _link_text(title: str) -> str:
     return title.replace("[", "［").replace("]", "］")
 
 
-def render(trend: str | None, items: list[DigestItem], guild_id: str, top: int) -> str:
+def render(trend: str | None, items: list[DigestItem], guild_id: str, top: int, limit: int = MAX_CONTENT) -> str:
     lines = [f"{trend}\n\n**注目の記事**" if trend else "**注目の記事**"]
     for it in items[:top]:
         line = f"- [{_link_text(it.title)}]({post_url(guild_id, it.thread_id)})" if it.thread_id else f"- {it.title}"
         if it.likes:
             line += f"  👍{it.likes}"
         # 「ほか N 件」の行（最大 20 字程度）の分を残して 2,000 字に収める
-        if len("\n".join([*lines, line])) + 20 > MAX_CONTENT:
+        if len("\n".join([*lines, line])) + 20 > limit:
             break
         lines.append(line)
     if (rest := len(items) - (len(lines) - 1)) > 0:
@@ -83,7 +83,7 @@ async def post_digest(
     """genre のまとめを投稿し、本文を返す。投稿する記事がない・送り先がない・投稿済みなら None。"""
     day = now.astimezone().strftime("%Y-%m-%d")
     channel = conn.execute(
-        "SELECT webhook_url, guild_id FROM discord_channels WHERE category = ?", (genre,)
+        "SELECT webhook_url, guild_id FROM discord_channels WHERE category = ?", (DIGEST_KEY,)
     ).fetchone()
     if channel is None or already_posted(conn, genre, day):
         return None
@@ -93,11 +93,12 @@ async def post_digest(
     trend = None
     if summarizer:
         trend = await summarizer.trend([i.title for i in items[:MAX_TREND_TITLES]])
-    content = render(trend, items, channel["guild_id"], top)
+    header = f"## 📰 {genre} {now.astimezone():%m/%d} のまとめ（{len(items)} 件）"
+    content = header + "\n" + render(trend, items, channel["guild_id"], top, limit=MAX_CONTENT - len(header) - 1)
     if dry_run:
         return content
+    # まとめはテキストチャンネル（#ニュース）に、ジャンルごとに 1 メッセージで投稿する
     msg = send_webhook(channel["webhook_url"], {
-        "thread_name": f"📰 {now.astimezone():%m/%d} のまとめ（{len(items)} 件）",
         "username": "feedpipe まとめ",
         "content": content,
         "allowed_mentions": {"parse": []},
@@ -105,7 +106,7 @@ async def post_digest(
     with conn:
         conn.execute(
             "INSERT INTO digests (genre, day, thread_id, created_at) VALUES (?, ?, ?, ?)",
-            (genre, day, msg.get("channel_id"), db.now_iso()),
+            (genre, day, msg.get("id"), db.now_iso()),
         )
     return content
 

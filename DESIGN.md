@@ -59,7 +59,7 @@ systemd --user: feedpipe-bot.service
 - **👍 は「興味あり」の印**として集計するだけで、投稿の取捨選択には使わない（押されていない投稿は「見ていない」可能性があるので、興味なしとは扱わない）。投稿から 7 日以内の記事を 6 時間ごとに確認する。
 
 ### 3.5 1 日のまとめ（digest）
-- 各ジャンルのフォーラムに「📰 MM/DD のまとめ（N 件）」を 1 日 1 回投稿する（`[digest] hour` 以降の最初の定期実行で。投稿済みの日は `digests` テーブルで飛ばす）。
+- まとめ用のテキストチャンネル（`[digest] channel`、既定 **#ニュース**。サーバー内を名前で探し、feedpipe 配下でなくてよい。なければ作らずに知らせる）に、**ジャンルごとに 1 メッセージ**「## 📰 tech MM/DD のまとめ（N 件）」を 1 日 1 回投稿する（`[digest] hour` 以降の最初の定期実行で。投稿済みの日は `digests` テーブルで飛ばす）。リンク先は各ジャンルのフォーラムの投稿。
 - 本文 = LLM が直近 24 時間の見出しから書く「今日の傾向」（2 文）＋ **重要度の高い順の投稿へのリンク**（上位 10 件、👍 の数付き）＋「ほか N 件」。2,000 字に収める。
 - 「主な話題」を LLM に箇条書きさせる案は、関係のない話題を 1 行に混ぜたので採らず、一覧はコードで作る。
 - run の後に続けて実行する（要約サーバーを run と取り合わないため）。
@@ -70,8 +70,8 @@ systemd --user: feedpipe-bot.service
 |---|---|
 | `feeds` | url（移転で更新）/ original_url / title / category（= ジャンルのパス）/ enabled / disabled_reason / etag / last_modified / last_status / fail_count / latest_entry_at / initialized_at / options（JSON） |
 | `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ notified_at / discord_thread_id / likes / likes_checked_at |
-| `discord_channels` | category（トップレベルのジャンル）/ guild_id / channel_id / webhook_url / tags（JSON: `feed:<id>` と `sub:<パス>` → タグ ID） |
-| `digests` | genre / day（ローカル日付）/ thread_id — 投稿済みのまとめ |
+| `discord_channels` | category（トップレベルのジャンル。まとめの投稿先は `#digest`）/ guild_id / channel_id / webhook_url / tags（JSON: `feed:<id>` と `sub:<パス>` → タグ ID） |
+| `digests` | genre / day（ローカル日付）/ thread_id（投稿したメッセージの ID）— 投稿済みのまとめ |
 
 `items.status`: `seen`（初回の既読化）→ `new` → `saved` → `notified`。投稿しなかったものは `stale`、失敗は `error`。状態を記録するので、途中で落ちても次の実行で続きから処理する。列の追加は `db.ADDED_COLUMNS` で自動的に行う。
 
