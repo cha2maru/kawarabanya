@@ -29,6 +29,7 @@ class FakeDiscord:
         self.likes: dict[str, int] = {}
         self.messages: dict[str, dict] = {}  # Webhook で投稿したメッセージ
         self.thread_tags: dict[str, list] = {}
+        self.deleted: list[str] = []
         self.next_id = 100
         self.rate_limited_once = False
 
@@ -66,6 +67,11 @@ class FakeDiscord:
             ch = {"id": self._id(), **body, "available_tags": tags}
             self.channels.append(ch)
             return httpx.Response(201, json=ch)
+        if req.method == "DELETE" and path.startswith("/channels/thread"):  # フォーラムの投稿を消す
+            if path in self.deleted:
+                return httpx.Response(404, json={"message": "Unknown Channel"})
+            self.deleted.append(path)
+            return httpx.Response(200, json={})
         if req.method == "PATCH" and path.startswith("/channels/"):
             cid = path.split("/")[2]
             if cid.startswith("thread"):  # フォーラムの投稿（スレッド）のタグの書き換え
@@ -343,3 +349,18 @@ def test_retag_posts(tmp_path):
     sec = next(t["id"] for c in fake.channels if c["id"] == "11" for t in c["available_tags"] if t["name"] == "セキュリティ")
     assert (changed, total) == (2, 2)
     assert fake.thread_tags == {"thread-a": [sec], "thread-b": []}  # 古いフィード名のタグは外れる
+
+
+def test_delete_duplicate_posts():
+    fake, client, conn = setup()
+    feed_id = db.list_feeds(conn)[0].id
+    with conn:
+        for key, status in [("a", "notified"), ("b", "duplicate"), ("c", "duplicate")]:
+            iid = db.insert_item(conn, feed_id, key, None, key, ago(hours=1), status)
+            db.update_item(conn, iid, discord_thread_id=f"thread-{key}")
+    fake.deleted.append("/channels/thread-c")  # すでに消えている
+    assert len(notify.delete_duplicate_posts(conn, client)) == 2 and fake.deleted == ["/channels/thread-c"]
+    assert len(notify.delete_duplicate_posts(conn, client, apply=True)) == 2
+    assert fake.deleted == ["/channels/thread-c", "/channels/thread-b"]
+    assert notify.delete_duplicate_posts(conn, client) == []
+    assert conn.execute("SELECT discord_thread_id FROM items WHERE key = 'a'").fetchone()[0] == "thread-a"

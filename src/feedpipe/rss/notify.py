@@ -268,3 +268,23 @@ async def retag_posts(
             raise
         changed += 1
     return changed, len(rows)
+
+
+def delete_duplicate_posts(conn: sqlite3.Connection, client: DiscordClient, *, apply: bool = False) -> list[sqlite3.Row]:
+    """重複（duplicate）と判定した記事のフォーラムの投稿を返し、apply=True なら消す。"""
+    rows = conn.execute(
+        "SELECT id, title, discord_thread_id FROM items WHERE status = 'duplicate' AND discord_thread_id IS NOT NULL"
+    ).fetchall()
+    if not apply:
+        return rows
+    for r in rows:
+        try:
+            client.request("DELETE", f"/channels/{r['discord_thread_id']}")
+        except DiscordError as e:
+            if "HTTP 403" in str(e):
+                raise DiscordError(f"{e}（Bot に「スレッドの管理」の権限が必要です）") from None
+            if "HTTP 404" not in str(e):  # 404 はすでに消えている
+                raise
+        with conn:
+            db.update_item(conn, r["id"], discord_thread_id=None)
+    return rows

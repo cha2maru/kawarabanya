@@ -30,6 +30,7 @@ from .rss import (
 from .server import (
     cmd_bot,
     cmd_discord_channels,
+    cmd_discord_delete_duplicates,
     cmd_discord_guilds,
     cmd_discord_invite_url,
     cmd_discord_retag,
@@ -158,6 +159,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_discord_channels)
     s = dc.add_parser("retag", help="投稿済みの記事のタグを、サブジャンルに付け直す（未判定なら LLM で判定）")
     s.set_defaults(func=cmd_discord_retag)
+    s = dc.add_parser("delete-duplicates", help="重複と判定した記事のフォーラムの投稿を消す")
+    s.add_argument("--apply", action="store_true", help="実際に消す（なしは一覧だけ）")
+    s.set_defaults(func=cmd_discord_delete_duplicates)
     s = dc.add_parser("test", help="カテゴリのチャンネルにテスト送信")
     s.add_argument("category")
     s.add_argument("message", nargs="?", default="feedpipe からのテスト送信です")

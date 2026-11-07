@@ -117,6 +117,17 @@ def cmd_discord_retag(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_discord_delete_duplicates(cfg: Config, args: argparse.Namespace) -> int:
+    """discord delete-duplicates: 重複と判定した記事のフォーラムの投稿を消す（--apply なしは一覧だけ）。"""
+    from ..rss.notify import delete_duplicate_posts
+
+    rows = delete_duplicate_posts(_open_db(cfg, args), _discord_client(cfg), apply=args.apply)
+    for r in rows:
+        print(f"  {r['id']:>5} {r['title']}")
+    print(f"重複の投稿: {len(rows)} 件" + ("を削除しました" if args.apply else "（--apply で削除）"))
+    return 0
+
+
 def cmd_discord_test(cfg: Config, args: argparse.Namespace) -> int:
     """discord test: ジャンルのフォーラムにテスト投稿する。"""
     conn = _open_db(cfg, args)
