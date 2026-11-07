@@ -1,0 +1,220 @@
+"""フィードの死活チェック。"""
+
+from __future__ import annotations
+
+import asyncio
+import socket
+import sqlite3
+import time
+from calendar import timegm
+from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import StrEnum
+from urllib.parse import urlsplit
+
+import feedparser
+import httpx
+
+from . import db
+from .config import GeneralConfig
+
+PERMANENT_REDIRECTS = {301, 308}
+
+
+class Status(StrEnum):
+    OK = "ok"
+    NOT_FEED = "not_feed"  # 応答はあるがフィードとして解析できない
+    GONE = "gone"  # 404 / 410
+    FORBIDDEN = "forbidden"  # 401 / 403（ボット対策のことも多い）
+    HTTP_ERROR = "http_error"  # その他の 4xx / 5xx
+    DNS = "dns"  # ホスト名が存在しない
+    NETWORK = "network"  # 接続失敗・タイムアウト・TLS エラーなど
+
+    @property
+    def is_ok(self) -> bool:
+        return self is Status.OK
+
+    @property
+    def is_permanent(self) -> bool:
+        """回復の見込みが薄い失敗か（`check --disable-dead` で即無効化する対象）。"""
+        return self in {Status.NOT_FEED, Status.GONE, Status.DNS}
+
+
+@dataclass
+class CheckResult:
+    feed: db.Feed
+    status: Status
+    http_status: int | None = None
+    # 恒久的なリダイレクト（301/308 のみ）の最終 URL。一時的なリダイレクトは None。
+    moved_to: str | None = None
+    feed_title: str | None = None
+    entries: int = 0
+    # フィード内で最も新しい記事の日時（日付のない記事しかなければ None）
+    latest_entry: datetime | None = None
+    error: str | None = None
+    elapsed: float = 0.0
+
+
+def _is_name_not_found(exc: BaseException) -> bool:
+    """例外の連鎖をたどり、ホスト名が存在しない（一時的な名前解決失敗ではない）かを判定する。"""
+    seen: set[int] = set()
+    e: BaseException | None = exc
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, socket.gaierror):
+            return e.errno in {socket.EAI_NONAME, getattr(socket, "EAI_NODATA", -5)}
+        if "Name or service not known" in str(e):
+            return True
+        e = e.__cause__ or e.__context__
+    return False
+
+
+def _latest_entry(entries: list) -> datetime | None:
+    stamps = [
+        t
+        for e in entries
+        if (t := e.get("published_parsed") or e.get("updated_parsed")) is not None
+    ]
+    if not stamps:
+        return None
+    return datetime.fromtimestamp(timegm(max(stamps)), UTC)
+
+
+def _classify_http(code: int) -> Status:
+    if code in (404, 410):
+        return Status.GONE
+    if code in (401, 403):
+        return Status.FORBIDDEN
+    return Status.HTTP_ERROR
+
+
+async def check_feed(client: httpx.AsyncClient, feed: db.Feed) -> CheckResult:
+    started = time.monotonic()
+    result = CheckResult(feed=feed, status=Status.NETWORK)
+    try:
+        resp = await client.get(feed.url)
+    except httpx.TooManyRedirects as e:
+        result.error = f"リダイレクトが多すぎます: {e}"
+    except httpx.TimeoutException:
+        result.error = "タイムアウト"
+    except httpx.HTTPError as e:
+        if _is_name_not_found(e):
+            result.status = Status.DNS
+            result.error = f"ホストが見つかりません: {urlsplit(feed.url).hostname}"
+        else:
+            result.error = f"{type(e).__name__}: {e}"
+    else:
+        result.http_status = resp.status_code
+        if resp.is_success:
+            # 移転先が正常に応答した場合だけ URL を更新対象にする
+            if resp.history and all(h.status_code in PERMANENT_REDIRECTS for h in resp.history):
+                final = str(resp.url)
+                if final != feed.url:
+                    result.moved_to = final
+            parsed = feedparser.parse(resp.content, response_headers=dict(resp.headers))
+            if parsed.version:
+                result.status = Status.OK
+                result.feed_title = parsed.feed.get("title")
+                result.entries = len(parsed.entries)
+                result.latest_entry = _latest_entry(parsed.entries)
+            else:
+                result.status = Status.NOT_FEED
+                result.error = f"フィードではありません（{resp.headers.get('content-type', '?')}）"
+        else:
+            result.status = _classify_http(resp.status_code)
+            result.error = f"HTTP {resp.status_code}"
+    result.elapsed = time.monotonic() - started
+    return result
+
+
+async def check_feeds(
+    feeds: list[db.Feed],
+    cfg: GeneralConfig,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    on_result: Callable[[CheckResult], None] | None = None,
+) -> list[CheckResult]:
+    """全体の同時接続数と、ホストごとの同時接続数を制限しながらチェックする。"""
+    global_sem = asyncio.Semaphore(cfg.concurrency)
+    host_sems: defaultdict[str, asyncio.Semaphore] = defaultdict(
+        lambda: asyncio.Semaphore(cfg.per_host)
+    )
+
+    async with httpx.AsyncClient(
+        transport=transport,
+        follow_redirects=True,
+        timeout=cfg.timeout,
+        headers={"User-Agent": cfg.user_agent},
+    ) as client:
+
+        async def one(feed: db.Feed) -> CheckResult:
+            host = urlsplit(feed.url).hostname or ""
+            async with global_sem, host_sems[host]:
+                r = await check_feed(client, feed)
+            if on_result:
+                on_result(r)
+            return r
+
+        return await asyncio.gather(*(one(f) for f in feeds))
+
+
+@dataclass
+class ApplyStats:
+    moved: int = 0
+    disabled: int = 0
+    merged: int = 0  # 移転先がすでに登録済みだったため無効化したもの
+
+
+def apply_results(
+    conn: sqlite3.Connection,
+    results: list[CheckResult],
+    *,
+    max_failures: int,
+    disable_dead: bool = False,
+) -> ApplyStats:
+    """チェック結果を DB に反映する（URL 更新・失敗回数・自動無効化）。"""
+    stats = ApplyStats()
+    now = db.now_iso()
+    with conn:
+        for r in results:
+            f = r.feed
+            if r.moved_to:
+                other = db.find_feed_by_url(conn, r.moved_to)
+                if other and other.id != f.id:
+                    db.set_enabled(conn, f.id, False, f"duplicate_of:{other.id}")
+                    stats.merged += 1
+                    continue
+                conn.execute("UPDATE feeds SET url = ? WHERE id = ?", (r.moved_to, f.id))
+                stats.moved += 1
+
+            if r.status.is_ok:
+                conn.execute(
+                    "UPDATE feeds SET last_fetched_at = ?, last_success_at = ?, last_status = ?,"
+                    " last_error = NULL, fail_count = 0, latest_entry_at = ?,"
+                    " title = COALESCE(title, ?) WHERE id = ?",
+                    (
+                        now,
+                        now,
+                        r.status.value,
+                        r.latest_entry.isoformat(timespec="seconds") if r.latest_entry else None,
+                        r.feed_title,
+                        f.id,
+                    ),
+                )
+                continue
+
+            fail_count = f.fail_count + 1
+            conn.execute(
+                "UPDATE feeds SET last_fetched_at = ?, last_status = ?, last_error = ?,"
+                " fail_count = ? WHERE id = ?",
+                (now, r.status.value, r.error, fail_count, f.id),
+            )
+            if disable_dead and r.status.is_permanent:
+                db.set_enabled(conn, f.id, False, r.status.value)
+                stats.disabled += 1
+            elif fail_count >= max_failures:
+                db.set_enabled(conn, f.id, False, f"fail_x{fail_count}:{r.status.value}")
+                stats.disabled += 1
+    return stats

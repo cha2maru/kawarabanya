@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# feedpipe
+data/
+archive/
+config.toml
+.env
+
+# 個人の購読リスト
+feedly.opml

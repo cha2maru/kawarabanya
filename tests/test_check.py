@@ -1,0 +1,107 @@
+import asyncio
+import socket
+
+import httpx
+
+from feedpipe import db
+from feedpipe.check import Status, apply_results, check_feeds
+from feedpipe.config import GeneralConfig
+
+RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Feed T</title>
+<item><title>a</title><link>https://x/a</link><pubDate>Mon, 02 Nov 2026 03:00:00 GMT</pubDate></item>
+<item><title>b</title><link>https://x/b</link></item></channel></rss>"""
+
+
+def handler(request: httpx.Request) -> httpx.Response:
+    host = request.url.host
+    if host == "ok.example":
+        return httpx.Response(200, content=RSS, headers={"content-type": "application/rss+xml"})
+    if host == "moved.example":
+        return httpx.Response(301, headers={"location": "https://ok.example/new"})
+    if host == "temp.example":
+        return httpx.Response(302, headers={"location": "https://ok.example/tmp"})
+    if host == "dup.example":
+        return httpx.Response(301, headers={"location": "https://ok.example/feed"})
+    if host == "movedgone.example":
+        return httpx.Response(301, headers={"location": "https://gone.example/new"})
+    if host == "gone.example":
+        return httpx.Response(404, text="nf")
+    if host == "deny.example":
+        return httpx.Response(403, text="no")
+    if host == "html.example":
+        return httpx.Response(200, text="<html><body>hi</body></html>", headers={"content-type": "text/html"})
+    if host == "nxdomain.example":
+        raise httpx.ConnectError("x") from socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+    raise httpx.ConnectTimeout("timeout")
+
+
+def setup():
+    conn = db.connect(":memory:")
+    urls = {
+        "ok": "https://ok.example/feed",
+        "moved": "http://moved.example/rss",
+        "temp": "https://temp.example/rss",
+        "dup": "https://dup.example/rss",
+        "gone": "https://gone.example/rss",
+        "deny": "https://deny.example/rss",
+        "html": "https://html.example/",
+        "nx": "https://nxdomain.example/rss",
+        "slow": "https://slow.example/rss",
+        "movedgone": "http://movedgone.example/rss",
+    }
+    ids = {k: db.insert_feed(conn, u, None, None, "c") for k, u in urls.items()}
+    return conn, ids
+
+
+def run(conn, **kw):
+    feeds = db.list_feeds(conn, enabled=True)
+    return asyncio.run(check_feeds(feeds, GeneralConfig(), transport=httpx.MockTransport(handler), **kw))
+
+
+def test_classification():
+    conn, ids = setup()
+    by_id = {r.feed.id: r for r in run(conn)}
+    st = {k: by_id[i].status for k, i in ids.items()}
+    assert st == {
+        "ok": Status.OK,
+        "moved": Status.OK,
+        "temp": Status.OK,
+        "dup": Status.OK,
+        "gone": Status.GONE,
+        "deny": Status.FORBIDDEN,
+        "html": Status.NOT_FEED,
+        "nx": Status.DNS,
+        "slow": Status.NETWORK,
+        "movedgone": Status.GONE,
+    }
+    assert by_id[ids["movedgone"]].moved_to is None  # 移転先が 404 なら URL を変えない
+    assert by_id[ids["ok"]].latest_entry.isoformat() == "2026-11-02T03:00:00+00:00"
+    assert by_id[ids["ok"]].entries == 2
+    assert by_id[ids["ok"]].feed_title == "Feed T"
+    assert by_id[ids["moved"]].moved_to == "https://ok.example/new"
+    assert by_id[ids["temp"]].moved_to is None  # 一時的なリダイレクトでは URL を変えない
+
+
+def test_apply_results_updates_and_disables():
+    conn, ids = setup()
+    stats = apply_results(conn, run(conn), max_failures=5, disable_dead=True)
+    assert stats.moved == 1
+    assert stats.merged == 1
+    assert stats.disabled == 4  # gone / movedgone / html / nx
+
+    assert db.get_feed(conn, ids["moved"]).url == "https://ok.example/new"
+    assert db.get_feed(conn, ids["moved"]).original_url == "http://moved.example/rss"
+    assert db.get_feed(conn, ids["dup"]).disabled_reason == f"duplicate_of:{ids['ok']}"
+    assert db.get_feed(conn, ids["ok"]).title == "Feed T"
+    deny = db.get_feed(conn, ids["deny"])
+    assert deny.enabled and deny.fail_count == 1  # 403 はすぐには無効化しない
+
+
+def test_auto_disable_after_max_failures():
+    conn, ids = setup()
+    for _ in range(3):
+        apply_results(conn, run(conn), max_failures=3)
+    deny = db.get_feed(conn, ids["deny"])
+    assert not deny.enabled
+    assert deny.disabled_reason == "fail_x3:forbidden"
+    assert db.get_feed(conn, ids["ok"]).fail_count == 0
