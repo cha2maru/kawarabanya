@@ -72,7 +72,7 @@ def test_digest_flag(tmp_path):
     p = tmp_path / "genres.toml"
     p.write_text('[culture]\n[culture.sports]\nlabel = "スポーツ"\ndigest = false\n', encoding="utf-8")
     g = load_genres(p)
-    assert g["culture"].digest and not g["culture/sports"].digest
+    assert (g["culture"].interest, g["culture/sports"].interest) == (None, "low")  # digest = false は low の古い書き方
 
 
 def test_suggest_subgenres(tmp_path):

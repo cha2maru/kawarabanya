@@ -23,7 +23,7 @@ from ..discord_api import (
     send_webhook,
 )
 from ..llm import Summarizer
-from .genres import top_genre
+from .genres import interest_of, top_genre
 
 MAX_CONTENT = 2000
 # 傾向を書かせる見出しの上限（LLM の入力 8,192 トークンに収めるため）
@@ -39,24 +39,31 @@ class DigestItem:
     likes: int | None
 
 
+# 好き（interest = "like"）のジャンルの記事は、重要度にこれを足して並べる
+LIKE_BONUS = 0.3
+
+
 def collect(
-    conn: sqlite3.Connection, genre: str, since: datetime, excluded: frozenset[str] = frozenset()
+    conn: sqlite3.Connection, genre: str, since: datetime, levels: dict[str, str] | None = None
 ) -> list[DigestItem]:
     """since 以降に投稿したジャンルの記事を、重要度の高い順に返す（判定のないものは最後）。
 
-    excluded（genres.toml で digest = false のジャンル・サブジャンル）の記事は除く。
+    levels（genres.interest_levels）で、うすい・ミュートの記事は除き、好きの記事は上に寄せる。
     """
+    levels = levels or {}
     rows = conn.execute(
         "SELECT COALESCE(i.subgenre, f.category) AS category, i.title, i.discord_thread_id, i.priority, i.likes FROM items i"
         " JOIN feeds f ON f.id = i.feed_id WHERE i.status = 'notified' AND i.notified_at >= ?",
         (since.isoformat(timespec="seconds"),),
     ).fetchall()
-    items = [
-        DigestItem(r["title"] or "(無題)", r["discord_thread_id"], r["priority"], r["likes"])
-        for r in rows
-        if top_genre(r["category"]) == genre and not {r["category"], genre} & excluded
-    ]
-    return sorted(items, key=lambda i: -(i.priority if i.priority is not None else -1))
+    scored = []
+    for r in rows:
+        level = interest_of(levels, r["category"])
+        if top_genre(r["category"]) != genre or level in ("low", "mute"):
+            continue
+        score = (r["priority"] if r["priority"] is not None else -1) + (LIKE_BONUS if level == "like" else 0)
+        scored.append((score, DigestItem(r["title"] or "(無題)", r["discord_thread_id"], r["priority"], r["likes"])))
+    return [it for _, it in sorted(scored, key=lambda x: -x[0])]
 
 
 def _link_text(title: str) -> str:
@@ -86,7 +93,7 @@ async def post_digest(
     genre: str,
     *,
     label: str | None = None,
-    excluded: frozenset[str] = frozenset(),
+    levels: dict[str, str] | None = None,
     now: datetime,
     top: int,
     window_hours: int,
@@ -112,7 +119,7 @@ async def post_digest(
     since = now - timedelta(hours=window_hours)
     if prev:
         since = max(since, datetime.fromisoformat(prev["created_at"]))
-    items = collect(conn, genre, since, excluded)
+    items = collect(conn, genre, since, levels)
     if not items:
         return None
     trend = None

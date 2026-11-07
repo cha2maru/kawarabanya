@@ -308,9 +308,12 @@ def _notify(
         limit=limit or cfg.discord.max_posts_per_run,
         max_age_days=cfg.discord.max_age_days,
         category=category,
+        levels=genres.interest_levels(_load_genres(cfg)),
         dry_run=dry_run,
     )
     line = f"通知: 送信 {stats.sent} 件"
+    if stats.muted:
+        line += f" / ミュートのため送らない {stats.muted} 件"
     if stats.stale:
         line += f" / {cfg.discord.max_age_days} 日より古いため送らない {stats.stale} 件"
     if stats.failed:
@@ -459,14 +462,14 @@ def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
         )]
     )
 
-    excluded = frozenset(g.path for g in (defs or {}).values() if not g.digest)
+    levels = genres.interest_levels(defs)
 
     async def go():
         async with Summarizer(cfg.summarize) as summarizer:
             return {
                 g: await digest.post_digest(
                     conn, summarizer, g, label=defs[g].label if defs and g in defs else None,
-                    excluded=excluded, now=now, top=cfg.digest.top, window_hours=cfg.digest.window_hours,
+                    levels=levels, now=now, top=cfg.digest.top, window_hours=cfg.digest.window_hours,
                     due_after=due_after, update=args.update, dry_run=args.dry_run,
                 )
                 for g in genre_list

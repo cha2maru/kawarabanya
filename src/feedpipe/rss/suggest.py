@@ -20,7 +20,7 @@ from pathlib import Path
 from .. import db
 from ..discord_api import MAX_TAGS
 from ..llm import Summarizer
-from .genres import Genre, top_genre
+from .genres import Genre, section_re, set_key, top_genre
 
 # この件数以上の記事がまとまるときだけ作る
 MIN_ITEMS = 3
@@ -185,20 +185,6 @@ async def merge(
     return merges if left <= target else None
 
 
-def _section_re(path: str) -> re.Pattern:
-    """genres.toml の [genre.key] の節（見出しから次の見出しの前まで）。"""
-    genre, key = path.split("/")
-    return re.compile(rf"^\[{re.escape(genre)}\.{re.escape(key)}\][^\n]*\n(?:(?!\[).*(?:\n|$))*", re.MULTILINE)
-
-
-def _set_field(section: str, name: str, value: str) -> str:
-    line = f"{name} = {json.dumps(value, ensure_ascii=False)}"
-    if re.search(rf"^{name}\s*=", section, re.MULTILINE):
-        return re.sub(rf"^{name}\s*=.*$", lambda _: line, section, count=1, flags=re.MULTILINE)
-    head, _, rest = section.partition("\n")
-    return f"{head}\n{line}\n{rest}"
-
-
 def apply(
     conn: sqlite3.Connection, genres_file: str | Path, suggestions: list[Suggestion], merges: list[Merge] = ()
 ) -> None:
@@ -208,10 +194,10 @@ def apply(
     day = datetime.now().strftime("%Y-%m-%d")
     for mg in merges:
         for removed in mg.removed:
-            text = _section_re(removed).sub("", text, count=1)
+            text = section_re(removed).sub("", text, count=1)
         keep = f"{mg.genre}/{mg.key}"
-        if m := _section_re(keep).search(text):
-            sec = _set_field(_set_field(m.group(0), "label", mg.label), "description", mg.description)
+        if m := section_re(keep).search(text):
+            sec = set_key(set_key(m.group(0), "label", mg.label), "description", mg.description)
             text = text[: m.start()] + sec + text[m.end():]
         # 追加の案どうし・追加の案への統合は、追加の案を書き換える
         for s in suggestions:
@@ -221,7 +207,7 @@ def apply(
                 s.label, s.description = mg.label, mg.description
     added: set[str] = set()
     for s in suggestions:
-        if s.path in added or _section_re(s.path).search(text):
+        if s.path in added or section_re(s.path).search(text):
             continue  # 既存のサブジャンルに統合された
         added.add(s.path)
         text = text.rstrip("\n") + (

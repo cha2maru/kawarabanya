@@ -24,7 +24,7 @@ from ..discord_api import (
 )
 from ..llm import Summarizer
 from . import archive
-from .genres import Genre
+from .genres import Genre, interest_of
 from .item import is_recent
 from .pipeline import classify_item
 
@@ -70,6 +70,7 @@ class NotifyStats:
     no_channel: int = 0  # 送り先のチャンネルが未登録
     remaining: int = 0  # 上限に達したため次回に回したもの
     stale: int = 0  # 公開から日数が経っていたため投稿せずに済ませたもの
+    muted: int = 0  # ミュート（interest = "mute"）のジャンルなので投稿しなかったもの
     errors: list[str] = field(default_factory=list)
 
 
@@ -161,23 +162,29 @@ def notify_pending(
     limit: int,
     max_age_days: int,
     category: str | None = None,
+    levels: dict[str, str] | None = None,
     dry_run: bool = False,
     transport: httpx.BaseTransport | None = None,
     interval: float = SEND_INTERVAL,
 ) -> NotifyStats:
     """保存済み・未投稿の記事を limit 件まで投稿する。
 
-    公開から max_age_days 日を過ぎたものは投稿せず stale にする。投稿後は Markdown に投稿へのリンクを書き込む。
+    公開から max_age_days 日を過ぎたものは投稿せず stale に、ミュートのジャンル（levels）の記事は muted にする。投稿後は Markdown に投稿へのリンクを書き込む。
     """
     stats = NotifyStats()
     items, stats.no_channel = pending_items(conn, category)
     old = [p for p in items if not is_recent(p.published, p.fetched_at, max_age_days)]
     items = [p for p in items if p not in old]
     stats.stale = len(old)
-    if old and not dry_run:
+    muted = [p for p in items if interest_of(levels or {}, p.subgenre or p.category) == "mute"]
+    items = [p for p in items if p not in muted]
+    stats.muted = len(muted)
+    if not dry_run:
         with conn:
             for p in old:
                 db.update_item(conn, p.item_id, status="stale")
+            for p in muted:
+                db.update_item(conn, p.item_id, status="muted")
     stats.remaining = max(len(items) - limit, 0)
     for i, p in enumerate(items[:limit]):
         payload = build_payload(p)

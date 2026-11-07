@@ -6,7 +6,7 @@
     feeds = ["https://...", ...]
 
     priority = "A: ... B: ... C: ..."   # 重要度の判定基準（省略可）
-    digest = false              # 投稿はするが、まとめには載せない（省略時 true）
+    interest = "low"            # 好き嫌い: like（まとめの上位に寄せる）/ low（まとめに載せない）/ mute（投稿もしない）
 
     feeds に { url = ..., item = ..., ... } と書くと HTML 取り込み（rss/htmlsource.py）
 
@@ -19,6 +19,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
 import tomllib
 from dataclasses import dataclass, field
@@ -27,7 +29,14 @@ from pathlib import Path
 from .. import db
 from .htmlsource import HtmlSource
 
-RESERVED = {"label", "description", "feeds", "priority", "digest"}
+RESERVED = {"label", "description", "feeds", "priority", "interest", "digest"}
+# 好き嫌い（interest）。書かなければ normal（サブジャンルはジャンルの値を受け継ぐ）
+INTEREST_LEVELS = {
+    "like": "好き（まとめの上位に寄せる）",
+    "normal": "普通",
+    "low": "うすい（投稿はするが、まとめに載せない）",
+    "mute": "ミュート（投稿もしない）",
+}
 
 
 @dataclass
@@ -41,8 +50,8 @@ class Genre:
     html: dict[str, dict] = field(default_factory=dict)
     # 重要度の判定基準（A/B/C の説明）。空ならトップレベルのジャンル → 既定の基準
     priority: str = ""
-    # False なら、このジャンル（サブジャンル）の記事は投稿するが、まとめには載せない（興味のうすいもの）
-    digest: bool = True
+    # 好き嫌い（INTEREST_LEVELS のキー）。None なら書いていない
+    interest: str | None = None
 
     @property
     def top(self) -> str:
@@ -53,6 +62,26 @@ class Genre:
     def is_sub(self) -> bool:
         """サブジャンルか。"""
         return "/" in self.path
+
+
+def _interest(table: dict, gpath: str, path: str | Path) -> str | None:
+    # digest = false は interest = "low" の古い書き方
+    level = table.get("interest") or ("low" if table.get("digest") is False else None)
+    if level is not None and level not in INTEREST_LEVELS:
+        raise ValueError(f"{path}: [{gpath}] の interest は {' / '.join(INTEREST_LEVELS)} のどれかです: {level}")
+    return level
+
+
+def interest_levels(genres: dict[str, Genre] | None) -> dict[str, str]:
+    """パス → 好き嫌い（書いてあるものだけ）。"""
+    return {p: g.interest for p, g in (genres or {}).items() if g.interest}
+
+
+def interest_of(levels: dict[str, str], category: str | None) -> str:
+    """記事のカテゴリ（"news/world"）の好き嫌い。サブジャンル → ジャンルの順に探し、なければ normal。"""
+    if not category:
+        return "normal"
+    return levels.get(category) or levels.get(top_genre(category) or "") or "normal"
 
 
 def top_genre(category: str | None) -> str | None:
@@ -100,7 +129,7 @@ def load_genres(path: str | Path) -> dict[str, Genre]:
             feeds=feeds,
             html=html,
             priority=table.get("priority", ""),
-            digest=table.get("digest", True),
+            interest=_interest(table, gpath, path),
         )
         for sub_key, sub in table.items():
             if sub_key in RESERVED:
@@ -190,3 +219,67 @@ def priority_criteria(genres: dict[str, Genre] | None, category: str | None) -> 
         if (g := genres.get(path)) and g.priority:
             return g.priority
     return None
+
+
+# ===== genres.toml の書き換え（Bot・genres suggest から。手書きのコメントは残す） =====
+
+
+def section_re(gpath: str) -> re.Pattern:
+    """genres.toml の [news] / [news.world] の節（見出しから次の見出しの前まで）。"""
+    header = re.escape(gpath.replace("/", "."))
+    return re.compile(rf"^\[{header}\][^\n]*\n(?:(?!\[).*(?:\n|$))*", re.MULTILINE)
+
+
+def _edit_section(file: str | Path, gpath: str, edit) -> None:
+    path = Path(file)
+    text = path.read_text(encoding="utf-8")
+    m = section_re(gpath).search(text)
+    if m is None:
+        raise ValueError(f"{path} に [{gpath.replace('/', '.')}] がありません")
+    path.write_text(text[: m.start()] + edit(m.group(0)) + text[m.end():], encoding="utf-8")
+
+
+def set_key(section: str, name: str, value: str | None) -> str:
+    """節の name = ... を value（JSON 文字列として書く）にする。None なら消す。"""
+    pattern = re.compile(rf"^{name}\s*=.*\n?", re.MULTILINE)
+    if value is None:
+        return pattern.sub("", section, count=1)
+    line = f"{name} = {json.dumps(value, ensure_ascii=False)}\n"
+    if pattern.search(section):
+        return pattern.sub(lambda _: line, section, count=1)
+    head, _, rest = section.partition("\n")
+    return f"{head}\n{line}{rest}"
+
+
+def set_interest(file: str | Path, gpath: str, level: str) -> None:
+    """ジャンル・サブジャンルの好き嫌いを書き換える（normal なら消す）。"""
+    if level not in INTEREST_LEVELS:
+        raise ValueError(f"好き嫌いは {' / '.join(INTEREST_LEVELS)} のどれかです: {level}")
+    _edit_section(file, gpath, lambda sec: set_key(set_key(sec, "digest", None), "interest",
+                                                   None if level == "normal" else level))
+
+
+def add_feed_url(file: str | Path, gpath: str, url: str, comment: str | None = None) -> None:
+    """ジャンルの feeds の末尾に URL を書き足す（feeds がなければ作る）。"""
+    line = f"  {json.dumps(url)},{f'  # {comment}' if comment else ''}\n"
+
+    def edit(sec: str) -> str:
+        if m := re.search(r"^feeds\s*=\s*\[[^\]]*?(?=^\])", sec, re.MULTILINE | re.DOTALL):
+            return sec[: m.end()] + line + sec[m.end():]
+        head, _, rest = sec.partition("\n")
+        return f"{head}\nfeeds = [\n{line}]\n{rest}"
+
+    _edit_section(file, gpath, edit)
+
+
+def remove_feed_urls(file: str | Path, urls: list[str]) -> int:
+    """feeds から URL の行（文字列でも HTML 取り込みのテーブルでも）を消し、消した行数を返す。"""
+    path = Path(file)
+    text = path.read_text(encoding="utf-8")
+    removed = 0
+    for url in dict.fromkeys(urls):
+        q = re.escape(json.dumps(url))
+        text, n = re.subn(rf"^[ \t]*(?:{q}|\{{[^\n]*url\s*=\s*{q}[^\n]*)[^\n]*\n", "", text, flags=re.MULTILINE)
+        removed += n
+    path.write_text(text, encoding="utf-8")
+    return removed

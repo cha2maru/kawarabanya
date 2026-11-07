@@ -332,8 +332,12 @@ def test_digest_render_and_post(tmp_path):
     since = datetime.now(UTC) - timedelta(hours=24)
     with conn:
         conn.execute("UPDATE items SET subgenre = 'tech/sports' WHERE key = 'b'")
-    assert {i.title for i in digest.collect(conn, "tech", since, frozenset({"tech/sports"}))} == {"小ネタ", "判定なし", "新着"}
-    assert digest.collect(conn, "tech", since, frozenset({"tech"})) == []
+    assert {i.title for i in digest.collect(conn, "tech", since, {"tech/sports": "low"})} == {"小ネタ", "判定なし", "新着"}
+    assert digest.collect(conn, "tech", since, {"tech": "mute"}) == []
+    with conn:  # 好きなサブジャンルの記事は、重要度に LIKE_BONUS を足して上に寄せる
+        conn.execute("UPDATE items SET subgenre = 'tech/ai', priority = 0.8 WHERE key = 'c'")
+    assert next(i.title for i in digest.collect(conn, "tech", since)) == "小ネタ"  # 0.99
+    assert next(i.title for i in digest.collect(conn, "tech", since, {"tech/ai": "like"})) == "判定なし"  # 0.8 + 0.3
 
     many = [digest.DigestItem(f"記事{i}" * 20, f"t{i}", 0.5, None) for i in range(50)]
     text = digest.render("傾向。", many, "1", top=50)
@@ -400,3 +404,11 @@ def test_pending_items_follow_item_genre(tmp_path):
         db.update_item(conn, a, subgenre="culture/movie")  # tech のフィードでも、LLM が別のジャンルに振り分けた
     assert notify.pending_items(conn, "culture") == ([], 1)  # culture のフォーラムへ（テストでは未作成なので送り先なし）
     assert notify.pending_items(conn, "tech") == ([], 0)
+
+    # ミュートのジャンルの記事は投稿せず muted にする
+    with conn:
+        m = db.insert_item(conn, feed_id, "m", "https://m", "ミュートの記事", ago(hours=1), "saved")
+        db.update_item(conn, m, subgenre="tech/ai")
+    stats = notify.notify_pending(conn, limit=5, max_age_days=3, levels={"tech/ai": "mute"}, interval=0)
+    assert stats.muted == 1 and stats.sent == 0
+    assert conn.execute("SELECT status FROM items WHERE id = ?", (m,)).fetchone()[0] == "muted"
