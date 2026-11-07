@@ -31,7 +31,10 @@ class Bot(discord.Client):
     """常駐 Bot 本体。Discord に接続したまま、定期的に run・genres suggest・digest を別プロセスで実行する。"""
 
     def __init__(self, cfg: Config, config_args: list[str]):
-        super().__init__(intents=discord.Intents.default())
+        intents = discord.Intents.default()
+        # 「@RSSBOT」がロールへのメンションになると、これがないと本文が空で届く（Developer Portal でもオンにする）
+        intents.message_content = True
+        super().__init__(intents=intents)
         self.cfg = cfg
         self.config_args = config_args  # 子プロセスにも同じ --config / --db を渡す
         self.llm: asyncio.subprocess.Process | None = None
@@ -99,12 +102,23 @@ class Bot(discord.Client):
 
     async def on_message(self, message: discord.Message) -> None:
         """Bot へのメンションを日本語の依頼として受け、コマンドに直して返事をする（サーバーの持ち主だけ）。"""
-        if message.author.bot or self.user is None or self.user not in message.mentions:
+        if message.author.bot or self.user is None:
+            return
+        # 「@RSSBOT」は Bot 本人ではなく、同じ名前の Bot のロールへのメンションになることがある
+        my_roles = set(message.guild.me.roles) if message.guild else set()
+        if self.user not in message.mentions and not my_roles & set(message.role_mentions):
+            return
+        log.info("メンション: %s（本文 %d 字）", message.author, len(message.content))
+        if not message.content:
+            await message.reply(
+                "本文が読めませんでした。Developer Portal の Bot の設定で「MESSAGE CONTENT INTENT」をオンにしてください",
+                mention_author=False,
+            )
             return
         if message.guild is None or message.author.id != message.guild.owner_id:
             await message.reply("この Bot に頼めるのはサーバーの持ち主だけです", mention_author=False)
             return
-        text = re.sub(r"<@!?\d+>", "", message.content).strip()
+        text = re.sub(r"<@[!&]?\d+>", "", message.content).strip()
         if not text:
             await message.reply(assistant.help_text(), mention_author=False)
             return

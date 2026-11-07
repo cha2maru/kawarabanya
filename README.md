@@ -73,7 +73,7 @@ uv run kawarabanya feeds add "http://127.0.0.1:1200/github/repos/DIYgod" --genre
 
 ### Discord から頼む
 
-Bot にメンションして日本語で書くと、ローカル LLM がコマンドに直す（サーバーの持ち主だけ）。サイトの追加・削除、好き嫌いの変更、取り込み・まとめの実行は、ボタンで確認してから実行する。状態や一覧はすぐ返す。
+Bot にメンションして日本語で書くと、ローカル LLM がコマンドに直す（サーバーの持ち主だけ）。Developer Portal の Bot の設定で **MESSAGE CONTENT INTENT** をオンにしておく（「@RSSBOT」は Bot のロールへのメンションになることがあり、そのときは本文を読む許可が要る）。サイトの追加・削除、好き嫌いの変更、取り込み・まとめの実行は、ボタンで確認してから実行する。状態や一覧はすぐ返す。
 
 ```
 @RSSBOT https://example.com/news をボードゲームに追加して   → feeds add … --genre hobby/boardgame（確認）
