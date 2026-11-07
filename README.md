@@ -35,6 +35,8 @@ journalctl --user -u feedpipe-bot -f         # ログ
 |---|---|
 | `bot` | 常駐 Bot。60 分ごとに `run` と `digest --due` を別プロセスで実行する |
 | `digest [--genre X] [--due] [--dry-run]` | ジャンルごとの 1 日のまとめ（今日の傾向＋重要度順の投稿へのリンク）を #ニュース に投稿する |
+| `digest --update [--genre X]` | 投稿済みの今日のまとめを、最新の記事・重要度で作り直して書き換える |
+| `digest --delete [--genre X] [--day YYYY-MM-DD]` | まとめを削除する（記録も消えるので、その日にもう一度投稿できる） |
 | `run [--category X] [--backfill N] [--no-fulltext] [--no-summary] [--no-notify]` | 取得 → 保存 → 重要度の判定 → 要約 → 投稿 → 👍 集計。初回のフィードは既存記事を既読にするだけ |
 | `summarize` | 保存済み・未投稿で要約のない最近の記事を、重要度を判定してから要約する |
 | `notify [--category X] [--limit N] [--dry-run]` | 保存済み・未投稿の記事を投稿する |

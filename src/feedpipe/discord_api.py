@@ -354,3 +354,32 @@ def count_likes(client: DiscordClient, thread_id: str) -> int | None:
             return None
         raise
     return next((r["count"] for r in msg.get("reactions", []) if r["emoji"].get("name") == LIKE_EMOJI), 0)
+
+
+def _webhook_request(
+    method: str, url: str, payload: dict | None, transport: httpx.BaseTransport | None, *, ok_404: bool = False
+) -> None:
+    with httpx.Client(transport=transport, timeout=20) as c:
+        for _ in range(5):
+            resp = c.request(method, url, json=payload)
+            if resp.status_code == 429:
+                time.sleep(float(resp.json().get("retry_after", 1)))
+                continue
+            if resp.status_code == 404 and ok_404:
+                return
+            if resp.status_code >= 400:
+                raise DiscordError(f"Webhook のメッセージ操作に失敗: HTTP {resp.status_code} {resp.text[:200]}")
+            return
+    raise DiscordError("Webhook: レート制限が解除されません")
+
+
+def edit_webhook_message(
+    webhook_url: str, message_id: str, payload: dict, transport: httpx.BaseTransport | None = None
+) -> None:
+    """Webhook で投稿したメッセージを書き換える（同じ Webhook で投稿したものだけ）。"""
+    _webhook_request("PATCH", f"{webhook_url}/messages/{message_id}", payload, transport)
+
+
+def delete_webhook_message(webhook_url: str, message_id: str, transport: httpx.BaseTransport | None = None) -> None:
+    """Webhook で投稿したメッセージを消す。すでに消えていれば何もしない。"""
+    _webhook_request("DELETE", f"{webhook_url}/messages/{message_id}", None, transport, ok_404=True)

@@ -26,6 +26,7 @@ class FakeDiscord:
         self.webhooks: dict[str, list] = {"11": [{"id": "w11", "name": "feedpipe", "token": "k11"}]}
         self.posts: list[dict] = []
         self.likes: dict[str, int] = {}
+        self.messages: dict[str, dict] = {}  # Webhook で投稿したメッセージ
         self.next_id = 100
         self.rate_limited_once = False
 
@@ -36,12 +37,23 @@ class FakeDiscord:
     def handler(self, req: httpx.Request) -> httpx.Response:
         path = req.url.path.removeprefix("/api/v10")
         body = json.loads(req.content) if req.content else None
+        if req.url.path.startswith("/api/webhooks/") and "/messages/" in req.url.path:  # 投稿の編集・削除
+            mid = req.url.path.rsplit("/", 1)[1]
+            if mid not in self.messages:
+                return httpx.Response(404, json={"message": "Unknown Message"})
+            if req.method == "DELETE":
+                del self.messages[mid]
+                return httpx.Response(204)
+            self.messages[mid] = body
+            return httpx.Response(200, json={"id": mid, **body})
         if req.url.path.startswith("/api/webhooks/"):  # Webhook URL はバージョンなし・認証なし
             if not self.rate_limited_once:
                 self.rate_limited_once = True
                 return httpx.Response(429, json={"retry_after": 0.01})
             self.posts.append(body)
-            return httpx.Response(200, json={"id": self._id(), "channel_id": f"thread{len(self.posts)}"})
+            mid = self._id()
+            self.messages[mid] = body
+            return httpx.Response(200, json={"id": mid, "channel_id": f"thread{len(self.posts)}"})
         assert req.headers["authorization"] == "Bot TOKEN"
         if path == "/users/@me/guilds":
             return httpx.Response(200, json=[{"id": "1", "name": "srv"}])
@@ -273,9 +285,25 @@ def test_digest_render_and_post(tmp_path):
     assert lines[3] == "- [小ネタ](https://discord.com/channels/1/t-a)"
     assert lines[4] == "ほか 1 件"
     assert "thread_name" not in fake.posts[-1]  # テキストチャンネルへの普通のメッセージ
+    t = httpx.MockTransport(fake.handler)
     # 同じ日は二度投稿しない
-    assert asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24,
-                                               transport=httpx.MockTransport(fake.handler))) is None
+    assert asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24, transport=t)) is None
+    [mid] = [r[0] for r in conn.execute("SELECT thread_id FROM digests")]
+
+    # 更新: 重要度が変わったら並びが変わって書き換わる
+    with conn:
+        conn.execute("UPDATE items SET priority = 0.99 WHERE key = 'a'")
+    updated = asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24,
+                                             update=True, transport=t))
+    assert fake.messages[mid]["content"] == updated and "- [小ネタ]" in updated.splitlines()[2]
+    assert asyncio.run(digest.post_digest(conn, None, "other", now=now, top=2, window_hours=24,
+                                          update=True, transport=t)) is None  # 未投稿は更新しない
+
+    # 削除: メッセージと記録が消え、もう一度投稿できる
+    day = now.astimezone().strftime("%Y-%m-%d")
+    assert digest.delete_digest(conn, "tech", day, transport=t)
+    assert mid not in fake.messages and not digest.delete_digest(conn, "tech", day, transport=t)
+    assert asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24, transport=t))
 
     many = [digest.DigestItem(f"記事{i}" * 20, f"t{i}", 0.5, None) for i in range(50)]
     text = digest.render("傾向。", many, "1", top=50)

@@ -13,7 +13,13 @@ from datetime import datetime, timedelta
 import httpx
 
 from . import db
-from .discord_api import DIGEST_KEY, post_url, send_webhook
+from .discord_api import (
+    DIGEST_KEY,
+    delete_webhook_message,
+    edit_webhook_message,
+    post_url,
+    send_webhook,
+)
 from .genres import top_genre
 from .summarize import Summarizer
 
@@ -65,10 +71,6 @@ def render(trend: str | None, items: list[DigestItem], guild_id: str, top: int, 
     return "\n".join(lines)
 
 
-def already_posted(conn: sqlite3.Connection, genre: str, day: str) -> bool:
-    return conn.execute("SELECT 1 FROM digests WHERE genre = ? AND day = ?", (genre, day)).fetchone() is not None
-
-
 async def post_digest(
     conn: sqlite3.Connection,
     summarizer: Summarizer | None,
@@ -77,15 +79,19 @@ async def post_digest(
     now: datetime,
     top: int,
     window_hours: int,
+    update: bool = False,
     dry_run: bool = False,
     transport: httpx.BaseTransport | None = None,
 ) -> str | None:
-    """genre のまとめを投稿し、本文を返す。投稿する記事がない・送り先がない・投稿済みなら None。"""
+    """genre の今日のまとめを投稿し、本文を返す。
+
+    update=True なら、投稿済みの今日のまとめを作り直して書き換える。
+    投稿する記事がない・送り先がない・（投稿なら）投稿済み・（更新なら）未投稿のときは None。
+    """
     day = now.astimezone().strftime("%Y-%m-%d")
-    channel = conn.execute(
-        "SELECT webhook_url, guild_id FROM discord_channels WHERE category = ?", (DIGEST_KEY,)
-    ).fetchone()
-    if channel is None or already_posted(conn, genre, day):
+    channel = _channel(conn)
+    posted = _posted(conn, genre, day)
+    if channel is None or (posted is not None) != update:
         return None
     items = collect(conn, genre, now - timedelta(hours=window_hours))
     if not items:
@@ -97,18 +103,45 @@ async def post_digest(
     content = header + "\n" + render(trend, items, channel["guild_id"], top, limit=MAX_CONTENT - len(header) - 1)
     if dry_run:
         return content
+    payload = {"content": content, "allowed_mentions": {"parse": []}}
+    if update:
+        edit_webhook_message(channel["webhook_url"], posted, payload, transport=transport)
+        return content
     # まとめはテキストチャンネル（#ニュース）に、ジャンルごとに 1 メッセージで投稿する
-    msg = send_webhook(channel["webhook_url"], {
-        "username": "feedpipe まとめ",
-        "content": content,
-        "allowed_mentions": {"parse": []},
-    }, transport=transport)
+    msg = send_webhook(channel["webhook_url"], {"username": "feedpipe まとめ", **payload}, transport=transport)
     with conn:
         conn.execute(
             "INSERT INTO digests (genre, day, thread_id, created_at) VALUES (?, ?, ?, ?)",
             (genre, day, msg.get("id"), db.now_iso()),
         )
     return content
+
+
+def delete_digest(
+    conn: sqlite3.Connection, genre: str, day: str, *, transport: httpx.BaseTransport | None = None
+) -> bool:
+    """day（YYYY-MM-DD）の genre のまとめを消す。投稿済みの記録も消すので、同じ日にもう一度投稿できる。"""
+    channel = _channel(conn)
+    message_id = _posted(conn, genre, day)
+    if message_id is None:
+        return False
+    if channel is not None:
+        delete_webhook_message(channel["webhook_url"], message_id, transport=transport)
+    with conn:
+        conn.execute("DELETE FROM digests WHERE genre = ? AND day = ?", (genre, day))
+    return True
+
+
+def _channel(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT webhook_url, guild_id FROM discord_channels WHERE category = ?", (DIGEST_KEY,)
+    ).fetchone()
+
+
+def _posted(conn: sqlite3.Connection, genre: str, day: str) -> str | None:
+    """投稿済みのまとめのメッセージ ID（未投稿なら None）。"""
+    row = conn.execute("SELECT thread_id FROM digests WHERE genre = ? AND day = ?", (genre, day)).fetchone()
+    return row[0] if row else None
 
 
 def is_due(now: datetime, hour: int) -> bool:

@@ -533,37 +533,48 @@ def cmd_genres_apply(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
-    from datetime import UTC as _UTC
-
     from . import digest
 
     conn = _open_db(cfg, args)
-    now = datetime.now(_UTC)
+    now = datetime.now(UTC)
+
+    if args.delete:
+        day = args.day or now.astimezone().strftime("%Y-%m-%d")
+        targets = args.genre or [r[0] for r in conn.execute("SELECT genre FROM digests WHERE day = ?", (day,))]
+        deleted = [g for g in targets if digest.delete_digest(conn, g, day)]
+        print(f"まとめ: {day} の {len(deleted)} 件を削除しました（{', '.join(deleted) or 'なし'}）")
+        return 0
+    if args.day:
+        raise ValueError("--day は --delete と一緒に使います（投稿・更新は今日のまとめだけ）")
     if args.due and not (cfg.digest.enabled and digest.is_due(now, cfg.digest.hour)):
         return 0
+
     defs = _load_genres(cfg)
     genre_list = args.genre or (
         [g.path for g in defs.values() if not g.is_sub] if defs
-        else [r[0] for r in conn.execute("SELECT category FROM discord_channels ORDER BY category")]
+        else [r[0] for r in conn.execute(
+            "SELECT category FROM discord_channels WHERE category != ? ORDER BY category", (discord_api.DIGEST_KEY,)
+        )]
     )
 
     async def go():
         async with Summarizer(cfg.summarize) as summarizer:
-            out = {}
-            for g in genre_list:
-                out[g] = await digest.post_digest(
-                    conn, summarizer, g, now=now, top=cfg.digest.top,
-                    window_hours=cfg.digest.window_hours, dry_run=args.dry_run,
+            return {
+                g: await digest.post_digest(
+                    conn, summarizer, g, now=now, top=cfg.digest.top, window_hours=cfg.digest.window_hours,
+                    update=args.update, dry_run=args.dry_run,
                 )
-            return out
+                for g in genre_list
+            }
 
     results = asyncio.run(go())
-    posted = [g for g, c in results.items() if c]
-    for g in posted:
-        if args.dry_run:
+    done = [g for g, c in results.items() if c]
+    if args.dry_run:
+        for g in done:
             print(f"===== {g} =====\n{results[g]}\n")
-    if posted or not args.due:
-        print(f"まとめ: {'表示' if args.dry_run else '投稿'} {len(posted)} 件（{', '.join(posted) or 'なし'}）")
+    if done or not args.due:
+        verb = "表示" if args.dry_run else ("更新" if args.update else "投稿")
+        print(f"まとめ: {verb} {len(done)} 件（{', '.join(done) or 'なし'}）")
     return 0
 
 
@@ -632,6 +643,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--genre", nargs="+", help="このジャンルだけ")
     s.add_argument("--due", action="store_true", help="[digest] hour を過ぎていなければ何もしない（Bot の定期実行用）")
     s.add_argument("--dry-run", action="store_true", help="投稿せずに内容を表示する")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--update", action="store_true", help="投稿済みの今日のまとめを、最新の内容で書き換える")
+    g.add_argument("--delete", action="store_true", help="まとめを削除する（その日にもう一度投稿できるようになる）")
+    s.add_argument("--day", help="--delete で消す日（YYYY-MM-DD。既定は今日）")
     s.set_defaults(func=cmd_digest)
 
     s = sub.add_parser("bot", help="常駐 Bot を起動する（定期的に run を実行）")
