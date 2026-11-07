@@ -62,3 +62,18 @@ uv run feedpipe run --no-summary             # 要約しない
 
 - 要約と投稿は **公開から 3 日以内の記事だけ**（`[summarize] max_age_days` / `[discord] max_age_days`）。
   それより古い未通知の記事は投稿せず `stale` にする（Markdown の保存はする）。
+
+### ジャンル（genres.toml）
+
+投稿先のジャンルは `genres.toml`（git 管理外。書き方は `genres.example.toml`）で定義する。
+
+- `[news]` がジャンル（Discord のフォーラム 1 つ）、`[news.world]` がサブジャンル（フォーラム内のタグ）
+- フィードの移動は、URL の行を別のジャンルの `feeds` に移して反映する
+
+```sh
+uv run feedpipe genres list                  # ジャンルとフィード数
+uv run feedpipe genres apply [--dry-run]     # genres.toml の割り当てをフィードに反映
+uv run feedpipe discord setup --apply        # フォーラム・タグを更新（ジャンルに対応しないフォーラムは「未使用」と表示）
+```
+
+genres.toml に書かれていないフィードの記事は投稿されない（Markdown の保存はする）。

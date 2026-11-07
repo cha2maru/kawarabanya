@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from . import db
+from .genres import Genre, top_genre
 
 log = logging.getLogger(__name__)
 
@@ -132,15 +133,20 @@ class PlannedChannel:
     channel_id: str | None = None  # 既存のフォーラムがあればその ID
     existing_tags: list[dict] = field(default_factory=list)
     nsfw: bool = False  # 既存のフォーラムが年齢制限か
+    subgenres: dict[str, str] = field(default_factory=dict)  # サブジャンルのパス → 表示名
+    description: str = ""
 
     @property
     def exists(self) -> bool:
         return self.channel_id is not None
 
+    def _all_tags(self) -> list[str]:
+        subs = [label[:MAX_TAG_CHARS] for label in self.subgenres.values()]
+        return list(dict.fromkeys([*subs, *(tag_name(f) for f in self.feeds)]))
+
     def wanted_tags(self) -> list[str]:
-        """フィード名のタグ（重複除去、上限 20 個）。"""
-        names = list(dict.fromkeys(tag_name(f) for f in self.feeds))
-        return names[:MAX_TAGS]
+        """サブジャンル → フィード名の順のタグ（重複除去、上限 20 個）。"""
+        return self._all_tags()[:MAX_TAGS]
 
     def missing_tags(self) -> list[str]:
         have = {t["name"] for t in self.existing_tags}
@@ -149,9 +155,8 @@ class PlannedChannel:
 
     @property
     def tag_overflow(self) -> int:
-        """タグの上限を超えたためタグなしで投稿されるフィードの数。"""
-        names = {tag_name(f) for f in self.feeds}
-        return max(len(names) - MAX_TAGS, 0)
+        """タグの上限を超えたため付けられないタグの数。"""
+        return max(len(self._all_tags()) - MAX_TAGS, 0)
 
 
 @dataclass
@@ -160,10 +165,15 @@ class Plan:
     parent_name: str
     parent_id: str | None  # None なら親カテゴリを新しく作る
     channels: list[PlannedChannel]
+    orphans: list[dict] = field(default_factory=list)  # 親カテゴリ内にあるが、どのジャンルにも対応しないフォーラム
 
 
 def make_plan(
-    client: DiscordClient, guild: dict, feeds_by_category: dict[str, list[db.Feed]], parent_name: str
+    client: DiscordClient,
+    guild: dict,
+    feeds_by_category: dict[str, list[db.Feed]],
+    parent_name: str,
+    genres: dict[str, Genre] | None = None,
 ) -> Plan:
     existing = client.channels(guild["id"])
     parent = next(
@@ -187,9 +197,19 @@ def make_plan(
                 channel_id=forum["id"] if forum else None,
                 existing_tags=forum.get("available_tags", []) if forum else [],
                 nsfw=bool(forum.get("nsfw")) if forum else False,
+                subgenres={g.path: g.label for g in (genres or {}).values() if g.is_sub and g.top == cat},
+                description=genres[cat].description if genres and cat in genres else "",
             )
         )
-    return Plan(guild=guild, parent_name=parent_name, parent_id=parent["id"] if parent else None, channels=planned)
+    names = {p.name for p in planned}
+    orphans = [c for n, c in forums.items() if n not in names]
+    return Plan(
+        guild=guild,
+        parent_name=parent_name,
+        parent_id=parent["id"] if parent else None,
+        channels=planned,
+        orphans=orphans,
+    )
 
 
 def apply_plan(
@@ -211,7 +231,7 @@ def apply_plan(
                 pc.name,
                 GUILD_FORUM,
                 parent_id=plan.parent_id,
-                topic=f"feedpipe: {pc.category}",
+                topic=pc.description or f"feedpipe: {pc.category}",
                 available_tags=[{"name": n} for n in pc.wanted_tags()],
                 nsfw=nsfw,
             )
@@ -229,7 +249,13 @@ def apply_plan(
                 pc.existing_tags, pc.nsfw = ch.get("available_tags", []), bool(ch.get("nsfw"))
 
         tag_ids = {t["name"]: t["id"] for t in pc.existing_tags}
-        feed_tags = {str(f.id): tag_ids[n] for f in pc.feeds if (n := tag_name(f)) in tag_ids}
+        # 投稿時に付けるタグ: "sub:<サブジャンル>" と "feed:<フィード ID>" → タグ ID
+        feed_tags = {f"feed:{f.id}": tag_ids[n] for f in pc.feeds if (n := tag_name(f)) in tag_ids}
+        feed_tags |= {
+            f"sub:{path}": tag_ids[label[:MAX_TAG_CHARS]]
+            for path, label in pc.subgenres.items()
+            if label[:MAX_TAG_CHARS] in tag_ids
+        }
 
         hook = next((w for w in client.webhooks(pc.channel_id) if w.get("name") == webhook_name and w.get("token")), None)
         if hook is None:
@@ -249,10 +275,10 @@ def apply_plan(
 
 
 def feeds_by_category(conn: sqlite3.Connection, only: list[str] | None = None) -> dict[str, list[db.Feed]]:
-    """有効なフィードをカテゴリ（なしは uncategorized）ごとにまとめる。"""
+    """有効なフィードをトップレベルのジャンル（なしは uncategorized）ごとにまとめる。"""
     out: dict[str, list[db.Feed]] = {}
     for f in db.list_feeds(conn, enabled=True):
-        cat = f.category or UNCATEGORIZED
+        cat = top_genre(f.category) or UNCATEGORIZED
         if only is None or cat in only:
             out.setdefault(cat, []).append(f)
     for cat in only or []:

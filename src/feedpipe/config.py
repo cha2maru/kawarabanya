@@ -30,6 +30,7 @@ def load_dotenv(path: Path = DEFAULT_ENV_PATH) -> None:
 class GeneralConfig:
     db: str = "data/feedpipe.db"
     archive_dir: str = "archive"
+    genres_file: str = "genres.toml"
     concurrency: int = 16
     per_host: int = 2
     timeout: float = 20.0

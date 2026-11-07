@@ -27,11 +27,15 @@ EXCERPT_CHARS = 200
 SEND_INTERVAL = 0.5
 
 
+TOP = "CASE WHEN instr(f.category, '/') > 0 THEN substr(f.category, 1, instr(f.category, '/') - 1) ELSE f.category END"
+
+
 @dataclass
 class Pending:
     item_id: int
     feed_id: int
     feed_title: str | None
+    category: str | None
     title: str | None
     url: str | None
     published: str | None
@@ -55,11 +59,12 @@ class NotifyStats:
 def pending_items(conn: sqlite3.Connection, category: str | None = None) -> tuple[list[Pending], int]:
     """通知待ちの記事と、送り先がないため送れない記事の数を返す。"""
     rows = conn.execute(
-        "SELECT i.id, i.feed_id, f.title AS feed_title, i.title, i.url, i.published, i.fetched_at, i.summary,"
+        "SELECT i.id, i.feed_id, f.title AS feed_title, f.category, i.title, i.url, i.published, i.fetched_at, i.summary,"
         " i.md_path, d.webhook_url, d.tags"
         " FROM items i JOIN feeds f ON f.id = i.feed_id"
-        " LEFT JOIN discord_channels d ON d.category = COALESCE(f.category, ?)"
-        " WHERE i.status = 'saved' AND (? IS NULL OR COALESCE(f.category, ?) = ?)"
+        # フォーラムはトップレベルのジャンル（"news/world" なら "news"）ごと
+        " LEFT JOIN discord_channels d ON d.category = COALESCE(" + TOP + ", ?)"
+        " WHERE i.status = 'saved' AND (? IS NULL OR COALESCE(" + TOP + ", ?) = ?)"
         " ORDER BY i.published, i.id",
         (UNCATEGORIZED, category, UNCATEGORIZED, category),
     ).fetchall()
@@ -68,6 +73,7 @@ def pending_items(conn: sqlite3.Connection, category: str | None = None) -> tupl
             item_id=r["id"],
             feed_id=r["feed_id"],
             feed_title=r["feed_title"],
+            category=r["category"],
             title=r["title"],
             url=r["url"],
             published=r["published"],
@@ -121,8 +127,12 @@ def build_payload(p: Pending) -> dict:
         # 記事中の @everyone などで通知が飛ばないようにする
         "allowed_mentions": {"parse": []},
     }
-    if tag := p.tags.get(str(p.feed_id)):
-        payload["applied_tags"] = [tag]
+    tags = [
+        p.tags.get(f"sub:{p.category}"),
+        p.tags.get(f"feed:{p.feed_id}") or p.tags.get(str(p.feed_id)),  # 後者は旧形式
+    ]
+    if tags := [t for t in tags if t]:
+        payload["applied_tags"] = tags
     return payload
 
 

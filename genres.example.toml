@@ -1,0 +1,27 @@
+# feedpipe のジャンル定義の見本。genres.toml にコピーして使う。
+#
+# - [ジャンル] が Discord のフォーラム 1 つになる（キーはチャンネル名。英小文字推奨）
+# - [ジャンル.サブジャンル] はフォーラム内のタグになる（サブジャンルの下にはジャンルを作れない）
+# - feeds にはフィードの URL を書く（取り込み時の URL でも、移転後の URL でもよい）。1 つの URL は 1 か所だけ
+# - フィードを移すには URL の行を別のジャンルに移して `feedpipe genres apply`
+# - ジャンルを足したら `feedpipe discord setup --apply` でフォーラム・タグを作る
+
+[news]
+label = "ニュース"
+description = "国内・国際・社会の総合ニュース"
+feeds = [
+  "https://news.yahoo.co.jp/rss/categories/domestic.xml",  # 国内 - Yahoo!ニュース
+]
+
+[news.world]
+label = "国際"
+feeds = [
+  "https://news.yahoo.co.jp/rss/categories/world.xml",  # 国際 - Yahoo!ニュース
+]
+
+[tech]
+label = "テック"
+description = "IT・ガジェット・開発"
+feeds = [
+  "https://gigazine.net/news/rss_2.0/",  # GIGAZINE
+]

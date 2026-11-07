@@ -14,7 +14,7 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import db, discord_api, notify, opml
+from . import db, discord_api, genres, notify, opml
 from .check import CheckResult, Status, apply_results, check_feeds
 from .config import Config, load_config, load_dotenv
 from .run import FeedReport, run_feeds, summarize_pending
@@ -305,8 +305,13 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
     conn = _open_db(cfg, args)
     client = _discord_client(cfg)
     guild = discord_api.resolve_guild(client, cfg.discord.guild_id)
-    by_cat = discord_api.feeds_by_category(conn, args.categories)
-    plan = discord_api.make_plan(client, guild, by_cat, cfg.discord.parent_category)
+    genre_defs = _load_genres(cfg)
+    only = args.categories
+    if only is None and genre_defs:
+        # genres.toml があれば、そこで定義したトップレベルのジャンルだけフォーラムにする
+        only = [g.path for g in genre_defs.values() if not g.is_sub]
+    by_cat = discord_api.feeds_by_category(conn, only)
+    plan = discord_api.make_plan(client, guild, by_cat, cfg.discord.parent_category, genre_defs)
 
     print(f"サーバー: {guild['name']}")
     parent_state = "既存" if plan.parent_id else "新規作成"
@@ -326,10 +331,19 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
         print(f"             タグ: {tags or '-'}")
         if pc.tag_overflow:
             print(f"             ※タグの上限 {discord_api.MAX_TAGS} 個を超える {pc.tag_overflow} フィードはタグなしで投稿します")
+    for c in plan.orphans:
+        print(f"  未使用      💬{c['name']}（どのジャンルにも対応しません。不要なら Discord で削除してください）")
     if not args.apply:
         print("\n--apply を付けると作成します（既存のフォーラムはタグと Webhook だけ用意します）")
         return 0
     created = discord_api.apply_plan(client, conn, plan, cfg.discord.webhook_name, nsfw=cfg.discord.nsfw)
+    if genre_defs and not args.categories:
+        # ジャンルに対応しなくなった送り先を消す（未割り当てのフィードが古いフォーラムに投稿されないように）
+        names = [pc.category for pc in plan.channels]
+        with conn:
+            conn.execute(
+                f"DELETE FROM discord_channels WHERE category NOT IN ({','.join('?' * len(names))})", names
+            )
     print(f"\nフォーラムを {len(created)} 件作成し、{len(plan.channels)} 件の Webhook を登録しました")
     return 0
 
@@ -387,6 +401,52 @@ def cmd_discord_test(cfg: Config, args: argparse.Namespace) -> int:
         row["webhook_url"], {"thread_name": "feedpipe テスト", "content": args.message, "username": "feedpipe"}
     )
     print(f"#{row['channel_name']} に送信しました")
+    return 0
+
+
+# --- genres ----------------------------------------------------------------
+
+
+def _load_genres(cfg: Config) -> dict[str, genres.Genre] | None:
+    path = Path(cfg.general.genres_file)
+    return genres.load_genres(path) if path.exists() else None
+
+
+def _require_genres(cfg: Config) -> dict[str, genres.Genre]:
+    defs = _load_genres(cfg)
+    if defs is None:
+        raise ValueError(f"{cfg.general.genres_file} がありません（genres.example.toml を参考に作成してください）")
+    return defs
+
+
+def cmd_genres_list(cfg: Config, args: argparse.Namespace) -> int:
+    defs = _require_genres(cfg)
+    conn = _open_db(cfg, args)
+    counts = Counter(f.category for f in db.list_feeds(conn, enabled=True))
+    for g in defs.values():
+        indent = "    " if g.is_sub else ""
+        print(f"{indent}{_fit(g.path, 20 - len(indent))} {_fit(g.label, 14)} {counts[g.path]:>3} 件  {g.description}")
+    return 0
+
+
+def cmd_genres_apply(cfg: Config, args: argparse.Namespace) -> int:
+    defs = _require_genres(cfg)
+    conn = _open_db(cfg, args)
+    r = genres.apply_genres(conn, defs, dry_run=args.dry_run)
+    for feed, new in r.moved:
+        print(f"  移動 {feed.id:>4} {_fit(feed.title or feed.url, 36)} {feed.category or '-'} → {new}")
+    for f in r.unassigned:
+        print(f"  未割り当て {f.id:>4} {_fit(f.title or f.url, 36)} {f.url}")
+    print(
+        f"移動 {len(r.moved)} 件 / 未割り当て {len(r.unassigned)} 件"
+        f" / genres.toml にあるが未登録の URL {len(r.unknown_urls)} 件"
+    )
+    if args.dry_run:
+        print("--dry-run のため DB は更新していません")
+    elif r.moved:
+        print("Discord のフォーラム・タグも更新するには: feedpipe discord setup --apply")
+    if r.unassigned:
+        print("未割り当てのフィードの記事は投稿されません（genres.toml のどこかに URL を書いてください）")
     return 0
 
 
@@ -468,6 +528,13 @@ def build_parser() -> argparse.ArgumentParser:
     s = feeds.add_parser("disable", help="無効にする")
     s.add_argument("ids", type=int, nargs="+")
     s.set_defaults(func=lambda c, a: _cmd_set_enabled(c, a, False))
+
+    gs = sub.add_parser("genres", help="ジャンル（genres.toml）の管理").add_subparsers(dest="genres_command", required=True)
+    s = gs.add_parser("list", help="ジャンルの一覧とフィード数")
+    s.set_defaults(func=cmd_genres_list)
+    s = gs.add_parser("apply", help="genres.toml の割り当てをフィードに反映する")
+    s.add_argument("--dry-run", action="store_true", help="DB を更新しない")
+    s.set_defaults(func=cmd_genres_apply)
 
     dc = sub.add_parser("discord", help="Discord の準備（Bot を使う）").add_subparsers(dest="discord_command", required=True)
     s = dc.add_parser("invite-url", help="Bot をサーバーに招待する URL を表示")

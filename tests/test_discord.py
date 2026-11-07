@@ -162,3 +162,30 @@ def test_notify_limit_and_missing_channel():
         db.insert_item(conn, feed_id, "x", "https://x", "x", None, "saved")
     stats = notify.notify_pending(conn, limit=10, max_age_days=3)
     assert stats.no_channel == 1 and stats.sent == 0
+
+
+def test_subgenre_tags(tmp_path):
+    from feedpipe.genres import load_genres
+
+    fake = FakeDiscord()
+    fake.channels = []
+    client = DiscordClient("TOKEN", transport=httpx.MockTransport(fake.handler))
+    conn = db.connect(":memory:")
+    fid = db.insert_feed(conn, "https://w.example/rss", "世界ニュース", None, "news/world")
+    db.insert_feed(conn, "https://d.example/rss", "国内ニュース", None, "news")
+    g = tmp_path / "genres.toml"
+    g.write_text('[news]\ndescription = "総合"\n[news.world]\nlabel = "国際"\n', encoding="utf-8")
+
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "feedpipe",
+                     load_genres(g))
+    [pc] = plan.channels  # news/world も news のフォーラムにまとまる
+    assert pc.name == "news" and pc.wanted_tags() == ["国際", "国内ニュース", "世界ニュース"]
+    apply_plan(client, conn, plan, "feedpipe")
+    forum = next(c for c in fake.channels if c["type"] == GUILD_FORUM)
+    assert forum["topic"] == "総合"
+
+    with conn:
+        db.insert_item(conn, fid, "k", "https://w.example/1", "記事", ago(hours=1), "saved")
+    notify.notify_pending(conn, limit=5, max_age_days=3, transport=httpx.MockTransport(fake.handler), interval=0)
+    tag_by_name = {t["name"]: t["id"] for t in forum["available_tags"]}
+    assert fake.posts[-1]["applied_tags"] == [tag_by_name["国際"], tag_by_name["世界ニュース"]]
