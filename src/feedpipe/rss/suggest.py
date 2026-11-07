@@ -1,8 +1,10 @@
 """どのサブジャンルにも当てはまらなかった記事から、新しいサブジャンルを LLM に決めさせて genres.toml に足す。
 
 当てはまらなかった記事は items.subgenre がトップレベルのジャンル（"news"）になっている（pipeline.classify_item）。
-LLM には今のジャンル・サブジャンルの一覧と記事の見出しを渡し、思考モードで時間をかけて
+LLM には今のジャンル・サブジャンルの一覧と記事の見出しを渡し、検討メモを書かせてから
 「どのジャンルに、どんなサブジャンルを作り、どの記事が入るか」を JSON で答えさせる。
+案は、新しいサブジャンルを足した一覧で記事を振り分け直して確かめ、実際にそこを選んだ記事が
+MIN_ITEMS 件以上あるものだけを採る（4B のモデルは既存と重なる案・広すぎる案を出しがちなため）。
 
 足すとジャンルのサブジャンルが Discord のタグの上限（20）を超えるときは、先に似たサブジャンルを
 LLM にまとめさせる（統合）。まとめきれなければ、そのジャンルには足さない。
@@ -20,7 +22,9 @@ from pathlib import Path
 from .. import db
 from ..discord_api import MAX_TAGS
 from ..llm import Summarizer
+from . import archive
 from .genres import Genre, section_re, set_key, top_genre
+from .pipeline import MATCH_P
 
 # この件数以上の記事がまとまるときだけ作る
 MIN_ITEMS = 3
@@ -32,14 +36,34 @@ PROMPT = (
     "あなたはニュースサイトの編集者です。記事を分類するサブジャンルの一覧に、新しいサブジャンルを足します。\n"
     "下の記事は、今あるどのサブジャンルにも当てはまらなかったものです。よく読んで、"
     "{min_items} 件以上の記事がまとまって入る、はっきりした話題のサブジャンルを最大 {max_n} 個考えてください。\n"
-    "- 今あるサブジャンルと重なるもの、「その他」「雑多」のような曖昧なものは作らない\n"
+    "- まず memo に、記事を話題ごとに分けた検討を短く書く\n"
+    "- 今あるサブジャンルと重なるもの、「その他」「雑多」「話題」のような曖昧なもの、広すぎるものは作らない\n"
     "- genre は今あるジャンルのキーから選ぶ。key は英小文字の短い名前、label は日本語 10 字以内、"
     "description は判定の手がかりになる説明（30 字程度）\n"
     "- items には、そのサブジャンルに入る記事の番号を書く\n"
-    "- まとまる話題がなければ空の一覧にする\n"
-    '答えは JSON だけで: {{"subgenres": [{{"genre": "...", "key": "...", "label": "...", '
-    '"description": "...", "items": [1, 2, 3]}}]}}'
+    "- まとまる話題がなければ subgenres を空にする"
 )
+
+
+def _schema(genres: dict[str, Genre]) -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "memo": {"type": "string"},
+            "subgenres": {"type": "array", "maxItems": MAX_SUGGESTIONS, "items": {
+                "type": "object",
+                "properties": {
+                    "genre": {"enum": [g.path for g in genres.values() if not g.is_sub]},
+                    "key": {"type": "string", "pattern": KEY_RE.pattern},
+                    "label": {"type": "string"},
+                    "description": {"type": "string"},
+                    "items": {"type": "array", "items": {"type": "integer"}},
+                },
+                "required": ["genre", "key", "label", "description", "items"],
+            }},
+        },
+        "required": ["memo", "subgenres"],
+    }
 
 
 @dataclass
@@ -61,7 +85,7 @@ def unmatched_items(conn: sqlite3.Connection, genres: dict[str, Genre], days: in
     since = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
     tops = [g.path for g in genres.values() if not g.is_sub]
     rows = conn.execute(
-        "SELECT id, title, subgenre, status FROM items WHERE status IN ('saved', 'notified') AND fetched_at >= ?"
+        "SELECT id, title, subgenre, status, md_path FROM items WHERE status IN ('saved', 'notified') AND fetched_at >= ?"
         f" AND subgenre IN ({','.join('?' * len(tops))}) ORDER BY fetched_at DESC",
         (since, *tops),
     ).fetchall()
@@ -78,17 +102,13 @@ def _prompt_input(genres: dict[str, Genre], rows: list[sqlite3.Row]) -> str:
     return "\n".join(lines)
 
 
-def parse(text: str, genres: dict[str, Genre], rows: list[sqlite3.Row]) -> list[Suggestion]:
-    """LLM の答えから、使える案だけを取り出す。
+def parse(data: dict | None, genres: dict[str, Genre], rows: list[sqlite3.Row]) -> list[Suggestion]:
+    """LLM の答えから、形の正しい案だけを取り出す。
 
-    ジャンルがない・キーや名前が既存と重なる・タグの上限を超える・記事が MIN_ITEMS 件に満たない案は捨てる。
+    ジャンルがない・キーや名前が既存と重なる・記事が MIN_ITEMS 件に満たない案は捨てる。
     投稿済みの記事はフォーラムを移せないので、同じジャンルの記事だけを入れる。
     """
-    m = re.search(r"\{.*\}", text or "", re.DOTALL)
-    try:
-        raw = json.loads(m.group(0))["subgenres"] if m else []
-    except (ValueError, KeyError, TypeError):
-        return []
+    raw = (data or {}).get("subgenres")
     out: list[Suggestion] = []
     for s in raw if isinstance(raw, list) else []:
         try:
@@ -112,16 +132,45 @@ def parse(text: str, genres: dict[str, Genre], rows: list[sqlite3.Row]) -> list[
     return out[:MAX_SUGGESTIONS]
 
 
+def _body(row: sqlite3.Row) -> str:
+    return archive.read_body(row["md_path"]) if row["md_path"] and Path(row["md_path"]).exists() else ""
+
+
+def _options(genres: dict[str, Genre], extra: list[tuple[str, str, str]] = ()) -> list[tuple[str, str]]:
+    """振り分けの選択肢（「ジャンル / サブジャンル」, 説明）。extra は (ジャンル, label, description)。"""
+    label = {g.path: g.label for g in genres.values() if not g.is_sub}
+    opts = [(f"{label.get(g.top, g.top)} / {g.label}", g.description) for g in genres.values() if g.is_sub]
+    return opts + [(f"{label.get(genre, genre)} / {name}", desc) for genre, name, desc in extra]
+
+
+async def verify(
+    summarizer: Summarizer, genres: dict[str, Genre], s: Suggestion, rows: dict[int, sqlite3.Row]
+) -> Suggestion | None:
+    """新しいサブジャンルを足した一覧で s の記事を振り分け直し、実際にそこを選んだ記事だけを残す。"""
+    options = _options(genres, [(s.genre, s.label, s.description)])
+    kept = []
+    for item_id in s.item_ids:
+        r = rows[item_id]
+        res = await summarizer.classify(r["title"], _body(r), options)
+        if res and res[0] == len(options) - 1 and res[1] >= MATCH_P:
+            kept.append(item_id)
+    if len(kept) < MIN_ITEMS:
+        return None
+    s.item_ids = kept
+    return s
+
+
 async def suggest(
     conn: sqlite3.Connection, summarizer: Summarizer, genres: dict[str, Genre], days: int = 7
 ) -> list[Suggestion]:
-    """当てはまらなかった記事から、新しいサブジャンルの案を作る。記事が少なければ LLM を呼ばない。"""
+    """当てはまらなかった記事から、新しいサブジャンルの案を作って確かめる。記事が少なければ LLM を呼ばない。"""
     rows = unmatched_items(conn, genres, days)
     if len(rows) < MIN_ITEMS:
         return []
     system = PROMPT.format(min_items=MIN_ITEMS, max_n=MAX_SUGGESTIONS)
-    text = await summarizer.think(system, _prompt_input(genres, rows), "新しいサブジャンルの提案")
-    return parse(text or "", genres, rows)
+    data = await summarizer.ask_json(system, _prompt_input(genres, rows), _schema(genres), "新しいサブジャンルの案")
+    by_id = {r["id"]: r for r in rows}
+    return [v for s in parse(data, genres, rows) if (v := await verify(summarizer, genres, s, by_id))]
 
 
 MERGE_PROMPT = (
@@ -130,8 +179,25 @@ MERGE_PROMPT = (
     "- まとめるサブジャンルの key を keys に並べ、残す key（keys のどれか）と、まとめた後の label（日本語 10 字以内）・"
     "description（判定の手がかりになる説明。30 字程度）を書く\n"
     "- まとめないサブジャンルは書かない。「固定」と書いたものはまとめられない\n"
-    '答えは JSON だけで: {{"merges": [{{"keys": ["a", "b"], "key": "a", "label": "...", "description": "..."}}]}}'
+    "- まず memo に、似ているものの検討を短く書く"
 )
+MERGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "memo": {"type": "string"},
+        "merges": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "keys": {"type": "array", "items": {"type": "string"}},
+                "key": {"type": "string"},
+                "label": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            "required": ["keys", "key", "label", "description"],
+        }},
+    },
+    "required": ["memo", "merges"],
+}
 
 
 @dataclass
@@ -163,12 +229,10 @@ async def merge(
     subs += [(s.key, s.label, s.description, False) for s in adding]
     lines = [f"- {k}: {label}（{desc}）" + ("【固定】" if fixed else "") for k, label, desc, fixed in subs]
     system = MERGE_PROMPT.format(genre=genres[genre].label, target=target)
-    text = await summarizer.think(system, "\n".join(lines), f"サブジャンルの統合（{genre}）")
-    m = re.search(r"\{.*\}", text or "", re.DOTALL)
-    try:
-        raw = json.loads(m.group(0))["merges"] if m else []
-    except (ValueError, KeyError, TypeError):
+    data = await summarizer.ask_json(system, "\n".join(lines), MERGE_SCHEMA, f"サブジャンルの統合（{genre}）")
+    if data is None:
         return None
+    raw = data.get("merges")
     movable = {k for k, *_, fixed in subs if not fixed}
     used: set[str] = set()
     merges: list[Merge] = []

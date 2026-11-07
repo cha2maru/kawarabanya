@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import re
@@ -141,22 +142,30 @@ class Summarizer:
         except (KeyError, IndexError, TypeError):
             return None
 
-    async def think(self, system: str, user: str, what: str, max_tokens: int = 8192, timeout: float = 1800) -> str | None:
-        """思考モードで時間をかけて答えさせ、答え（思考を除く）を返す。CPU では数分〜十数分かかる。"""
+    async def ask_json(
+        self, system: str, user: str, schema: dict, what: str, max_tokens: int = 2000, timeout: float = 900
+    ) -> dict | None:
+        """JSON Schema に沿った JSON だけを出させ、読んで返す（llama-server の文法制約）。失敗したら None。
+
+        思考モードは CPU では長すぎる（58 件の分類で 8,192 トークンを使い切り、答えを書かなかった）ので、
+        考えさせたいときはスキーマの先頭に memo などの欄を置いて短く書かせる。
+        """
         data = await self._chat(
             {
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                "temperature": 0.6,
+                "temperature": 0.3,
                 "max_tokens": max_tokens,
-                "chat_template_kwargs": {"enable_thinking": True},
+                "response_format": {"type": "json_schema", "json_schema": {"schema": schema}},
             },
             what,
             timeout,
         )
         try:
-            return re.sub(r"<think>.*?</think>", "", data["choices"][0]["message"]["content"], flags=re.DOTALL).strip()
-        except (KeyError, IndexError, TypeError):
+            text = re.sub(r"<think>.*?</think>", "", data["choices"][0]["message"]["content"], flags=re.DOTALL)
+            result = json.loads(text)
+        except (KeyError, IndexError, TypeError, ValueError):
             return None
+        return result if isinstance(result, dict) else None
 
     async def trend(self, titles: list[str]) -> str | None:
         """見出しの一覧から、全体の傾向を 2 文で書かせる。"""

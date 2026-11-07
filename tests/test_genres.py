@@ -112,17 +112,28 @@ def test_suggest_subgenres(tmp_path):
     calls = []
 
     def llm(req):
-        calls.append(json.loads(req.content))
-        content = "<think>考え中</think>\n" + json.dumps(answer, ensure_ascii=False)
-        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+        body = json.loads(req.content)
+        calls.append(body)
+        if "grammar" in body:  # 確かめの振り分け: 記事c だけ既存の「政治」（A）、ほかは新しいサブジャンル（B）
+            best = "A" if "記事c" in body["messages"][1]["content"] else "B"
+            top = [{"token": best, "logprob": -0.1}, {"token": "Z", "logprob": -2.4}]
+            return httpx.Response(200, json={"choices": [{"message": {"content": best},
+                                                          "logprobs": {"content": [{"top_logprobs": top}]}}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(answer, ensure_ascii=False)}}]})
 
     async def go():
         async with Summarizer(SummarizeConfig(), transport=httpx.MockTransport(llm)) as s:
             return await suggest.suggest(conn, s, genres)
 
+    assert asyncio.run(go()) == []  # 確かめると 記事c は既存の「政治」を選ぶので、残り 2 件 → 採らない
+    assert calls[0]["response_format"]["json_schema"]["schema"]["properties"]["subgenres"]["items"]["properties"]["genre"]["enum"] == ["news", "tech"]
+    with conn:  # 記事e（tech の未投稿）も天気の記事だったことにする → a, b, e の 3 件で採る
+        conn.execute("UPDATE items SET subgenre = 'news' WHERE id = ?", (ids["e"],))
+    rows = suggest.unmatched_items(conn, genres, 7)
+    num = {r["title"]: n for n, r in enumerate(rows, 1)}
+    answer["subgenres"][0]["items"] = [num[f"記事{k}"] for k in "abcde"]
     [s] = asyncio.run(go())
-    assert calls[0]["chat_template_kwargs"] == {"enable_thinking": True}
-    assert (s.path, s.label, sorted(s.item_ids)) == ("news/weather", "天気", sorted(ids[k] for k in "abc"))
+    assert (s.path, s.label, sorted(s.item_ids)) == ("news/weather", "天気", sorted(ids[k] for k in "abe"))
     suggest.apply(conn, p, [s])
     g = load_genres(p)
     assert g["news/weather"].label == "天気" and g["news/weather"].description == "天気・気象"
