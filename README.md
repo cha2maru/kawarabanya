@@ -207,6 +207,8 @@ docker run -d --name rsshub --restart unless-stopped -p 127.0.0.1:1200:1200 diyg
 uv run kawarabanya feeds add "http://127.0.0.1:1200/famitsu/category/news" --genre game
 ```
 
+`--restart unless-stopped` を付けると、Docker が起動するたびに RSSHub も立ち上がる（WSL2 で Docker Desktop を使うなら、Docker Desktop の Settings → General の「Start Docker Desktop when you sign in to your computer」もオンにする）。`config.toml` の `[general] rsshub_url = "http://127.0.0.1:1200"` を書くと、`doctor` が RSSHub が動いているかを確かめる（止まっていると RSSHub 経由のフィードが取得に失敗し続け、5 回で自動的に無効になる）。
+
 フィードを移すには URL の行を別のジャンルに移して `genres apply` → `discord setup --apply`。書かれていないフィードの記事は投稿されない（保存はする）。
 
 保存した Markdown の Front Matter には、投稿後に Discord の投稿へのリンク（`discord:`）が入る。

@@ -34,6 +34,8 @@ class GeneralConfig:
     genres_file: str = "genres.toml"
     # サイト別の取り込み（拡張）を置くディレクトリ（rss/sources/extensions.py）
     extensions_dir: str = "extensions"
+    # 自分で動かしている RSSHub の URL（例: "http://127.0.0.1:1200"）。doctor が動いているかを確かめる。空なら使わない
+    rsshub_url: str = ""
     concurrency: int = 16
     per_host: int = 2
     timeout: float = 20.0

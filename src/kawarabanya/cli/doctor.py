@@ -80,11 +80,24 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
     except OSError as e:
         r("ng", "保存先", f"{archive} に書き込めません: {e}")
 
+    _check_rsshub(cfg, r)
     _check_discord(cfg, r, channels)
     _check_llm(cfg, r)
     _check_service(r)
     print("問題はありません" if r.failures == 0 else f"❌ が {r.failures} 件あります")
     return 1 if r.failures else 0
+
+
+def _check_rsshub(cfg: Config, r: Report) -> None:
+    base = cfg.general.rsshub_url.rstrip("/")
+    if not base:
+        return
+    try:
+        ok = httpx.get(base + "/", timeout=10).is_success
+    except httpx.HTTPError:
+        ok = False
+    # 止まっていると RSSHub 経由のフィードが取得に失敗し続け、5 回で自動的に無効になる
+    r("ok" if ok else "ng", "RSSHub", base if ok else f"{base} に応答がありません（docker start rsshub。Docker Desktop が起動しているか）")
 
 
 def _check_discord(cfg: Config, r: Report, channels: list) -> None:

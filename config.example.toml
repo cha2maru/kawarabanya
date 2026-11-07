@@ -6,6 +6,7 @@ db = "data/kawarabanya.db"
 archive_dir = "archive"                 # 記事の Markdown を保存する場所
 genres_file = "genres.toml"             # ジャンルとフィードの定義（見本: genres.example.toml）
 extensions_dir = "extensions"           # サイト別の取り込み（拡張）を置く場所
+rsshub_url = ""                         # 自分で動かしている RSSHub（例: "http://127.0.0.1:1200"）。doctor が動いているかを確かめる
 concurrency = 16                        # 全体の同時接続数
 per_host = 2                            # 同じホストへの同時接続数
 timeout = 20.0                          # 取得のタイムアウト（秒）

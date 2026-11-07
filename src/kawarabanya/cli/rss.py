@@ -387,7 +387,8 @@ def cmd_feeds_rsshub(cfg: Config, args: argparse.Namespace) -> int:
     for r in (hits or routes)[:10]:
         print(f"  {r.route}  {r.title}  {r.docs}")
     if hits:
-        print("RSSHub を動かして http://127.0.0.1:1200<ルート> を feeds add で登録する（名前もそのとき付く）")
+        base = cfg.general.rsshub_url or "http://127.0.0.1:1200"
+        print(f"RSSHub を動かして {base}<ルート> を feeds add で登録する（名前もそのとき付く）")
     return 0
 
 

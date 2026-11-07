@@ -30,6 +30,7 @@ description: kawarabanya をこのマシンに入れる・動かない環境を�
 | ⚠️ 要約サーバーに応答がない | Bot を起動すれば一緒に起動する（`llm_server_command`）。単体なら `scripts/llama-server.sh` |
 | ⚠️ フォーラムがない | `uv run kawarabanya discord setup --apply`（kawarabanya-discord-setup の 5） |
 | ⚠️ 常駐サービス | `scripts/install.sh --service` |
+| ❌ RSSHub に応答がない | `docker start rsshub`（コンテナがなければ README の「RSS のないサイト」の `docker run`）。Docker Desktop が起動しているか、サインイン時に自動で起動する設定か |
 
 ## 決まり
 

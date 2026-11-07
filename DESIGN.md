@@ -69,7 +69,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
   - 取得は本体が行う（条件付き GET・リダイレクトの追従・失敗の回数と自動無効化を RSS と揃えるため）。拡張の例外と 0 件は、そのフィードの失敗（not_feed）として数え、取り込み全体は止めない。
   - 何度も取得が要るサイトは、拡張が `fetch(fetcher, url, options)` で自分で取得する（条件付き GET はしない）。
   - 組み込みの拡張 `sitemap`（`rss/sources/sitemap.py`）: サイトマップの URL を lastmod の新しい順に記事にする（目次なら新しい子を 3 個まで）。タイトルは `news:title`、なければ本文を取るときに記事ページの `<title>`。11/07 にアークライト・ホビージャパンで 50 件ずつ取れた（商品一覧などのページも混ざるので `link_pattern` で絞る）。
-- **RSSHub で試した結果**（2026-11-07、Docker の diygod/rsshub）: famitsu・NHK WORLD・GitHub のルートが RSS を返し、`feeds add`（自動検出がそのまま通るので `--no-discover` は要らない）→ `run` で本文まで取れた。kawarabanya 側の変更は要らない。
+- **RSSHub で試した結果**（2026-11-07、Docker の diygod/rsshub）: famitsu・NHK WORLD・GitHub のルートが RSS を返し、`feeds add`（自動検出がそのまま通るので `--no-discover` は要らない）→ `run` で本文まで取れた。kawarabanya 側の変更は要らない。常に使うときは `--restart unless-stopped` で動かし、`[general] rsshub_url` を書いて `doctor` で動いているかを確かめる。
 - **既存の OSS の流用**（2026-11-07 に調べた）: RSSHub（ルート 1,000 以上）・RSS-Bridge（ブリッジ 552）はサーバーごと使う形で、kawarabanya からは普通のフィードとして登録する。`feeds rsshub URL` は RSSHub の radar ルール（ドメイン → パスのパターン → ルート。1,563 ドメイン）で、RSSHub を動かさずに対応を調べる（公式インスタンスの API は費用の都合で制限されているので jsDelivr の配布物を使う）。html2rss-configs（226 件）は日本のサイトが 1 件しかないので見送り。yt-dlp・gallery-dl は動画・画像サイトが要るときに `fetch` の拡張にする。
 - **ボット対策で断られるサイトには、ブラウザを装ってまで取りに行かない**（例: すごろくやは kawarabanya の User-Agent に 403 を返す）。
 

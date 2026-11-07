@@ -4,6 +4,7 @@
 
 ## 未リリース
 
+- `[general] rsshub_url` を書くと、`doctor` が RSSHub が動いているかを確かめる
 - RSSHub のフィードの登録で `--no-discover` を勧めていたのをやめる（自動検出で名前も付く）
 
 ## v0.1.0（2026-11-07）
