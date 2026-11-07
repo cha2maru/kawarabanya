@@ -4,7 +4,7 @@
 
 ## 未リリース
 
-- 語とジャンルの紐づけ（`genres keyword`・genres.toml の `keywords`、「@Bot Cloudflareはtech」）。タイトルにある語で振り分けの候補を絞る
+- 語とジャンルの紐づけ（`genres keyword`・genres.toml の `keywords`、「@Bot Cloudflareはtech」）。見出しか冒頭にある語で記事のジャンルを決める
 - 記事を別のジャンルに移す（`items move`、記事の投稿のスレッドで「@Bot これは映画」）
 - Bot の招待の権限に「スレッドでメッセージを送る」を足す
 - 不調を Discord に知らせる（自動で止めたフィード・RSSHub の無応答・定期処理の 3 回連続の失敗）

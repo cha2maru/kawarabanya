@@ -7,7 +7,7 @@
 
     priority = "A: ... B: ... C: ..."   # 重要度の判定基準（省略可）
     interest = "low"            # 好き嫌い: like（まとめの上位に寄せる）/ low（まとめに載せない）/ mute（投稿もしない）
-    keywords = ["Cloudflare"]   # タイトルにこの語があれば、振り分けの候補をこのジャンルに絞る
+    keywords = ["Cloudflare"]   # 見出しか冒頭にこの語があれば、記事をこのジャンルにする
 
     feeds に { url = ..., item = ..., ... } と書くと HTML 取り込み（rss/sources/htmlsource.py）、
     { url = ..., extension = "名前", ... } と書くとサイト別の拡張（rss/sources/extensions.py）
@@ -56,7 +56,7 @@ class Genre:
     priority: str = ""
     # 好き嫌い（INTEREST_LEVELS のキー）。None なら書いていない
     interest: str | None = None
-    # タイトルにあれば振り分けの候補をこのジャンルに絞る語
+    # 見出しか冒頭にあれば、記事をこのジャンルにする語
     keywords: list[str] = field(default_factory=list)
 
     @property
@@ -273,17 +273,17 @@ def normalize_word(text: str) -> str:
     return unicodedata.normalize("NFKC", text).casefold()
 
 
-def has_word(title: str, word: str) -> bool:
-    """title に語があるか。英数字の語は、Go が Google に当たらないよう前後が英数字でないときだけ一致させる。"""
+def has_word(text: str, word: str) -> bool:
+    """text に語があるか。英数字の語は、Go が Google に当たらないよう前後が英数字でないときだけ一致させる。"""
     w = normalize_word(word)
     before = r"(?<![a-z0-9])" if re.match(r"[a-z0-9]", w) else ""
     after = r"(?![a-z0-9])" if re.search(r"[a-z0-9]$", w) else ""
-    return re.search(before + re.escape(w) + after, normalize_word(title)) is not None
+    return re.search(before + re.escape(w) + after, normalize_word(text)) is not None
 
 
-def keyword_tops(genres: dict[str, Genre], title: str | None) -> set[str]:
-    """タイトルに keywords の語があるジャンル（トップレベル）。"""
-    return {g.top for g in genres.values() if title and any(has_word(title, w) for w in g.keywords)}
+def keyword_tops(genres: dict[str, Genre], text: str | None) -> set[str]:
+    """text（見出しと冒頭）に keywords の語があるジャンル（トップレベル）。"""
+    return {g.top for g in genres.values() if text and any(has_word(text, w) for w in g.keywords)}
 
 
 def add_keyword(file: str | Path, gpath: str, word: str) -> None:

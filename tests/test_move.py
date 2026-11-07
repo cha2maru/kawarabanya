@@ -77,27 +77,28 @@ GENRES = {
 }
 
 
-def classify(summarizer, title="Ｃｌｏｕｄｆｌａｒｅで障害", **kw):
+def classify(summarizer, title="Ｃｌｏｕｄｆｌａｒｅで障害", body="本文", **kw):
     conn = db.connect(":memory:")
     fid = db.insert_feed(conn, "https://a.example/rss", "A", None, "news")
     conn.execute("INSERT INTO items (id, feed_id, key, fetched_at, status) VALUES (1, ?, 'k', 'x', 'saved')", (fid,))
-    return asyncio.run(pipeline.classify_item(conn, summarizer, GENRES, 1, title, "news", "本文", **kw))
+    return asyncio.run(pipeline.classify_item(conn, summarizer, GENRES, 1, title, "news", body, **kw))
 
 
 def test_keyword_narrows_candidates():
-    s = Chooser((0, 0.6))  # 別のジャンルでも、語があれば MOVE_P より低い確率で採用する
+    s = Chooser((0, 0.9))
     assert classify(s) == "tech/net"
     assert s.seen == [["テック / ネット"]]
 
 
-def test_keyword_falls_back_to_all_subgenres():
-    s = Chooser((None, 0.9), (1, 0.9))
-    assert classify(s) == "culture/movie"  # 語のジャンルと違う記事
-    assert len(s.seen[1]) == 3
+def test_keyword_fixes_genre_when_subgenre_is_unsure():
+    assert classify(Chooser((0, 0.5))) == "tech"  # 合うサブジャンルがなくても、ジャンルは語のもの
+    assert classify(Chooser((None, 0.9))) == "tech"
 
 
-def test_keyword_genre_when_nothing_matches():
-    assert classify(Chooser((None, 0.9), (None, 0.9))) == "tech"
+def test_keyword_in_lead():
+    s = Chooser((None, 0.9))
+    assert classify(s, title="便利なバッグ", body="こちらはＣｌｏｕｄｆｌａｒｅが書いた記事です。") == "tech"
+    assert classify(Chooser((None, 0.9)), title="便利なバッグ") == "news"
 
 
 def test_keyword_ignored_for_posted_items():
