@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -318,11 +318,13 @@ def test_digest_render_and_post(tmp_path):
     assert digest.delete_digest(conn, "tech", day, transport=t)
     assert mid not in fake.messages and not digest.delete_digest(conn, "tech", day, transport=t)
 
-    # 投稿時刻: 直近の times
-    jst = timezone(timedelta(hours=9))
-    assert digest.last_slot(datetime(2026, 11, 8, 7, 0, tzinfo=jst), ["06:30", "18:30"]) == datetime(2026, 11, 8, 6, 30, tzinfo=jst).astimezone()
-    assert digest.last_slot(datetime(2026, 11, 8, 5, 0, tzinfo=jst), ["06:30", "18:30"]) == datetime(2026, 11, 7, 18, 30, tzinfo=jst).astimezone()
-    assert digest.next_slot(datetime(2026, 11, 8, 20, 0, tzinfo=jst), ["06:30", "18:30"]) == datetime(2026, 11, 9, 6, 30, tzinfo=jst).astimezone()
+    # 投稿時刻: 直近の times（ローカル時刻）
+    def local(*args):
+        return datetime(*args).astimezone()
+
+    assert digest.last_slot(local(2026, 11, 8, 7, 0), ["06:30", "18:30"]) == local(2026, 11, 8, 6, 30)
+    assert digest.last_slot(local(2026, 11, 8, 5, 0), ["06:30", "18:30"]) == local(2026, 11, 7, 18, 30)
+    assert digest.next_slot(local(2026, 11, 8, 20, 0), ["06:30", "18:30"]) == local(2026, 11, 9, 6, 30)
 
     # 興味のうすいサブジャンル（digest = false）は載せない
     since = datetime.now(UTC) - timedelta(hours=24)
