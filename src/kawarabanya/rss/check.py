@@ -110,6 +110,17 @@ async def check_feed(
     """
     started = time.monotonic()
     result = CheckResult(feed=feed, status=Status.NETWORK)
+    ext = None
+    if feed.source_type != "rss":  # HTML 取り込み・サイト別の拡張
+        try:
+            ext = extensions.get(feed.source_type)
+        except ValueError as e:
+            result.status, result.error = Status.NOT_FEED, str(e)
+            return result
+    if ext and ext.fetch:  # 自分で取得する拡張（sitemap など）
+        await _check_with_fetch(fetcher, feed, ext, result)
+        result.elapsed = time.monotonic() - started
+        return result
     headers: dict[str, str] = {}
     if conditional:
         if feed.etag:
@@ -139,9 +150,8 @@ async def check_feed(
                 final = str(resp.url)
                 if final != feed.url:
                     result.moved_to = final
-            if feed.source_type != "rss":  # HTML 取り込み・サイト別の拡張
+            if ext:
                 try:
-                    ext = extensions.get(feed.source_type)
                     entries = ext.parse(resp.content, str(resp.url), feed.option(feed.source_type) or {})
                     title = ext.title(resp.content)
                     # サイトの作りが変わると黙って 0 件になるので、失敗として数えて気づけるようにする
@@ -153,12 +163,8 @@ async def check_feed(
                 entries = parsed.entries if parsed.version else []
                 title = parsed.feed.get("title")
                 error = None if parsed.version else f"フィードではありません（{resp.headers.get('content-type', '?')}）"
-            if entries or (feed.source_type == "rss" and error is None):
-                result.status = Status.OK
-                result.feed_title = title
-                result.parsed_entries = entries
-                result.entries = len(entries)
-                result.latest_entry = _latest_entry(entries)
+            if entries or (ext is None and error is None):
+                _set_entries(result, entries, title)
                 result.etag = resp.headers.get("etag")
                 result.last_modified = resp.headers.get("last-modified")
             else:
@@ -169,6 +175,32 @@ async def check_feed(
             result.error = f"HTTP {resp.status_code}"
     result.elapsed = time.monotonic() - started
     return result
+
+
+def _set_entries(result: CheckResult, entries: list, title: str | None) -> None:
+    result.status = Status.OK
+    result.feed_title = title
+    result.parsed_entries = entries
+    result.entries = len(entries)
+    result.latest_entry = _latest_entry(entries)
+
+
+async def _check_with_fetch(fetcher: Fetcher, feed: db.Feed, ext: extensions.Extension, result: CheckResult) -> None:
+    """自分で取得する拡張で記事を取る。HTTP の失敗は RSS と同じに分類し、0 件と拡張の例外は not_feed にする。"""
+    try:
+        entries = await ext.fetch(fetcher, feed.url, feed.option(feed.source_type) or {})
+    except httpx.HTTPStatusError as e:
+        result.http_status = e.response.status_code
+        result.status, result.error = _classify_http(e.response.status_code), f"HTTP {e.response.status_code}"
+    except httpx.HTTPError as e:
+        result.error = f"{type(e).__name__}: {e}"
+    except Exception as e:  # noqa: BLE001 拡張の不具合で取り込み全体を止めない
+        result.status, result.error = Status.NOT_FEED, f"拡張 {ext.name} の失敗: {type(e).__name__}: {e}"
+    else:
+        if entries:
+            _set_entries(result, entries, None)
+        else:
+            result.status, result.error = Status.NOT_FEED, "記事が取り出せません（サイトの作りが変わった可能性）"
 
 
 async def check_feeds(

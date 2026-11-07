@@ -35,7 +35,7 @@ systemd --user: kawarabanya-bot.service
 config.py  db.py  bot.py  assistant.py  discord_api.py  llm.py   # 共通: 設定・SQLite・常駐 Bot・日本語の依頼の解釈・Discord REST/Webhook・LLM クライアント
 rss/        # RSS 機能
   fetcher.py check.py item.py fulltext.py opml.py genres.py discover.py（RSS の自動検出）
-  htmlsource.py（HTML 取り込み・文字コードの判別） extensions.py（サイト別の拡張）
+  htmlsource.py（HTML 取り込み・文字コードの判別） extensions.py（サイト別の拡張） sitemap.py rsshub.py（RSSHub の対応の確認）
   archive.py（Markdown 保存） pipeline.py（取得〜要約の流れ = run） notify.py（投稿・👍） digest.py（まとめ） suggest.py（サブジャンルの自動作成・統合）
 cli/        # コマンド
   __init__.py（引数の定義と main） common.py（表示の補助・DB/Discord の用意） rss.py（RSS のコマンド） server.py（Discord 管理・bot）
@@ -57,7 +57,9 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 - 文字コードの指定がない HTML は lxml が latin-1 とみなすので、先に UTF-8 として読む。
 - **サイト別の拡張**（`rss/extensions.py`）: CSS セレクタで取れないサイトは `extensions/<名前>.py` に `parse(content, url, options) -> list[entry]`（省略可で `validate(options)`・`title(content)`）を書き、`feeds` に `extension = "<名前>"` を書く。`feeds.source_type` は拡張の名前、設定は `options[拡張の名前]`。HTML 取り込みは組み込みの拡張 `html` として同じ道を通る。
   - 取得は本体が行う（条件付き GET・リダイレクトの追従・失敗の回数と自動無効化を RSS と揃えるため）。拡張の例外と 0 件は、そのフィードの失敗（not_feed）として数え、取り込み全体は止めない。
-  - 1 回の取得で記事が取れるサイトだけ。記事ごとに API を呼ぶようなサイトが出てきたら、拡張に取得もさせる。
+  - 何度も取得が要るサイトは、拡張が `fetch(fetcher, url, options)` で自分で取得する（条件付き GET はしない）。
+  - 組み込みの拡張 `sitemap`（`rss/sitemap.py`）: サイトマップの URL を lastmod の新しい順に記事にする（目次なら新しい子を 3 個まで）。タイトルは `news:title`、なければ本文を取るときに記事ページの `<title>`。11/07 にアークライト・ホビージャパンで 50 件ずつ取れた（商品一覧などのページも混ざるので `link_pattern` で絞る）。
+- **既存の OSS の流用**（2026-11-07 に調べた）: RSSHub（ルート 1,000 以上）・RSS-Bridge（ブリッジ 552）はサーバーごと使う形で、kawarabanya からは普通のフィードとして登録する。`feeds rsshub URL` は RSSHub の radar ルール（ドメイン → パスのパターン → ルート。1,563 ドメイン）で、RSSHub を動かさずに対応を調べる（公式インスタンスの API は費用の都合で制限されているので jsDelivr の配布物を使う）。html2rss-configs（226 件）は日本のサイトが 1 件しかないので見送り。yt-dlp・gallery-dl は動画・画像サイトが要るときに `fetch` の拡張にする。
 - **ボット対策で断られるサイトには、ブラウザを装ってまで取りに行かない**（例: すごろくやは kawarabanya の User-Agent に 403 を返す）。
 
 ## 3. 主な処理

@@ -91,7 +91,11 @@ async def _process(
     1 記事の失敗で全体を止めないよう、保存までの例外は error として記録する。
     """
     try:
+        title = item.title
         await fill_content(fetcher, item, cfg.fulltext)
+        if item.title != title:
+            with conn:
+                db.update_item(conn, item.id, title=item.title)
         fetched = datetime.now(UTC)
         content_hash = _content_hash(item.content_md)
         if dup := _find_duplicate(conn, item, content_hash):

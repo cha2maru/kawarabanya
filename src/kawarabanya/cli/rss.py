@@ -9,6 +9,9 @@ import sqlite3
 import sys
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import httpx
 
 from .. import db, discord_api
 from ..config import Config
@@ -267,7 +270,14 @@ def cmd_feeds_add(cfg: Config, args: argparse.Namespace) -> int:
     if not args.no_discover:
         found = asyncio.run(discover(args.url, cfg.general))
         if found is None:
-            print(f"{args.url}: フィードが見つかりません（RSS のないサイトは genres.toml に HTML 取り込みを書く）", file=sys.stderr)
+            print(f"{args.url}: フィードが見つかりません", file=sys.stderr)
+            try:
+                hits = [r for r in _rsshub_routes(cfg, args.url) if r.matched]
+            except httpx.HTTPError:
+                hits = []
+            for r in hits[:3]:
+                print(f"  RSSHub なら {r.route}（{r.title}）で取れます", file=sys.stderr)
+            print("  ほかの手: genres.toml に HTML 取り込みか、extension = \"sitemap\"（サイトマップ）を書く", file=sys.stderr)
             return 1
         url, title = found[0], title or found[1] or None
     if existing := db.find_feed_by_url(conn, url):
@@ -279,6 +289,30 @@ def cmd_feeds_add(cfg: Config, args: argparse.Namespace) -> int:
         genres.add_feed_url(cfg.general.genres_file, args.genre, url, title)
     print(f"追加しました: {feed_id} {title or ''} {url}（{args.genre or 'ジャンルなし'}）")
     print("次の取り込みでは既存の記事を既読にするだけで、それ以降の新着から投稿します")
+    return 0
+
+
+def _rsshub_routes(cfg: Config, url: str) -> list:
+    from ..rss import rsshub
+
+    cache = Path(cfg.general.db).parent / "rsshub-radar.json"
+    return rsshub.match(url, rsshub.load_rules(cache, cfg.general.user_agent))
+
+
+def cmd_feeds_rsshub(cfg: Config, args: argparse.Namespace) -> int:
+    """feeds rsshub: URL が RSSHub のどのルートで取れるかを調べる（RSSHub の radar ルール）。"""
+    routes = _rsshub_routes(cfg, args.url)
+    hits = [r for r in routes if r.matched]
+    if hits:
+        print(f"RSSHub で取れます（{len(hits)} 件）:")
+    elif routes:
+        print("このサイトのルートはありますが、この URL のパスには当たりません:")
+    else:
+        print("RSSHub のルートはありません")
+    for r in (hits or routes)[:10]:
+        print(f"  {r.route}  {r.title}  {r.docs}")
+    if hits:
+        print("RSSHub を動かして http://127.0.0.1:1200<ルート> を feeds add --no-discover で登録する")
     return 0
 
 

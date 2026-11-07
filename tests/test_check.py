@@ -130,3 +130,24 @@ def test_discover_feed():
     assert run("https://s.example/blog") == ("https://s.example/blog/index.rdf", "Site")  # よくある場所
     assert run("https://s.example/f") == ("https://s.example/f", "Site")  # フィードそのもの
     assert run("https://s.example/none") is None
+
+
+def test_rsshub_match():
+    from kawarabanya.rss.rsshub import match
+
+    rules = {
+        "famitsu.com": {"_name": "ファミ通", "www": [
+            {"title": "Category", "docs": "https://docs.rsshub.app/routes/famitsu",
+             "source": ["/category/:category/page/1"], "target": "/famitsu/category/:category?"}]},
+        "example.com": {".": [
+            {"title": "Tag", "docs": "d", "source": ["/tag/:tag", "/tag/:tag/:page?x=1"], "target": "/ex/tag/:tag/:sort?"},
+            {"title": "All", "docs": "d", "source": ["/*path"], "target": "/ex/all"}]},
+    }
+    [r] = match("https://www.famitsu.com/category/news/page/1", rules)
+    assert (r.route, r.matched) == ("/famitsu/category/news", True)
+    [r] = match("https://www.famitsu.com/ranking/", rules)  # ドメインは当たるがパスが違う
+    assert (r.route, r.matched) == ("/famitsu/category/:category?", False)
+    routes = match("https://example.com/tag/ai/", rules)
+    assert [(x.route, x.matched) for x in routes] == [("/ex/tag/ai", True), ("/ex/all", True)]
+    assert match("https://sub.example.com/tag/ai", rules) == []  # サブドメインが違う
+    assert match("https://notexample.com/", rules) == []

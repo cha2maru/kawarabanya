@@ -17,16 +17,21 @@
     def validate(options: dict) -> None:   # 省略可。設定が正しくなければ ValueError
     def title(content: bytes) -> str | None:   # 省略可。フィードの名前（省略時はページの <title>）
 
-shortcut: 1 回の取得で記事が取れるサイトだけ。記事ごとに API を呼ぶようなサイトが出てきたら、拡張に取得もさせる。
+何度も取得が要るサイト（目次から子のページをたどる・記事ごとに API を呼ぶ）は、parse の代わりに
+
+    async def fetch(fetcher, url: str, options: dict) -> list[dict]:   # fetcher.get(url) で取得する
+
+を書く（条件付き GET はしない）。組み込みの sitemap（rss/sitemap.py）がこの形。
 """
 
 from __future__ import annotations
 
 import importlib.util
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import sitemap
 from .htmlsource import HtmlSource, extract, page_title
 
 # 拡張を置くディレクトリ。CLI が [general] extensions_dir で上書きする
@@ -40,16 +45,20 @@ ENTRY_KEYS = {"url", "name", "extension"}
 class Extension:
     """サイト別の取り込み 1 つ。"""
     name: str
-    parse: Callable[[bytes, str, dict], list[dict]]
+    parse: Callable[[bytes, str, dict], list[dict]] | None = None
     validate: Callable[[dict], None] | None = None
     title: Callable[[bytes], str | None] = page_title
+    fetch: Callable[..., Awaitable[list[dict]]] | None = None  # 自分で取得する拡張
 
 
 def _html_parse(content: bytes, url: str, options: dict) -> list[dict]:
     return extract(content, url, HtmlSource.from_dict(options))
 
 
-_loaded: dict[str, Extension] = {BUILTIN: Extension(BUILTIN, _html_parse, HtmlSource.from_dict)}
+_loaded: dict[str, Extension] = {
+    BUILTIN: Extension(BUILTIN, _html_parse, HtmlSource.from_dict),
+    "sitemap": Extension("sitemap", validate=sitemap.validate, fetch=sitemap.fetch),
+}
 
 
 def get(name: str) -> Extension:
@@ -62,9 +71,10 @@ def get(name: str) -> Extension:
     spec = importlib.util.spec_from_file_location(f"kawarabanya_ext_{name}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    if not callable(getattr(module, "parse", None)):
-        raise ValueError(f"{path} に parse(content, url, options) がありません")  # noqa: TRY004
-    ext = Extension(name, module.parse, getattr(module, "validate", None), getattr(module, "title", page_title))
+    parse, fetch = getattr(module, "parse", None), getattr(module, "fetch", None)
+    if not callable(parse) and not callable(fetch):
+        raise ValueError(f"{path} に parse(content, url, options) か fetch(fetcher, url, options) がありません")  # noqa: TRY004
+    ext = Extension(name, parse, getattr(module, "validate", None), getattr(module, "title", page_title), fetch)
     _loaded[name] = ext
     return ext
 
@@ -82,4 +92,4 @@ def split_entry(entry: dict) -> tuple[str, dict]:
 def available() -> list[str]:
     """使える拡張の名前（組み込み＋DIR にあるもの）。"""
     files = sorted(p.stem for p in DIR.glob("*.py") if p.stem.isidentifier()) if DIR.exists() else []
-    return [BUILTIN, *files]
+    return [*(n for n in _loaded if n in (BUILTIN, "sitemap")), *files]

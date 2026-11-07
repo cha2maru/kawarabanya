@@ -20,6 +20,7 @@ from .rss import (
     cmd_feeds_list,
     cmd_feeds_option,
     cmd_feeds_remove,
+    cmd_feeds_rsshub,
     cmd_genres_apply,
     cmd_genres_interest,
     cmd_genres_list,
@@ -131,6 +132,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--title")
     s.add_argument("--no-discover", action="store_true", help="フィードを探さず、URL をそのまま登録する")
     s.set_defaults(func=cmd_feeds_add)
+
+    s = feeds.add_parser("rsshub", help="URL が RSSHub のどのルートで取れるかを調べる（RSSHub は動かさなくてよい）")
+    s.add_argument("url")
+    s.set_defaults(func=cmd_feeds_rsshub)
 
     s = feeds.add_parser("remove", help="無効にして genres.toml から外す（保存済みの記事と投稿は残す）")
     s.add_argument("id", help="フィードの ID か URL")

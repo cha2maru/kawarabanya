@@ -135,7 +135,7 @@ def test_extension_source(tmp_path, monkeypatch):
                                        encoding="utf-8")
     monkeypatch.setattr(extensions, "DIR", ext_dir)
     monkeypatch.setattr(extensions, "_loaded", dict(extensions._loaded))
-    assert extensions.available() == ["html", "broken", "jsonapi"]
+    assert extensions.available() == ["html", "sitemap", "broken", "jsonapi"]
 
     p = tmp_path / "genres.toml"
     p.write_text('[news]\nfeeds = [\n  { url = "https://api.example/list", extension = "jsonapi", key = "items" },\n'

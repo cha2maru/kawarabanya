@@ -321,3 +321,39 @@ def test_same_story(tmp_path):
     # 2 件を同時に処理するので、どちらが判定したかは順番しだい（件数の表示はずれうる）。残る側は同じ
     statuses = dict(conn.execute("SELECT key, status FROM items").fetchall())
     assert statuses == {"a": "duplicate", "b": "saved", "c": "saved"}  # 先に登録した（新しい順なので）記事B を残す
+
+
+def test_sitemap_source_fills_titles(tmp_path):
+    index = ('<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+             '<sitemap><loc>https://site.example/old.xml</loc><lastmod>2020-01-01</lastmod></sitemap>'
+             '<sitemap><loc>https://site.example/new.xml</loc><lastmod>2026-11-07T10:00:00+09:00</lastmod></sitemap>'
+             '</sitemapindex>')
+    urlset = ('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
+              'xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">'
+              '<url><loc>https://site.example/a</loc><lastmod>2026-11-06</lastmod></url>'
+              '<url><loc>https://site.example/b</loc><lastmod>2026-11-07</lastmod>'
+              '<news:news><news:title>ニュースの見出し</news:title></news:news></url>'
+              '<url><loc>https://site.example/about</loc></url></urlset>')
+    requested = []
+
+    def handler(req):
+        requested.append(req.url.path)
+        pages = {"/sitemap.xml": index, "/new.xml": urlset}
+        if req.url.path in pages:
+            return httpx.Response(200, text=pages[req.url.path], headers={"content-type": "application/xml"})
+        key = req.url.path.strip("/")
+        body = "".join(f"<p>{key} の本文 {n} 段落目。" + "あ" * 50 + "</p>" for n in range(5))
+        return httpx.Response(200, text=ARTICLE.format(t=f"ページの題 {key}", body=body),
+                              headers={"content-type": "text/html"})
+
+    conn = db.connect(":memory:")
+    fid = db.insert_feed(conn, "https://site.example/sitemap.xml", "サイトマップ", None, "news")
+    conn.execute("UPDATE feeds SET source_type = 'sitemap' WHERE id = ?", (fid,))
+    db.set_option(conn, fid, "sitemap", {"link_pattern": "/[ab]$", "children": 1})
+    cfg = Config(general=GeneralConfig(archive_dir=str(tmp_path / "archive")))
+    [r] = asyncio.run(run_feeds(conn, db.list_feeds(conn), cfg, backfill=2, transport=httpx.MockTransport(handler)))
+    assert r.check.status.is_ok and r.check.entries == 2  # /about は link_pattern で除く
+    assert "/old.xml" not in requested  # 目次は新しい子だけ読む
+    titles = dict(conn.execute("SELECT url, title FROM items").fetchall())
+    assert titles == {"https://site.example/b": "ニュースの見出し",  # news:title
+                      "https://site.example/a": "ページの題 a"}  # なければ記事ページの <title>

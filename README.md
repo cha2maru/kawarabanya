@@ -57,6 +57,7 @@ uv run kawarabanya feeds add "http://127.0.0.1:1200/github/repos/DIYgod" --genre
 | `import-opml FILE` / `export-opml FILE [--all]` | OPML の取り込み・書き出し |
 | `check [--disable-dead]` | 死活チェック（移転していれば URL を更新） |
 | `feeds add URL [--genre G] [--title T] [--no-discover]` | サイトかフィードの URL から登録する。ページ内の案内（`<link rel="alternate">`）やよくある場所（/feed など）から RSS を探し、genres.toml の `G` にも書き足す。初回は既存の記事を既読にするだけ |
+| `feeds rsshub URL` | URL が RSSHub のどのルートで取れるかを調べる（RSSHub の radar ルールを jsDelivr から取って `data/` に 7 日置く。RSSHub は動かさなくてよい）。`feeds add` でフィードが見つからないときも案内する |
 | `feeds remove ID\|URL` | 無効にして genres.toml から外す（保存済みの記事と投稿は残す） |
 | `feeds list\|enable\|disable\|option` | フィードの管理（例: `feeds option ID no_fulltext true`） |
 | `genres interest G like\|normal\|low\|mute` | ジャンル・サブジャンルの好き嫌いを genres.toml に書く |
@@ -146,7 +147,15 @@ def title(content: bytes) -> str | None:   # 省略可。フィードの名前�
 feeds = [{ url = "https://example.com/api/news", extension = "example", name = "Example", key = "items" }]
 ```
 
-取得（条件付き GET・リダイレクト・失敗の回数）は本体が行い、拡張は取り出すだけ。拡張が例外を出したり 0 件を返したりすると、そのフィードの失敗として数える。組み込みの HTML 取り込みは `extension = "html"`（省略時）。
+取得（条件付き GET・リダイレクト・失敗の回数）は本体が行い、拡張は取り出すだけ。何度も取得が要るサイトは、`parse` の代わりに `async def fetch(fetcher, url, options) -> list[dict]` を書く（`fetcher.get(url)` で取得する）。
+
+**サイトマップ**（組み込みの拡張 `sitemap`）: RSS も一覧ページもないサイトは、サイトマップの新しい URL を記事にできる。目次（sitemapindex）なら更新の新しい子を `children` 個（既定 3）まで読み、`link_pattern` で記事のページに絞る。タイトルは Google ニュース用サイトマップの `news:title`、なければ記事ページの `<title>`。
+
+```toml
+feeds = [{ url = "https://arclightgames.jp/sitemap.xml", extension = "sitemap", name = "アークライト", link_pattern = "/product/[^/]+/$" }]
+```
+
+拡張が例外を出したり 0 件を返したりすると、そのフィードの失敗として数える。組み込みの HTML 取り込みは `extension = "html"`（省略時）。
 
 フィードを移すには URL の行を別のジャンルに移して `genres apply` → `discord setup --apply`。書かれていないフィードの記事は投稿されない（保存はする）。
 

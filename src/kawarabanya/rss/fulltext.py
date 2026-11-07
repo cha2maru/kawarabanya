@@ -10,7 +10,7 @@ import trafilatura
 
 from ..config import FulltextConfig
 from .fetcher import Fetcher
-from .htmlsource import decode_html
+from .htmlsource import decode_html, page_title
 from .item import Item
 
 log = logging.getLogger(__name__)
@@ -30,26 +30,28 @@ def html_to_markdown(html: str | bytes, url: str | None, cfg: FulltextConfig) ->
     )
 
 
-async def _article_markdown(fetcher: Fetcher, url: str, cfg: FulltextConfig) -> tuple[str | None, str | None]:
-    """元記事のページを取得して本文を Markdown にし、(Markdown, ページの文字コード) を返す。
+async def _article_markdown(
+    fetcher: Fetcher, url: str, cfg: FulltextConfig
+) -> tuple[str | None, str | None, str | None]:
+    """元記事のページを取得して本文を Markdown にし、(Markdown, ページの文字コード, ページの <title>) を返す。
 
-    取得できない・HTML でなければ (None, None)。
+    取得できない・HTML でなければ (None, None, None)。
     """
     try:
         resp = await fetcher.get(url)
     except httpx.HTTPError as e:
         log.info("本文の取得に失敗: %s (%s)", url, e)
-        return None, None
+        return None, None, None
     if not resp.is_success or "html" not in resp.headers.get("content-type", "html"):
         log.info("本文の取得に失敗: %s (HTTP %s)", url, resp.status_code)
-        return None, None
+        return None, None, None
     # trafilatura の文字コードの推定は EUC-JP のページなどで外れるので、先に判別して文字列で渡す
     html, charset = decode_html(resp.content, resp.charset_encoding)
-    return await asyncio.to_thread(html_to_markdown, html, str(resp.url), cfg), charset
+    return await asyncio.to_thread(html_to_markdown, html, str(resp.url), cfg), charset, page_title(html)
 
 
 async def fill_content(fetcher: Fetcher, item: Item, cfg: FulltextConfig) -> None:
-    """item.content_md と item.content_source を埋める。"""
+    """item.content_md と item.content_source を埋める。タイトルがなければ記事ページの <title> にする。"""
     feed_md = None
     if item.feed_html:
         if "<" in item.feed_html:
@@ -57,9 +59,11 @@ async def fill_content(fetcher: Fetcher, item: Item, cfg: FulltextConfig) -> Non
         else:  # タグを含まないプレーンテキスト
             feed_md = item.feed_html.strip()
 
-    article_md = charset = None
+    article_md = charset = title = None
     if cfg.enabled and item.url and not item.feed.option("no_fulltext"):
-        article_md, charset = await _article_markdown(fetcher, item.url, cfg)
+        article_md, charset, title = await _article_markdown(fetcher, item.url, cfg)
+    if not item.title and title:  # サイトマップの記事などはタイトルがない
+        item.title = title
 
     if article_md and (len(article_md) >= cfg.min_length or len(article_md) >= len(feed_md or "")):
         item.content_md, item.content_source, item.charset = article_md, "article", charset
