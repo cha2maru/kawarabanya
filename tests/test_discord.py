@@ -312,6 +312,13 @@ def test_digest_render_and_post(tmp_path):
     assert mid not in fake.messages and not digest.delete_digest(conn, "tech", day, transport=t)
     assert asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24, transport=t))
 
+    # 興味のうすいサブジャンル（digest = false）は載せない
+    since = datetime.now(UTC) - timedelta(hours=24)
+    with conn:
+        conn.execute("UPDATE items SET subgenre = 'tech/sports' WHERE key = 'b'")
+    assert {i.title for i in digest.collect(conn, "tech", since, frozenset({"tech/sports"}))} == {"小ネタ", "判定なし"}
+    assert digest.collect(conn, "tech", since, frozenset({"tech"})) == []
+
     many = [digest.DigestItem(f"記事{i}" * 20, f"t{i}", 0.5, None) for i in range(50)]
     text = digest.render("傾向。", many, "1", top=50)
     assert len(text) <= digest.MAX_CONTENT and text.endswith("件") and text.startswith("傾向。")

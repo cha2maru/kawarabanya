@@ -6,6 +6,7 @@
     feeds = ["https://...", ...]
 
     priority = "A: ... B: ... C: ..."   # 重要度の判定基準（省略可）
+    digest = false              # 投稿はするが、1 日のまとめには載せない（省略時 true）
 
     feeds に { url = ..., item = ..., ... } と書くと HTML 取り込み（rss/htmlsource.py）
 
@@ -26,7 +27,7 @@ from pathlib import Path
 from .. import db
 from .htmlsource import HtmlSource
 
-RESERVED = {"label", "description", "feeds", "priority"}
+RESERVED = {"label", "description", "feeds", "priority", "digest"}
 
 
 @dataclass
@@ -40,6 +41,8 @@ class Genre:
     html: dict[str, dict] = field(default_factory=dict)
     # 重要度の判定基準（A/B/C の説明）。空ならトップレベルのジャンル → 既定の基準
     priority: str = ""
+    # False なら、このジャンル（サブジャンル）の記事は投稿するが、1 日のまとめには載せない（興味のうすいもの）
+    digest: bool = True
 
     @property
     def top(self) -> str:
@@ -97,6 +100,7 @@ def load_genres(path: str | Path) -> dict[str, Genre]:
             feeds=feeds,
             html=html,
             priority=table.get("priority", ""),
+            digest=table.get("digest", True),
         )
         for sub_key, sub in table.items():
             if sub_key in RESERVED:

@@ -6,6 +6,7 @@
 # - feeds にはフィードの URL を書く（取り込み時の URL でも、移転後の URL でもよい）。1 つの URL は 1 か所だけ
 # - フィードを移すには URL の行を別のジャンルに移して `feedpipe genres apply`
 # - priority で、そのジャンルの重要度の判定基準を書ける（サブジャンルに書けばそちらが優先）
+# - digest = false と書いたジャンル・サブジャンルの記事は、投稿はするが 1 日のまとめには載せない（興味のうすいもの）
 # - ジャンルを足したら `feedpipe discord setup --apply` でフォーラム・タグを作る
 
 [news]

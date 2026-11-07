@@ -83,6 +83,10 @@ description = "生成 AI・機械学習・AI サービス"   # LLM が判定す�
 [hobby.boardgame]
 label = "ボードゲーム"
 feeds = [ ... ]              # サブジャンルの下に書いたフィードは、判定せずにこのサブジャンルになる
+
+[culture.sports]
+label = "スポーツ"
+digest = false               # 投稿はするが、1 日のまとめには載せない（興味のうすいもの。ジャンルにも書ける）
 ```
 
 RSS のないサイトは、`feeds` に URL の代わりにテーブルを書くと一覧ページから記事を取り込む（HTML 取り込み）:

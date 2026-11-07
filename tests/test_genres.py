@@ -64,3 +64,12 @@ def test_apply(tmp_path):
 
     apply_genres(conn, load_genres(write(tmp_path, TOML)), disable_unassigned=True)
     assert db.get_feed(conn, x).disabled_reason == "no_genre"
+
+
+def test_digest_flag(tmp_path):
+    from feedpipe.rss.genres import load_genres
+
+    p = tmp_path / "genres.toml"
+    p.write_text('[culture]\n[culture.sports]\nlabel = "スポーツ"\ndigest = false\n', encoding="utf-8")
+    g = load_genres(p)
+    assert g["culture"].digest and not g["culture/sports"].digest

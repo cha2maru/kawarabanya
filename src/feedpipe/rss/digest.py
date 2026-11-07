@@ -37,17 +37,22 @@ class DigestItem:
     likes: int | None
 
 
-def collect(conn: sqlite3.Connection, genre: str, since: datetime) -> list[DigestItem]:
-    """since 以降に投稿したジャンルの記事を、重要度の高い順に返す（判定のないものは最後）。"""
+def collect(
+    conn: sqlite3.Connection, genre: str, since: datetime, excluded: frozenset[str] = frozenset()
+) -> list[DigestItem]:
+    """since 以降に投稿したジャンルの記事を、重要度の高い順に返す（判定のないものは最後）。
+
+    excluded（genres.toml で digest = false のジャンル・サブジャンル）の記事は除く。
+    """
     rows = conn.execute(
-        "SELECT f.category, i.title, i.discord_thread_id, i.priority, i.likes FROM items i"
+        "SELECT COALESCE(i.subgenre, f.category) AS category, i.title, i.discord_thread_id, i.priority, i.likes FROM items i"
         " JOIN feeds f ON f.id = i.feed_id WHERE i.status = 'notified' AND i.notified_at >= ?",
         (since.isoformat(timespec="seconds"),),
     ).fetchall()
     items = [
         DigestItem(r["title"] or "(無題)", r["discord_thread_id"], r["priority"], r["likes"])
         for r in rows
-        if top_genre(r["category"]) == genre
+        if top_genre(r["category"]) == genre and not {r["category"], genre} & excluded
     ]
     return sorted(items, key=lambda i: -(i.priority if i.priority is not None else -1))
 
@@ -79,6 +84,7 @@ async def post_digest(
     genre: str,
     *,
     label: str | None = None,
+    excluded: frozenset[str] = frozenset(),
     now: datetime,
     top: int,
     window_hours: int,
@@ -96,7 +102,7 @@ async def post_digest(
     posted = _posted(conn, genre, day)
     if channel is None or (posted is not None) != update:
         return None
-    items = collect(conn, genre, now - timedelta(hours=window_hours))
+    items = collect(conn, genre, now - timedelta(hours=window_hours), excluded)
     if not items:
         return None
     trend = None
