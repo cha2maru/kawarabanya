@@ -1,0 +1,52 @@
+# kawarabanya の設定の見本。config.toml にコピーして、変えたいところだけ残す（すべて省略可。ここの値は既定値）。
+# 秘密情報（Bot のトークン）はここではなく .env に書く（見本: .env.example）。
+
+[general]
+db = "data/kawarabanya.db"
+archive_dir = "archive"                 # 記事の Markdown を保存する場所
+genres_file = "genres.toml"             # ジャンルとフィードの定義（見本: genres.example.toml）
+extensions_dir = "extensions"           # サイト別の取り込み（拡張）を置く場所
+concurrency = 16                        # 全体の同時接続数
+per_host = 2                            # 同じホストへの同時接続数
+timeout = 20.0                          # 取得のタイムアウト（秒）
+user_agent = "Mozilla/5.0 (compatible; kawarabanya/0.1)"
+max_failures = 5                        # 連続でこの回数失敗したフィードは自動で無効にする
+stale_days = 365                        # 最新の記事がこの日数より古いフィードを「放置」として報告する（無効にはしない）
+
+[fulltext]
+enabled = true                          # 元記事のページから本文を取る
+min_length = 200                        # 元記事の本文がこれより短ければ、フィードの本文と長い方を使う
+include_images = true                   # 本文の Markdown に画像を含める
+
+[summarize]
+enabled = true
+endpoint = "http://127.0.0.1:8080/v1"   # 要約サーバー（OpenAI 互換 API。llama-server など）
+model = "Qwen3.5-4B"
+max_input_chars = 1000                  # 要約に渡す本文の文字数（3,000 → 1,000 字で 16 秒 → 9 秒、品質はほぼ同じ）
+max_tokens = 300
+temperature = 0.3
+timeout = 180.0                         # 要約 1 件のタイムアウト（秒）
+max_age_days = 3                        # 公開からこの日数以内の記事だけ判定・要約する
+priority_threshold = 0.8                # 重要度（A の確率）がこれ以上の記事だけ要約する。0 なら判定せず全件
+same_story_threshold = 0.9              # 見出しの似た直近の記事と同じ出来事である確率がこれ以上なら、後の方を投稿しない。0 なら判定しない
+
+[discord]
+# guild_id = "123456789012345678"       # Bot が複数のサーバーに参加しているときだけ書く
+parent_category = "kawarabanya"         # フォーラムをまとめる Discord のカテゴリ名
+webhook_name = "kawarabanya"            # 投稿に使う Webhook の名前（同じ名前の Webhook でしか書き換え・削除できないので、運用中に変えない）
+nsfw = true                             # フォーラムを年齢制限チャンネルにする
+max_posts_per_run = 30                  # 1 回の実行で投稿する上限（超えた分は次回に回す）
+max_age_days = 3                        # 公開からこの日数を過ぎた記事は投稿しない
+token_env = "DISCORD_BOT_TOKEN"         # Bot のトークンを読む環境変数の名前
+
+[digest]
+enabled = true
+channel = "ニュース"                    # まとめを投稿するテキストチャンネル（サーバー内を名前で探す。事前に作っておく）
+times = ["06:30", "18:30"]              # まとめを投稿する時刻。前回のまとめ以降の記事をまとめる（kawarabanya digest で随時も投稿できる）
+window_hours = 24                       # 前回のまとめがない・古いときに、さかのぼる時間数の上限
+top = 10                                # まとめに並べる投稿へのリンクの数
+
+[bot]
+run_interval_minutes = 60               # 定期実行の間隔（分）。0 なら定期実行しない（まとめの時刻の実行は別）
+run_args = []                           # run に追加で渡す引数（例: ["--no-summary"]）
+llm_server_command = ""                 # Bot と一緒に起動・停止する要約サーバーのコマンド（例: "scripts/llama-server.sh"）。空なら起動しない

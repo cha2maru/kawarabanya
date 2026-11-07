@@ -8,6 +8,7 @@
 
 ```sh
 uv sync
+cp config.example.toml config.toml           # 設定（すべて省略可。変えたいところだけ残す）
 
 # 1. Discord Bot（https://discord.com/developers/applications で作成）
 cp .env.example .env                         # DISCORD_BOT_TOKEN を書く
@@ -163,38 +164,16 @@ feeds = [{ url = "https://arclightgames.jp/sitemap.xml", extension = "sitemap", 
 
 ### config.toml（git 管理外。すべて省略可）
 
+すべての設定と既定値・説明は見本の [config.example.toml](config.example.toml) にある。コピーして、変えたいところだけ残す。よく変えるもの:
+
 ```toml
-[general]
-db = "data/kawarabanya.db"
-archive_dir = "archive"
-max_failures = 5             # 連続失敗でフィードを無効化する回数
-
-[fulltext]
-min_length = 200             # 元記事の本文がこれより短ければフィードの本文と長い方を使う
-
 [summarize]
-endpoint = "http://127.0.0.1:8080/v1"
-model = "Qwen3.5-4B"
-max_age_days = 3             # 公開からこの日数以内の記事だけ要約する
-max_input_chars = 1000       # 要約に渡す本文の文字数
 priority_threshold = 0.8     # 重要度（A の確率）がこれ以上の記事だけ要約する。0 なら全件
-same_story_threshold = 0.9   # 見出しの似た直近の記事と同じ出来事である確率がこれ以上なら、後の方を投稿しない。0 なら判定しない
-
-[discord]
-nsfw = true                  # フォーラムを年齢制限にする
-max_age_days = 3             # これより古い記事は投稿しない
-max_posts_per_run = 30
 
 [digest]
-enabled = true
-channel = "ニュース"         # まとめを投稿するテキストチャンネル（サーバー内を名前で探す。事前に作っておく）
-times = ["06:30", "18:30"]   # まとめを投稿する時刻。前回のまとめ以降の記事をまとめる（kawarabanya digest で随時も投稿できる）
-window_hours = 24            # 前回のまとめがない・古いときに、さかのぼる時間数の上限
-top = 10                     # まとめに並べる投稿へのリンクの数
+times = ["06:30", "18:30"]   # まとめを投稿する時刻
 
 [bot]
-run_interval_minutes = 60    # 0 なら定期実行しない
-run_args = []                # run に渡す追加の引数（例: ["--no-summary"]）
 llm_server_command = "scripts/llama-server.sh"   # Bot と一緒に要約サーバーを起動・停止する
 ```
 
