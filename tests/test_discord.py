@@ -25,6 +25,7 @@ class FakeDiscord:
         ]
         self.webhooks: dict[str, list] = {"11": [{"id": "w11", "name": "feedpipe", "token": "k11"}]}
         self.posts: list[dict] = []
+        self.likes: dict[str, int] = {}
         self.next_id = 100
         self.rate_limited_once = False
 
@@ -57,7 +58,17 @@ class FakeDiscord:
                 ch["available_tags"] = [t if "id" in t else {"id": self._id(), **t} for t in body["available_tags"]]
             if "nsfw" in body:
                 ch["nsfw"] = body["nsfw"]
+            if "default_reaction_emoji" in body:
+                ch["default_reaction_emoji"] = body["default_reaction_emoji"]
             return httpx.Response(200, json=ch)
+        if "/messages/" in path:  # フォーラム投稿の最初のメッセージ
+            tid = path.split("/")[2]
+            if tid not in self.likes:
+                return httpx.Response(404, json={"message": "Unknown Message"})
+            return httpx.Response(200, json={"id": tid, "reactions": [
+                {"emoji": {"id": None, "name": "👍"}, "count": self.likes[tid]},
+                {"emoji": {"id": None, "name": "🎉"}, "count": 9},
+            ]})
         if path.endswith("/webhooks"):
             cid = path.split("/")[2]
             if req.method == "GET":
@@ -209,3 +220,25 @@ def test_removes_unused_tags():
     apply_plan(client, conn, plan, "feedpipe")
     assert [t["name"] for t in tech["available_tags"]] == ["既存フィード", "新フィード"]
     assert tech["available_tags"][0]["id"] == "t1"  # 残すタグは id を保つ
+
+
+def test_default_reaction_and_like_sync():
+    fake, client, conn = setup()
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "feedpipe")
+    apply_plan(client, conn, plan, "feedpipe")
+    forums = [c for c in fake.channels if c["type"] == GUILD_FORUM and c.get("parent_id") == "10"]
+    assert all(c["default_reaction_emoji"]["emoji_name"] == "👍" for c in forums)  # 新規も既存も
+
+    feed_id = db.list_feeds(conn)[0].id
+    with conn:
+        ids = {}
+        for key, tid in [("a", "t-a"), ("b", "t-b"), ("gone", "t-gone")]:
+            ids[key] = db.insert_item(conn, feed_id, key, None, key, ago(hours=1), "notified")
+            db.update_item(conn, ids[key], discord_thread_id=tid, notified_at=ago(hours=1))
+    fake.likes = {"t-a": 2, "t-b": 0}
+
+    assert notify.sync_likes(conn, client, interval_hours=6) == 3
+    likes = dict(conn.execute("SELECT key, likes FROM items WHERE key IN ('a','b','gone')").fetchall())
+    assert likes == {"a": 2, "b": 0, "gone": None}
+    assert notify.sync_likes(conn, client, interval_hours=6) == 0  # 6 時間以内は再確認しない
+    assert notify.sync_likes(conn, client, interval_hours=0) == 3

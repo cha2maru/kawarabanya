@@ -193,7 +193,60 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
     rc = 1 if errors else 0
     if not args.no_notify and conn.execute("SELECT 1 FROM discord_channels LIMIT 1").fetchone():
         rc |= _notify(cfg, conn)
+        if cfg.discord.token:
+            _sync_likes(cfg, conn)
     return rc
+
+
+def _sync_likes(cfg: Config, conn: sqlite3.Connection, interval_hours: float = 6) -> int:
+    try:
+        n = notify.sync_likes(conn, _discord_client(cfg), interval_hours=interval_hours)
+    except discord_api.DiscordError as e:
+        # 権限不足などで取得できなくても、記事の取り込みと通知は成功しているので止めない
+        print(f"👍 の取得に失敗: {e}（Bot に「メッセージ履歴を読む」権限があるか確認してください）", file=sys.stderr)
+        return 1
+    print(f"👍: {n} 件の投稿を確認")
+    return 0
+
+
+def cmd_likes(cfg: Config, args: argparse.Namespace) -> int:
+    return _sync_likes(cfg, _open_db(cfg, args), interval_hours=0)
+
+
+def cmd_interests(cfg: Config, args: argparse.Namespace) -> int:
+    """投稿に付いた 👍 から、ジャンル・フィード別の興味の傾向を表示する。"""
+    conn = _open_db(cfg, args)
+    since = (datetime.now(UTC) - timedelta(days=args.days)).isoformat(timespec="seconds")
+    rows = conn.execute(
+        "SELECT f.category, f.title AS feed, i.title, i.likes FROM items i JOIN feeds f ON f.id = i.feed_id"
+        " WHERE i.status = 'notified' AND i.notified_at >= ?",
+        (since,),
+    ).fetchall()
+    if not rows:
+        print(f"直近 {args.days} 日に投稿した記事がありません")
+        return 0
+
+    def table(key: str, label: str, limit: int | None = None) -> None:
+        posts, liked = Counter(), Counter()
+        for r in rows:
+            posts[r[key] or "-"] += 1
+            liked[r[key] or "-"] += bool(r["likes"])
+        ranked = sorted(posts, key=lambda k: (-liked[k] / posts[k], -posts[k]))[:limit]
+        print(f"\n{label}別（👍 が付いた投稿の割合）")
+        for k in ranked:
+            rate = liked[k] / posts[k]
+            print(f"  {_fit(k, 30)} {'█' * round(rate * 20):<20} {rate:4.0%}  ({liked[k]}/{posts[k]})")
+
+    total_liked = sum(1 for r in rows if r["likes"])
+    print(f"直近 {args.days} 日: 投稿 {len(rows)} 件 / 👍 あり {total_liked} 件")
+    table("category", "ジャンル")
+    table("feed", "フィード", limit=args.top)
+    liked_titles = [r for r in rows if r["likes"]][-args.top:]
+    if liked_titles:
+        print("\n最近 👍 した記事")
+        for r in reversed(liked_titles):
+            print(f"  [{r['category']}] {r['title']}")
+    return 0
 
 
 def cmd_summarize(cfg: Config, args: argparse.Namespace) -> int:
@@ -291,7 +344,7 @@ def _discord_client(cfg: Config) -> discord_api.DiscordClient:
 def cmd_discord_invite_url(cfg: Config, args: argparse.Namespace) -> int:
     client = _discord_client(cfg)
     print(discord_api.invite_url(client.application_id()))
-    print("権限: チャンネルを見る / チャンネルの管理 / ウェブフックの管理", file=sys.stderr)
+    print("権限: チャンネルを見る / チャンネルの管理 / ウェブフックの管理 / メッセージ履歴を読む", file=sys.stderr)
     return 0
 
 
@@ -325,6 +378,8 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
                 todo.append(f"タグ削除 {len(extra)}: {'、'.join(t['name'] for t in extra)}")
             if pc.nsfw != cfg.discord.nsfw:
                 todo.append("年齢制限" + ("オン" if cfg.discord.nsfw else "オフ"))
+            if pc.default_reaction != discord_api.LIKE_EMOJI:
+                todo.append(f"既定リアクション {discord_api.LIKE_EMOJI}")
             state = f"既存（{'、'.join(todo)}）" if todo else "既存"
         else:
             state = "作成"
@@ -507,6 +562,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--category", help="このカテゴリだけ")
     s.add_argument("--dry-run", action="store_true", help="送らずに内容を表示する")
     s.set_defaults(func=cmd_notify)
+
+    s = sub.add_parser("likes", help="投稿の 👍 の数を今すぐ取得する（run でも 6 時間ごとに取得）")
+    s.set_defaults(func=cmd_likes)
+
+    s = sub.add_parser("interests", help="👍 から興味の傾向を表示する")
+    s.add_argument("--days", type=int, default=30, help="集計する期間（日）")
+    s.add_argument("--top", type=int, default=15, help="フィード・記事を表示する件数")
+    s.set_defaults(func=cmd_interests)
 
     feeds = sub.add_parser("feeds", help="フィードの管理").add_subparsers(dest="feeds_command", required=True)
 

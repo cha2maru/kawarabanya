@@ -8,13 +8,19 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
 
 from . import db, markdown
-from .discord_api import UNCATEGORIZED, DiscordError, send_webhook
+from .discord_api import (
+    UNCATEGORIZED,
+    DiscordClient,
+    DiscordError,
+    count_likes,
+    send_webhook,
+)
 from .item import is_recent
 
 log = logging.getLogger(__name__)
@@ -184,3 +190,32 @@ def notify_pending(
             )
         stats.sent += 1
     return stats
+
+
+def sync_likes(
+    conn: sqlite3.Connection,
+    client: DiscordClient,
+    *,
+    within_days: int = 7,
+    interval_hours: float = 6,
+) -> int:
+    """投稿から within_days 日以内の記事の 👍 の数を記録する。確認した件数を返す。
+
+    同じ投稿は interval_hours 時間に 1 回だけ確認する（毎回全件を読みに行かない）。
+    """
+    now = datetime.now(UTC)
+    rows = conn.execute(
+        "SELECT id, discord_thread_id, likes_checked_at FROM items"
+        " WHERE status = 'notified' AND discord_thread_id IS NOT NULL AND notified_at >= ?",
+        ((now - timedelta(days=within_days)).isoformat(timespec="seconds"),),
+    ).fetchall()
+    due = [
+        r for r in rows
+        if not r["likes_checked_at"]
+        or datetime.fromisoformat(r["likes_checked_at"]) <= now - timedelta(hours=interval_hours)
+    ]
+    for r in due:
+        likes = count_likes(client, r["discord_thread_id"])
+        with conn:
+            db.update_item(conn, r["id"], likes=likes, likes_checked_at=db.now_iso())
+    return len(due)

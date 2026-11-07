@@ -22,11 +22,15 @@ GUILD_TEXT = 0
 GUILD_CATEGORY = 4
 GUILD_FORUM = 15
 
-# 投稿は Webhook が行うので、Bot に必要なのはチャンネルの表示・管理と Webhook の管理だけ
+# 投稿は Webhook が行うので、Bot に必要なのはチャンネルの表示・管理、Webhook の管理と、
+# 👍 の数を読むためのメッセージ履歴の閲覧だけ
 PERM_VIEW_CHANNEL = 1 << 10
 PERM_MANAGE_CHANNELS = 1 << 4
+PERM_READ_MESSAGE_HISTORY = 1 << 16
 PERM_MANAGE_WEBHOOKS = 1 << 29
-BOT_PERMISSIONS = PERM_VIEW_CHANNEL | PERM_MANAGE_CHANNELS | PERM_MANAGE_WEBHOOKS
+BOT_PERMISSIONS = PERM_VIEW_CHANNEL | PERM_MANAGE_CHANNELS | PERM_READ_MESSAGE_HISTORY | PERM_MANAGE_WEBHOOKS
+LIKE_EMOJI = "👍"
+DEFAULT_REACTION = {"emoji_id": None, "emoji_name": LIKE_EMOJI}
 
 UNCATEGORIZED = "uncategorized"
 
@@ -134,6 +138,7 @@ class PlannedChannel:
     channel_id: str | None = None  # 既存のフォーラムがあればその ID
     existing_tags: list[dict] = field(default_factory=list)
     nsfw: bool = False  # 既存のフォーラムが年齢制限か
+    default_reaction: str | None = None  # 既存のフォーラムの既定のリアクション
     subgenres: dict[str, str] = field(default_factory=dict)  # サブジャンルのパス → 表示名
     description: str = ""
 
@@ -202,6 +207,7 @@ def make_plan(
                 channel_id=forum["id"] if forum else None,
                 existing_tags=forum.get("available_tags", []) if forum else [],
                 nsfw=bool(forum.get("nsfw")) if forum else False,
+                default_reaction=(forum.get("default_reaction_emoji") or {}).get("emoji_name") if forum else None,
                 subgenres={g.path: g.label for g in (genres or {}).values() if g.is_sub and g.top == cat},
                 description=genres[cat].description if genres and cat in genres else "",
             )
@@ -239,6 +245,7 @@ def apply_plan(
                 topic=pc.description or f"feedpipe: {pc.category}",
                 available_tags=[{"name": n} for n in pc.wanted_tags()],
                 nsfw=nsfw,
+                default_reaction_emoji=DEFAULT_REACTION,
             )
             pc.channel_id, pc.existing_tags, pc.nsfw = ch["id"], ch.get("available_tags", []), nsfw
             created.append(pc)
@@ -250,6 +257,9 @@ def apply_plan(
                 changes["available_tags"] = [have.get(n, {"name": n}) for n in pc.wanted_tags()]
             if pc.nsfw != nsfw:
                 changes["nsfw"] = nsfw
+            if pc.default_reaction != LIKE_EMOJI:
+                # 一覧から 1 クリックで 👍 できるようにする
+                changes["default_reaction_emoji"] = DEFAULT_REACTION
             if changes:
                 ch = client.request("PATCH", f"/channels/{pc.channel_id}", changes)
                 pc.existing_tags, pc.nsfw = ch.get("available_tags", []), bool(ch.get("nsfw"))
@@ -304,3 +314,14 @@ def send_webhook(url: str, payload: dict, transport: httpx.BaseTransport | None 
                 raise DiscordError(f"Webhook 送信に失敗: HTTP {resp.status_code} {resp.text[:200]}")
             return resp.json()
     raise DiscordError("Webhook 送信: レート制限が解除されません")
+
+
+def count_likes(client: DiscordClient, thread_id: str) -> int | None:
+    """フォーラム投稿の 👍 の数（最初のメッセージの ID はスレッド ID と同じ）。投稿が消えていれば None。"""
+    try:
+        msg = client.request("GET", f"/channels/{thread_id}/messages/{thread_id}")
+    except DiscordError as e:
+        if "HTTP 404" in str(e):
+            return None
+        raise
+    return next((r["count"] for r in msg.get("reactions", []) if r["emoji"].get("name") == LIKE_EMOJI), 0)
