@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 from kawarabanya.core import db
 from kawarabanya.core.llm import Summarizer
-from kawarabanya.rss.genres import INTEREST_LEVELS, Genre, normalize_word
+from kawarabanya.rss.genres import INTEREST_LEVELS, Genre, has_word, normalize_word
 
 # コマンド名 → (説明, 実行前に確認するか)
 COMMANDS: dict[str, tuple[str, bool]] = {
@@ -119,6 +119,12 @@ def find_post(conn: sqlite3.Connection, thread_id: int) -> sqlite3.Row | None:
     ).fetchone()
 
 
+def _named_genre(text: str, genres: dict[str, Genre]) -> str | None:
+    """依頼の文にそのまま書かれたジャンルのキーか名前（複数なら長いもの）。"""
+    named = [(len(n), p) for p, g in genres.items() for n in (p, g.label) if has_word(text, n)]
+    return max(named)[1] if named else None
+
+
 def _word(data: dict | None, text: str, genre: Genre) -> str:
     """LLM が挙げた振り分けの語。依頼の文にない語や、ジャンルの名前そのものは使わない。"""
     word = unicodedata.normalize("NFKC", (data or {}).get("word") or "").strip()
@@ -196,6 +202,9 @@ def build(
             argv = ["feeds", "option", str(f.id), "interest"] + ([] if level == "normal" else [level])
             return Intent(command, argv, f"「{f.title or f.url}」を{INTEREST_LEVELS[level]}にする", confirm)
         case "genre_assign":
+            # 「これはculture」を LLM が culture/comic と読むことがあるので、書かれた名前を優先する
+            genre = _named_genre(text, genres) or genre
+            label = genres[genre].label if genre in genres else genre
             if not genre:
                 return Intent(command, error="行き先のジャンルを書いてください")
             word = _word(data, text, genres[genre])

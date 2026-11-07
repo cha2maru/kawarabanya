@@ -106,3 +106,26 @@ def test_job_failures_alert_after_three(tmp_path, monkeypatch):
     assert not any("job:run" in s for s in sent)  # 1〜2 回は一時的なことが多い
     asyncio.run(go(1))
     assert "job:run" in sent[-1] and "job:digest" in sent[-1]
+
+
+def test_wait_llm_until_healthy(tmp_path):
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from threading import Thread
+
+    answers = [503, 200]
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(answers.pop(0))
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    Thread(target=server.serve_forever, daemon=True).start()
+    bot, _, _ = make_bot(tmp_path, {})
+    bot.cfg.summarize.endpoint = f"http://127.0.0.1:{server.server_port}/v1"
+    asyncio.run(bot._wait_llm(timeout=5, interval=0))
+    server.shutdown()
+    assert answers == []  # 503 の後、200 が返るまで待った

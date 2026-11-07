@@ -16,6 +16,7 @@ from collections import Counter
 from pathlib import Path
 
 import discord
+import httpx
 from discord.ext import tasks
 
 from kawarabanya.bot import assistant
@@ -31,6 +32,8 @@ MAX_OUTPUT = 1800
 MAX_UPLOAD = 5 * 1024 * 1024
 # 定期処理がこの回数続けて失敗したら Discord に知らせる（1 回の失敗は一時的なことが多い）
 JOB_FAILURES = 3
+# 要約サーバーのモデルの読み込みを待つ上限（秒）
+LLM_WAIT = 180
 
 log = logging.getLogger(__name__)
 
@@ -205,8 +208,25 @@ class Bot(discord.Client):
 
     @periodic_run.before_loop
     async def _wait_ready(self) -> None:
-        """Discord への接続が終わるまで、最初の定期実行を待たせる。"""
+        """Discord への接続と要約サーバーの準備が終わるまで、最初の定期実行を待たせる。"""
         await self.wait_until_ready()
+        if self.llm:
+            await self._wait_llm()
+
+    async def _wait_llm(self, timeout: float = LLM_WAIT, interval: float = 2) -> None:
+        """モデルの読み込みを待つ。読み込み中（503）に取り込むと、判定も要約もなしで投稿してしまう。"""
+        url = self.cfg.summarize.endpoint.rstrip("/").removesuffix("/v1") + "/health"
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        async with httpx.AsyncClient(timeout=5) as client:
+            while loop.time() < deadline:
+                try:
+                    if (await client.get(url)).status_code == 200:
+                        return
+                except httpx.HTTPError:
+                    pass
+                await asyncio.sleep(interval)
+        log.warning("要約サーバーの準備が %d 秒で終わりませんでした", timeout)
 
     async def close(self) -> None:
         """Bot を止める。一緒に起動した要約サーバーも止める。"""

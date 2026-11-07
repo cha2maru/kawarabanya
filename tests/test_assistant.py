@@ -109,3 +109,11 @@ def test_genre_assign(tmp_path):
     assert ask(conn, genres, "これはテック", command="genre_assign", genre="tech", word="Cloudflare").error
     assert ask(conn, genres, "Cloudflare", command="genre_assign", word="Cloudflare").error
     assert assistant.find_post(conn, 1) is None
+
+
+def test_genre_written_in_request_wins(tmp_path):
+    conn, genres = make(tmp_path)
+    data = {"command": "genre_assign", "genre": "hobby/vape", "word": ""}
+    assert assistant.build(data, "これはtech", conn, genres, post=post_row(conn)).argv == ["items", "move", "5", "tech"]
+    assert assistant.build(data, "これはホビー", conn, genres, post=post_row(conn)).argv[-1] == "hobby"
+    assert assistant.build(data, "これは煙のやつ", conn, genres, post=post_row(conn)).argv[-1] == "hobby/vape"
