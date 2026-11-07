@@ -77,3 +77,20 @@ uv run feedpipe discord setup --apply        # フォーラム・タグを更新
 ```
 
 genres.toml に書かれていないフィードの記事は投稿されない（Markdown の保存はする）。
+
+### 常駐 Bot
+
+```sh
+uv run feedpipe bot                          # Discord に接続したまま、60 分ごとに run を別プロセスで実行
+```
+
+`config.toml` で調整する（すべて省略可）:
+
+```toml
+[bot]
+run_interval_minutes = 60                    # 0 なら定期実行しない
+run_args = []                                # run に渡す追加の引数（例: ["--no-summary"]）
+llm_server_command = "scripts/llama-server.sh"   # Bot と一緒に要約サーバーを起動・停止する
+```
+
+対話機能（スラッシュコマンドなど）は `src/feedpipe/bot.py` の `Bot` に足していく。

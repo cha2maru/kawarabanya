@@ -83,11 +83,22 @@ class DiscordConfig:
 
 
 @dataclass
+class BotConfig:
+    # 常駐中に `feedpipe run` を実行する間隔（分）。0 なら実行しない
+    run_interval_minutes: int = 60
+    # run に追加で渡す引数（例: ["--no-summary"]）
+    run_args: list[str] = field(default_factory=list)
+    # Bot と一緒に起動・停止する要約サーバーのコマンド（例: "scripts/llama-server.sh"）。空なら起動しない
+    llm_server_command: str = ""
+
+
+@dataclass
 class Config:
     general: GeneralConfig = field(default_factory=GeneralConfig)
     fulltext: FulltextConfig = field(default_factory=FulltextConfig)
     summarize: SummarizeConfig = field(default_factory=SummarizeConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
+    bot: BotConfig = field(default_factory=BotConfig)
     path: Path | None = None
 
 
@@ -110,5 +121,6 @@ def load_config(path: Path | None = None) -> Config:
         fulltext=_section(FulltextConfig, raw.get("fulltext", {}), "fulltext", path),
         summarize=_section(SummarizeConfig, raw.get("summarize", {}), "summarize", path),
         discord=_section(DiscordConfig, raw.get("discord", {}), "discord", path),
+        bot=_section(BotConfig, raw.get("bot", {}), "bot", path),
         path=path,
     )

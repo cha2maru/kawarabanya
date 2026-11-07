@@ -513,6 +513,17 @@ def cmd_genres_apply(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+# --- bot -------------------------------------------------------------------
+
+
+def cmd_bot(cfg: Config, args: argparse.Namespace) -> int:
+    from .bot import run_bot  # discord.py の読み込みは bot のときだけ
+
+    config_args = [*(["--config", str(args.config)] if args.config else []), *(["--db", args.db] if args.db else [])]
+    run_bot(cfg, config_args)
+    return 0
+
+
 # --- parser ----------------------------------------------------------------
 
 
@@ -562,6 +573,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--category", help="このカテゴリだけ")
     s.add_argument("--dry-run", action="store_true", help="送らずに内容を表示する")
     s.set_defaults(func=cmd_notify)
+
+    s = sub.add_parser("bot", help="常駐 Bot を起動する（定期的に run を実行）")
+    s.set_defaults(func=cmd_bot)
 
     s = sub.add_parser("likes", help="投稿の 👍 の数を今すぐ取得する（run でも 6 時間ごとに取得）")
     s.set_defaults(func=cmd_likes)
@@ -637,6 +651,12 @@ def main(argv: list[str] | None = None) -> int:
     # trafilatura は抽出できなかったページごとに ERROR を出すので、-v のとき以外は抑える
     logging.getLogger("trafilatura").setLevel(logging.INFO if args.verbose else logging.CRITICAL)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("discord").setLevel(logging.INFO if args.verbose else logging.WARNING)
+    # 音声機能は使わないので、PyNaCl などがないという警告は出さない
+    logging.getLogger("discord.client").setLevel(logging.INFO if args.verbose else logging.ERROR)
+    if args.command == "bot":
+        # 常駐中は何をしたかを残したいので、-v がなくても feedpipe 自身のログは INFO で出す
+        logging.getLogger("feedpipe").setLevel(logging.INFO)
     try:
         load_dotenv()
         cfg = load_config(args.config)
