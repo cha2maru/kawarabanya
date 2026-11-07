@@ -15,15 +15,15 @@ from pathlib import Path
 
 import httpx
 
-from .. import db
-from ..config import Config
-from ..llm import Summarizer
-from . import archive
-from .check import CheckResult, apply_results, check_feed
-from .fetcher import Fetcher
-from .fulltext import fill_content
-from .genres import Genre, load_genres, priority_criteria
-from .item import Item, from_entry, is_recent
+from kawarabanya.core import db
+from kawarabanya.core.config import Config
+from kawarabanya.core.llm import Summarizer
+from kawarabanya.rss import archive
+from kawarabanya.rss.fulltext import fill_content
+from kawarabanya.rss.genres import Genre, load_genres, priority_criteria
+from kawarabanya.rss.item import Item, from_entry, is_recent
+from kawarabanya.rss.sources.check import CheckResult, apply_results, check_feed
+from kawarabanya.rss.sources.fetcher import Fetcher
 
 log = logging.getLogger(__name__)
 

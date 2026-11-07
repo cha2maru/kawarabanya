@@ -4,8 +4,8 @@ from pathlib import Path
 
 import httpx
 
-from kawarabanya import db
-from kawarabanya.config import Config, GeneralConfig
+from kawarabanya.core import db
+from kawarabanya.core.config import Config, GeneralConfig
 from kawarabanya.rss import archive
 from kawarabanya.rss.item import Item, from_entry
 from kawarabanya.rss.pipeline import run_feeds
@@ -133,7 +133,7 @@ def test_summarize_on_save(tmp_path):
     import json as _json
     import math
 
-    from kawarabanya.llm import Summarizer, clean_output
+    from kawarabanya.core.llm import Summarizer, clean_output
 
     calls = []
 
@@ -188,7 +188,7 @@ def test_summarize_on_save(tmp_path):
 
 
 def test_summarize_skips_old_and_unavailable(tmp_path):
-    from kawarabanya.llm import Summarizer
+    from kawarabanya.core.llm import Summarizer
 
     def down(request):
         raise httpx.ConnectError("refused")
@@ -226,7 +226,7 @@ def test_classify_subgenre(tmp_path):
     import json as _json
     import math
 
-    from kawarabanya.llm import Summarizer
+    from kawarabanya.core.llm import Summarizer
 
     (tmp_path / "genres.toml").write_text(
         '[tech]\nfeeds = ["https://site.example/feed"]\n'
@@ -292,7 +292,7 @@ def test_same_story(tmp_path):
     import json as _json
     import math
 
-    from kawarabanya.llm import Summarizer
+    from kawarabanya.core.llm import Summarizer
     from kawarabanya.rss.pipeline import _title_bigrams
 
     assert _title_bigrams("自民、退席の石破氏らに説明要求（共同通信） - Yahoo!ニュース") == _title_bigrams("自民退席の石破氏らに説明要求")

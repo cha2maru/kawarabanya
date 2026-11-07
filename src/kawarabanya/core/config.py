@@ -32,7 +32,7 @@ class GeneralConfig:
     db: str = "data/kawarabanya.db"
     archive_dir: str = "archive"
     genres_file: str = "genres.toml"
-    # サイト別の取り込み（拡張）を置くディレクトリ（rss/extensions.py）
+    # サイト別の取り込み（拡張）を置くディレクトリ（rss/sources/extensions.py）
     extensions_dir: str = "extensions"
     concurrency: int = 16
     per_host: int = 2

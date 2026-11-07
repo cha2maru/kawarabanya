@@ -4,11 +4,11 @@ import time
 import httpx
 import pytest
 
-from kawarabanya import db
-from kawarabanya.config import GeneralConfig
-from kawarabanya.rss.check import Status, apply_results, check_feeds
+from kawarabanya.core import db
+from kawarabanya.core.config import GeneralConfig
 from kawarabanya.rss.genres import apply_genres, load_genres
-from kawarabanya.rss.htmlsource import HtmlSource, extract, normalize_url
+from kawarabanya.rss.sources.check import Status, apply_results, check_feeds
+from kawarabanya.rss.sources.htmlsource import HtmlSource, extract, normalize_url
 
 PAGE = """<html><head><title>お知らせ | Example</title></head><body>
 <nav><a href="/about">会社概要</a></nav>
@@ -98,7 +98,7 @@ def test_extract_shift_jis_page():
 
 
 def test_decode_html_charsets():
-    from kawarabanya.rss.htmlsource import decode_html
+    from kawarabanya.rss.sources.htmlsource import decode_html
 
     body = "<p>置き配を盗まれたのでダミー荷物を置いてみた結果、見事にまた盗まれた</p>" * 3
     euc = f'<html><head><meta charset="EUC-JP"></head><body>{body}</body></html>'.encode("euc_jp")
@@ -117,7 +117,7 @@ def test_decode_html_charsets():
 def test_extension_source(tmp_path, monkeypatch):
     import json
 
-    from kawarabanya.rss import extensions
+    from kawarabanya.rss.sources import extensions
 
     ext_dir = tmp_path / "extensions"
     ext_dir.mkdir()

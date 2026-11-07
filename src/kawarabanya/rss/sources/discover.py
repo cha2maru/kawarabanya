@@ -8,8 +8,8 @@ from urllib.parse import urljoin
 import feedparser
 import httpx
 
-from ..config import GeneralConfig
-from .htmlsource import decode_html
+from kawarabanya.core.config import GeneralConfig
+from kawarabanya.rss.sources.htmlsource import decode_html
 
 # <link rel="alternate" type="application/rss+xml" href="..."> の href
 LINK_RE = re.compile(r"<link\b[^>]*>", re.IGNORECASE)

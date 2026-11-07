@@ -13,19 +13,25 @@ from pathlib import Path
 
 import httpx
 
-from .. import db, discord_api
-from ..config import Config
-from ..llm import Summarizer
-from ..rss import genres, notify, opml
-from ..rss.check import CheckResult, Status, apply_results, check_feeds
-from ..rss.pipeline import FeedReport, run_feeds, summarize_pending
-from .common import (
+from kawarabanya.cli.common import (
     STATUS_MARK,
     _discord_client,
     _fit,
     _load_genres,
     _open_db,
     _require_genres,
+)
+from kawarabanya.core import db, discord_api
+from kawarabanya.core.config import Config
+from kawarabanya.core.llm import Summarizer
+from kawarabanya.rss import forums, genres, notify
+from kawarabanya.rss.pipeline import FeedReport, run_feeds, summarize_pending
+from kawarabanya.rss.sources import opml
+from kawarabanya.rss.sources.check import (
+    CheckResult,
+    Status,
+    apply_results,
+    check_feeds,
 )
 
 
@@ -259,7 +265,7 @@ def cmd_feeds_list(cfg: Config, args: argparse.Namespace) -> int:
 
 def cmd_feeds_add(cfg: Config, args: argparse.Namespace) -> int:
     """feeds add: サイトかフィードの URL からフィードを探して登録し、genres.toml の --genre にも書き足す。"""
-    from ..rss.discover import discover
+    from kawarabanya.rss.sources.discover import discover
 
     conn = _open_db(cfg, args)
     defs = _load_genres(cfg)
@@ -293,7 +299,7 @@ def cmd_feeds_add(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def _rsshub_routes(cfg: Config, url: str) -> list:
-    from ..rss import rsshub
+    from kawarabanya.rss.sources import rsshub
 
     cache = Path(cfg.general.db).parent / "rsshub-radar.json"
     return rsshub.match(url, rsshub.load_rules(cache, cfg.general.user_agent))
@@ -449,7 +455,7 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     """status: 最後の取り込み・次のまとめ・要約サーバー・フィードと記事の状態を表示する。"""
     import httpx
 
-    from ..rss import digest, suggest
+    from kawarabanya.rss import digest, suggest
 
     conn = _open_db(cfg, args)
     now = datetime.now(UTC)
@@ -485,7 +491,7 @@ def cmd_genres_suggest(cfg: Config, args: argparse.Namespace) -> int:
     --apply で genres.toml に反映し、記事のサブジャンルを書き換え、Discord のタグを揃えて付け直す。
     --due は Bot の定期実行用（まとめの時刻 [digest] times を過ぎて、まだ実行していなければ実行する）。
     """
-    from ..rss import digest, suggest
+    from kawarabanya.rss import digest, suggest
 
     defs = _require_genres(cfg)
     conn = _open_db(cfg, args)
@@ -530,10 +536,10 @@ def cmd_genres_suggest(cfg: Config, args: argparse.Namespace) -> int:
     client = _discord_client(cfg)
     guild = discord_api.resolve_guild(client, cfg.discord.guild_id)
     only = [g.path for g in defs.values() if not g.is_sub]
-    plan = discord_api.make_plan(
-        client, guild, discord_api.feeds_by_category(conn, only), cfg.discord.parent_category, defs
+    plan = forums.make_plan(
+        client, guild, forums.feeds_by_category(conn, only), cfg.discord.parent_category, defs
     )
-    discord_api.apply_plan(client, conn, plan, cfg.discord.webhook_name, nsfw=cfg.discord.nsfw)
+    forums.apply_plan(client, conn, plan, cfg.discord.webhook_name, nsfw=cfg.discord.nsfw)
     ids = [i for s in found for i in s.item_ids] + merged_ids
     changed, _ = asyncio.run(notify.retag_posts(conn, client, None, defs, ids))
     print(f"Discord のタグを作り、投稿済みの {changed} 件のタグを付け直しました")
@@ -542,7 +548,7 @@ def cmd_genres_suggest(cfg: Config, args: argparse.Namespace) -> int:
 
 def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
     """digest: ジャンルごとのまとめ（前回のまとめ以降の記事）を投稿する（--update で書き換え、--delete で削除）。"""
-    from ..rss import digest
+    from kawarabanya.rss import digest
 
     conn = _open_db(cfg, args)
     now = datetime.now(UTC)

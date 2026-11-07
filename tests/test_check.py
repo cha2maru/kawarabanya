@@ -3,9 +3,9 @@ import socket
 
 import httpx
 
-from kawarabanya import db
-from kawarabanya.config import GeneralConfig
-from kawarabanya.rss.check import Status, apply_results, check_feeds
+from kawarabanya.core import db
+from kawarabanya.core.config import GeneralConfig
+from kawarabanya.rss.sources.check import Status, apply_results, check_feeds
 
 RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Feed T</title>
 <item><title>a</title><link>https://x/a</link><pubDate>Mon, 02 Nov 2026 03:00:00 GMT</pubDate></item>
@@ -112,8 +112,8 @@ def test_discover_feed():
 
     import httpx
 
-    from kawarabanya.config import GeneralConfig
-    from kawarabanya.rss.discover import discover
+    from kawarabanya.core.config import GeneralConfig
+    from kawarabanya.rss.sources.discover import discover
 
     rss = b'<?xml version="1.0"?><rss version="2.0"><channel><title>Site</title><item><title>a</title><link>https://s.example/a</link></item></channel></rss>'
 
@@ -125,7 +125,9 @@ def test_discover_feed():
         return httpx.Response(404)
 
     t = httpx.MockTransport(handler)
-    run = lambda u: asyncio.run(discover(u, GeneralConfig(), transport=t))
+    def run(u):
+        return asyncio.run(discover(u, GeneralConfig(), transport=t))
+
     assert run("https://s.example/news") == ("https://s.example/news/feed.xml", "Site")  # ページ内の案内
     assert run("https://s.example/blog") == ("https://s.example/blog/index.rdf", "Site")  # よくある場所
     assert run("https://s.example/f") == ("https://s.example/f", "Site")  # フィードそのもの
@@ -133,7 +135,7 @@ def test_discover_feed():
 
 
 def test_rsshub_match():
-    from kawarabanya.rss.rsshub import match
+    from kawarabanya.rss.sources.rsshub import match
 
     rules = {
         "famitsu.com": {"_name": "ファミ通", "www": [

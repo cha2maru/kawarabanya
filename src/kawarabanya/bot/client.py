@@ -16,10 +16,11 @@ import sys
 import discord
 from discord.ext import tasks
 
-from . import assistant, db
-from .config import Config
-from .llm import Summarizer
-from .rss.pipeline import load_genres_if_any
+from kawarabanya.bot import assistant
+from kawarabanya.core import db
+from kawarabanya.core.config import Config
+from kawarabanya.core.llm import Summarizer
+from kawarabanya.rss.pipeline import load_genres_if_any
 
 # Discord のメッセージの上限（2,000 字）に収めるため、コマンドの出力はこの字数で切る
 MAX_OUTPUT = 1800

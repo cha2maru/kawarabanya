@@ -8,8 +8,8 @@
     priority = "A: ... B: ... C: ..."   # 重要度の判定基準（省略可）
     interest = "low"            # 好き嫌い: like（まとめの上位に寄せる）/ low（まとめに載せない）/ mute（投稿もしない）
 
-    feeds に { url = ..., item = ..., ... } と書くと HTML 取り込み（rss/htmlsource.py）、
-    { url = ..., extension = "名前", ... } と書くとサイト別の拡張（rss/extensions.py）
+    feeds に { url = ..., item = ..., ... } と書くと HTML 取り込み（rss/sources/htmlsource.py）、
+    { url = ..., extension = "名前", ... } と書くとサイト別の拡張（rss/sources/extensions.py）
 
     [news.world]                # サブジャンル（Discord ではフォーラムのタグ）
     label = "国際"
@@ -27,8 +27,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import db
-from . import extensions
+from kawarabanya.core import db
+from kawarabanya.rss.sources import extensions
 
 RESERVED = {"label", "description", "feeds", "priority", "interest", "digest"}
 # 好き嫌い（interest）。書かなければ normal（サブジャンルはジャンルの値を受け継ぐ）
@@ -100,7 +100,7 @@ def load_genres(path: str | Path) -> dict[str, Genre]:
 
     def add(key: str, table: dict, parent: str | None) -> None:
         if not isinstance(table, dict):
-            raise ValueError(f"{path}: [{key}] はテーブルである必要があります（不明なキー?）")  # noqa: TRY004
+            raise ValueError(f"{path}: [{key}] はテーブルである必要があります（不明なキー?）")
         gpath = f"{parent}/{key}" if parent else key
         if "/" in key:
             raise ValueError(f"{path}: ジャンル名に / は使えません: {key}")

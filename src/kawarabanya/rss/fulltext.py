@@ -8,10 +8,10 @@ import logging
 import httpx
 import trafilatura
 
-from ..config import FulltextConfig
-from .fetcher import Fetcher
-from .htmlsource import decode_html, page_title
-from .item import Item
+from kawarabanya.core.config import FulltextConfig
+from kawarabanya.rss.item import Item
+from kawarabanya.rss.sources.fetcher import Fetcher
+from kawarabanya.rss.sources.htmlsource import decode_html, page_title
 
 log = logging.getLogger(__name__)
 

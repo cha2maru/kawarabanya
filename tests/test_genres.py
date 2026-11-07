@@ -1,6 +1,6 @@
 import pytest
 
-from kawarabanya import db
+from kawarabanya.core import db
 from kawarabanya.rss.genres import apply_genres, load_genres
 
 TOML = """
@@ -81,9 +81,9 @@ def test_suggest_subgenres(tmp_path):
 
     import httpx
 
-    from kawarabanya import db
-    from kawarabanya.config import SummarizeConfig
-    from kawarabanya.llm import Summarizer
+    from kawarabanya.core import db
+    from kawarabanya.core.config import SummarizeConfig
+    from kawarabanya.core.llm import Summarizer
     from kawarabanya.rss import suggest
     from kawarabanya.rss.genres import load_genres
 
@@ -146,9 +146,9 @@ def test_merge_subgenres_over_limit(tmp_path, monkeypatch):
 
     import httpx
 
-    from kawarabanya import db
-    from kawarabanya.config import SummarizeConfig
-    from kawarabanya.llm import Summarizer
+    from kawarabanya.core import db
+    from kawarabanya.core.config import SummarizeConfig
+    from kawarabanya.core.llm import Summarizer
     from kawarabanya.rss import suggest
     from kawarabanya.rss.genres import load_genres
 

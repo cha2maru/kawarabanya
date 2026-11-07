@@ -31,22 +31,30 @@ systemd --user: kawarabanya-bot.service
 
 ### 2.1 コードの構成（`src/kawarabanya/`）
 
+依存は一方通行（`cli`・`bot` → `rss` → `core`）。書き方の規約は [docs/CODING.md](docs/CODING.md)。
+
 ```
-config.py  db.py  bot.py  assistant.py  discord_api.py  llm.py   # 共通: 設定・SQLite・常駐 Bot・日本語の依頼の解釈・Discord REST/Webhook・LLM クライアント
+core/       # 共通の土台（上の層を import しない）
+  config.py（設定と .env） db.py（SQLite） llm.py（ローカル LLM のクライアント） discord_api.py（Discord の REST / Webhook）
 rss/        # RSS 機能
-  fetcher.py check.py item.py fulltext.py opml.py genres.py discover.py（RSS の自動検出）
-  htmlsource.py（HTML 取り込み・文字コードの判別） extensions.py（サイト別の拡張） sitemap.py rsshub.py（RSSHub の対応の確認）
-  archive.py（Markdown 保存） pipeline.py（取得〜要約の流れ = run） notify.py（投稿・👍） digest.py（まとめ） suggest.py（サブジャンルの自動作成・統合）
+  genres.py（genres.toml） item.py fulltext.py（本文の取得） archive.py（Markdown 保存）
+  pipeline.py（取得〜要約の流れ = run） suggest.py（サブジャンルの自動作成・統合）
+  notify.py（投稿・👍） digest.py（まとめ） forums.py（ジャンルに合わせたフォーラム・タグの準備）
+  sources/  # 記事の取り込み元
+    fetcher.py check.py（取得と判定） discover.py（RSS の自動検出） htmlsource.py（HTML 取り込み・文字コードの判別）
+    extensions.py（サイト別の拡張） sitemap.py rsshub.py（RSSHub の対応の確認） opml.py
+bot/        # 常駐 Bot
+  client.py（定期実行・メンションへの返事） assistant.py（日本語の依頼をコマンドに直す）
 cli/        # コマンド
   __init__.py（引数の定義と main） common.py（表示の補助・DB/Discord の用意） rss.py（RSS のコマンド） server.py（Discord 管理・bot）
 ```
 
-機能を足すときは、`rss/` と同じように機能ごとのパッケージを作り、コマンドは `cli/` に、Discord 上の対話は `bot.py` に足す。`discord_api.py` のフォーラム構成（ジャンル＝フォーラム）は今は RSS 専用の処理が混ざっている。
+機能を足すときは、`rss/` と同じように機能ごとのパッケージを作り、コマンドは `cli/` に、Discord 上の対話は `bot/` に足す（Bot に頼めることは `bot/assistant.py` の COMMANDS に足す）。
 
 ### 2.2 RSS のないサイト
 RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードとして登録できる（kawarabanya 側には専用の処理を持たない）。**2026-11-07 に試したあと停止・削除した**（使うときは README の手順で起動する）。2026-11-07 時点の版で名前空間は 2,087（日本向けは約 100。Zenn・Qiita・はてな・note はない）。サイト側の変更で動かないルート（例: NHK）や、設定がないと使えないルート（例: GitHub トレンドはトークンが要る）がある。
 
-### 2.3 HTML 取り込みとサイト別の拡張（`rss/htmlsource.py`・`rss/extensions.py`）
+### 2.3 HTML 取り込みとサイト別の拡張（`rss/sources/htmlsource.py`・`rss/sources/extensions.py`）
 - `genres.toml` の `feeds` に `{ url, item, title, link, date, link_pattern }` を書くと、一覧ページから CSS セレクタで記事を取り出し、以降は RSS と同じ処理（本文・保存・判定・要約・投稿）を通す。`feeds.source_type = 'html'`、セレクタは `options.html`。
 - 先行例を調べて決めたこと（2026-11-07）:
   - RSS-Bridge CssSelectorBridge・html2rss・FreshRSS と同じく「記事の塊のセレクタ＋中のタイトル・リンク・日付」。XPath より CSS（クラスの完全一致で壊れやすいという指摘）。
@@ -55,10 +63,10 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
   - 本文は記事ページから trafilatura で取る（RSS-Bridge の content_selector に当たる部分は既存の仕組み）。
   - JSON-LD などからの自動検出（html2rss の AutoSource）は作っていない。
 - 文字コードの指定がない HTML は lxml が latin-1 とみなすので、先に UTF-8 として読む。
-- **サイト別の拡張**（`rss/extensions.py`）: CSS セレクタで取れないサイトは `extensions/<名前>.py` に `parse(content, url, options) -> list[entry]`（省略可で `validate(options)`・`title(content)`）を書き、`feeds` に `extension = "<名前>"` を書く。`feeds.source_type` は拡張の名前、設定は `options[拡張の名前]`。HTML 取り込みは組み込みの拡張 `html` として同じ道を通る。
+- **サイト別の拡張**（`rss/sources/extensions.py`）: CSS セレクタで取れないサイトは `extensions/<名前>.py` に `parse(content, url, options) -> list[entry]`（省略可で `validate(options)`・`title(content)`）を書き、`feeds` に `extension = "<名前>"` を書く。`feeds.source_type` は拡張の名前、設定は `options[拡張の名前]`。HTML 取り込みは組み込みの拡張 `html` として同じ道を通る。
   - 取得は本体が行う（条件付き GET・リダイレクトの追従・失敗の回数と自動無効化を RSS と揃えるため）。拡張の例外と 0 件は、そのフィードの失敗（not_feed）として数え、取り込み全体は止めない。
   - 何度も取得が要るサイトは、拡張が `fetch(fetcher, url, options)` で自分で取得する（条件付き GET はしない）。
-  - 組み込みの拡張 `sitemap`（`rss/sitemap.py`）: サイトマップの URL を lastmod の新しい順に記事にする（目次なら新しい子を 3 個まで）。タイトルは `news:title`、なければ本文を取るときに記事ページの `<title>`。11/07 にアークライト・ホビージャパンで 50 件ずつ取れた（商品一覧などのページも混ざるので `link_pattern` で絞る）。
+  - 組み込みの拡張 `sitemap`（`rss/sources/sitemap.py`）: サイトマップの URL を lastmod の新しい順に記事にする（目次なら新しい子を 3 個まで）。タイトルは `news:title`、なければ本文を取るときに記事ページの `<title>`。11/07 にアークライト・ホビージャパンで 50 件ずつ取れた（商品一覧などのページも混ざるので `link_pattern` で絞る）。
 - **既存の OSS の流用**（2026-11-07 に調べた）: RSSHub（ルート 1,000 以上）・RSS-Bridge（ブリッジ 552）はサーバーごと使う形で、kawarabanya からは普通のフィードとして登録する。`feeds rsshub URL` は RSSHub の radar ルール（ドメイン → パスのパターン → ルート。1,563 ドメイン）で、RSSHub を動かさずに対応を調べる（公式インスタンスの API は費用の都合で制限されているので jsDelivr の配布物を使う）。html2rss-configs（226 件）は日本のサイトが 1 件しかないので見送り。yt-dlp・gallery-dl は動画・画像サイトが要るときに `fetch` の拡張にする。
 - **ボット対策で断られるサイトには、ブラウザを装ってまで取りに行かない**（例: すごろくやは kawarabanya の User-Agent に 403 を返す）。
 
@@ -111,7 +119,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 - run の後に続けて実行する（要約サーバーを run と取り合わないため）。
 - 投稿したメッセージの ID を `digests` に残し、同じ Webhook で書き換え（`--update`、最後のまとめ）・削除（`--delete`、最後のまとめか `--day` の日のすべて。記録も消す）ができる。まとめの投稿先を別のチャンネルに替えると、それより前のまとめは書き換え・削除できない（Webhook は自分が投稿したメッセージしか操作できない）。
 
-### 3.6 Discord からの依頼（`assistant.py`）
+### 3.6 Discord からの依頼（`bot/assistant.py`）
 - Bot へのメンション（Bot 本人か Bot のロール）を日本語の依頼として受ける。Discord で「@RSSBOT」と打つと同じ名前の Bot のロールが選ばれることがあり、ロールへのメンションは Message Content Intent がないと本文が空で届くので、この Intent を使う（Developer Portal でもオンにする）。使えるのはサーバーの持ち主だけ。
 - ローカル LLM に、コマンドの一覧（`assistant.COMMANDS`）・ジャンルの一覧を渡し、JSON Schema の文法制約で「コマンド 1 つと引数（genre / feed / level）」だけを答えさせる（1 件 2〜4 秒）。フィード名の一覧は渡さない（104 件分の読み込みが重い）。サイト名からフィードを探すのと、URL を依頼の文から取り出すのはコードで行う（LLM は長い URL を書き間違える）。
 - 変更するコマンド（サイトの追加・削除、好き嫌い、取り込み、まとめ）は、Bot が「実行 / やめる」のボタンで確認してから実行する。見るだけのもの（状態・一覧・興味の傾向）はすぐ返す。実行は定期処理と同じく別プロセスで、ロックで 1 つずつ行い、出力（1,800 字まで）を返事に書く。

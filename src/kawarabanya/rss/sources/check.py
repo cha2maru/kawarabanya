@@ -16,10 +16,10 @@ from urllib.parse import urlsplit
 import feedparser
 import httpx
 
-from .. import db
-from ..config import GeneralConfig
-from . import extensions
-from .fetcher import Fetcher
+from kawarabanya.core import db
+from kawarabanya.core.config import GeneralConfig
+from kawarabanya.rss.sources import extensions
+from kawarabanya.rss.sources.fetcher import Fetcher
 
 PERMANENT_REDIRECTS = {301, 308}
 

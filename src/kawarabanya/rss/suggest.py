@@ -19,12 +19,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from .. import db
-from ..discord_api import MAX_TAGS
-from ..llm import Summarizer
-from . import archive
-from .genres import Genre, section_re, set_key, top_genre
-from .pipeline import MATCH_P
+from kawarabanya.core import db
+from kawarabanya.core.llm import Summarizer
+from kawarabanya.rss import archive
+from kawarabanya.rss.forums import MAX_TAGS
+from kawarabanya.rss.genres import Genre, section_re, set_key, top_genre
+from kawarabanya.rss.pipeline import MATCH_P
 
 # この件数以上の記事がまとまるときだけ作る
 MIN_ITEMS = 3

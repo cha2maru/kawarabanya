@@ -8,7 +8,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import db
+from kawarabanya.core import db
 
 
 @dataclass

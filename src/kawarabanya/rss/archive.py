@@ -8,7 +8,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from .item import Item
+from kawarabanya.rss.item import Item
 
 UNSAFE = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]+')
 SPACES = re.compile(r"[\s_]+")

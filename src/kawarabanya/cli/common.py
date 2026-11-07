@@ -7,10 +7,10 @@ import sqlite3
 import unicodedata
 from pathlib import Path
 
-from .. import db, discord_api
-from ..config import Config
-from ..rss import genres
-from ..rss.check import Status
+from kawarabanya.core import db, discord_api
+from kawarabanya.core.config import Config
+from kawarabanya.rss import genres
+from kawarabanya.rss.sources.check import Status
 
 STATUS_MARK = {
     Status.OK: "OK  ",

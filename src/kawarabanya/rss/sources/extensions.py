@@ -5,7 +5,7 @@
 
     { url = "https://example.com/news", extension = "<名前>", name = "表示名", ...拡張の設定 }
 
-と書くと使う。extension を省くと組み込みの html（CSS セレクタ。rss/htmlsource.py）。
+と書くと使う。extension を省くと組み込みの html（CSS セレクタ。rss/sources/htmlsource.py）。
 
 拡張のファイルに書くもの:
 
@@ -21,7 +21,7 @@
 
     async def fetch(fetcher, url: str, options: dict) -> list[dict]:   # fetcher.get(url) で取得する
 
-を書く（条件付き GET はしない）。組み込みの sitemap（rss/sitemap.py）がこの形。
+を書く（条件付き GET はしない）。組み込みの sitemap（rss/sources/sitemap.py）がこの形。
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import sitemap
-from .htmlsource import HtmlSource, extract, page_title
+from kawarabanya.rss.sources import sitemap
+from kawarabanya.rss.sources.htmlsource import HtmlSource, extract, page_title
 
 # 拡張を置くディレクトリ。CLI が [general] extensions_dir で上書きする
 DIR = Path("extensions")
@@ -73,7 +73,7 @@ def get(name: str) -> Extension:
     spec.loader.exec_module(module)
     parse, fetch = getattr(module, "parse", None), getattr(module, "fetch", None)
     if not callable(parse) and not callable(fetch):
-        raise ValueError(f"{path} に parse(content, url, options) か fetch(fetcher, url, options) がありません")  # noqa: TRY004
+        raise ValueError(f"{path} に parse(content, url, options) か fetch(fetcher, url, options) がありません")
     ext = Extension(name, parse, getattr(module, "validate", None), getattr(module, "title", page_title), fetch)
     _loaded[name] = ext
     return ext

@@ -13,8 +13,8 @@ from pathlib import Path
 
 import httpx
 
-from .. import db
-from ..discord_api import (
+from kawarabanya.core import db
+from kawarabanya.core.discord_api import (
     UNCATEGORIZED,
     DiscordClient,
     DiscordError,
@@ -22,11 +22,11 @@ from ..discord_api import (
     post_url,
     send_webhook,
 )
-from ..llm import Summarizer
-from . import archive
-from .genres import Genre, interest_of
-from .item import is_recent
-from .pipeline import classify_item
+from kawarabanya.core.llm import Summarizer
+from kawarabanya.rss import archive
+from kawarabanya.rss.genres import Genre, interest_of
+from kawarabanya.rss.item import is_recent
+from kawarabanya.rss.pipeline import classify_item
 
 log = logging.getLogger(__name__)
 

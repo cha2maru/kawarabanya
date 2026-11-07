@@ -15,15 +15,15 @@ from datetime import datetime, time, timedelta
 
 import httpx
 
-from ..discord_api import (
+from kawarabanya.core.discord_api import (
     DIGEST_KEY,
     delete_webhook_message,
     edit_webhook_message,
     post_url,
     send_webhook,
 )
-from ..llm import Summarizer
-from .genres import interest_of, top_genre
+from kawarabanya.core.llm import Summarizer
+from kawarabanya.rss.genres import interest_of, top_genre
 
 MAX_CONTENT = 2000
 # 傾向を書かせる見出しの上限（LLM の入力 8,192 トークンに収めるため）
@@ -109,7 +109,7 @@ async def post_digest(
     投稿する記事がない・送り先がない・（更新なら）未投稿のときは None。
     """
     channel = _channel(conn)
-    last, before = (_history(conn, genre) + [None, None])[:2]
+    last, before = [*_history(conn, genre), None, None][:2]
     if channel is None or (update and last is None):
         return None
     if not update and due_after and last and datetime.fromisoformat(last["created_at"]) >= due_after:

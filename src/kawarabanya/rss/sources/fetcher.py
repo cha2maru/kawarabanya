@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from ..config import GeneralConfig
+from kawarabanya.core.config import GeneralConfig
 
 
 class Fetcher:

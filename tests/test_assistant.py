@@ -1,4 +1,5 @@
-from kawarabanya import assistant, db
+from kawarabanya.bot import assistant
+from kawarabanya.core import db
 from kawarabanya.rss.genres import load_genres
 
 

@@ -5,9 +5,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .. import discord_api
-from ..config import Config
-from .common import _discord_client, _fit, _load_genres, _open_db
+from kawarabanya.cli.common import _discord_client, _fit, _load_genres, _open_db
+from kawarabanya.core import discord_api
+from kawarabanya.core.config import Config
+from kawarabanya.rss import forums
 
 
 def cmd_discord_invite_url(cfg: Config, args: argparse.Namespace) -> int:
@@ -36,8 +37,8 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
     if only is None and genre_defs:
         # genres.toml があれば、そこで定義したトップレベルのジャンルだけフォーラムにする
         only = [g.path for g in genre_defs.values() if not g.is_sub]
-    by_cat = discord_api.feeds_by_category(conn, only)
-    plan = discord_api.make_plan(client, guild, by_cat, cfg.discord.parent_category, genre_defs)
+    by_cat = forums.feeds_by_category(conn, only)
+    plan = forums.make_plan(client, guild, by_cat, cfg.discord.parent_category, genre_defs)
 
     print(f"サーバー: {guild['name']}")
     parent_state = "既存" if plan.parent_id else "新規作成"
@@ -60,7 +61,7 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
         print(f"  {state:<10} 💬{pc.name:<16} ← {pc.category}（{len(pc.feeds)} フィード）")
         print(f"             タグ: {tags or '-'}")
         if pc.tag_overflow:
-            print(f"             ※タグの上限 {discord_api.MAX_TAGS} 個を超える {pc.tag_overflow} フィードはタグなしで投稿します")
+            print(f"             ※タグの上限 {forums.MAX_TAGS} 個を超える {pc.tag_overflow} フィードはタグなしで投稿します")
     digest_ch = None
     if cfg.digest.enabled:
         digest_ch = discord_api.find_text_channel(client, guild["id"], cfg.digest.channel)
@@ -71,7 +72,7 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
     if not args.apply:
         print("\n--apply を付けると作成します（既存のフォーラムはタグと Webhook だけ用意します。--prune で未使用を削除）")
         return 0
-    created = discord_api.apply_plan(client, conn, plan, cfg.discord.webhook_name, nsfw=cfg.discord.nsfw)
+    created = forums.apply_plan(client, conn, plan, cfg.discord.webhook_name, nsfw=cfg.discord.nsfw)
     if args.prune:
         for c in plan.orphans:
             client.request("DELETE", f"/channels/{c['id']}")
@@ -102,8 +103,8 @@ def cmd_discord_retag(cfg: Config, args: argparse.Namespace) -> int:
     """discord retag: 投稿済みの記事のタグを、サブジャンルに付け直す（未判定なら LLM で判定）。"""
     import asyncio
 
-    from ..llm import Summarizer
-    from ..rss.notify import retag_posts
+    from kawarabanya.core.llm import Summarizer
+    from kawarabanya.rss.notify import retag_posts
 
     conn = _open_db(cfg, args)
     client = _discord_client(cfg)
@@ -119,7 +120,7 @@ def cmd_discord_retag(cfg: Config, args: argparse.Namespace) -> int:
 
 def cmd_discord_delete_duplicates(cfg: Config, args: argparse.Namespace) -> int:
     """discord delete-duplicates: 重複と判定した記事のフォーラムの投稿を消す（--apply なしは一覧だけ）。"""
-    from ..rss.notify import delete_duplicate_posts
+    from kawarabanya.rss.notify import delete_duplicate_posts
 
     rows = delete_duplicate_posts(_open_db(cfg, args), _discord_client(cfg), apply=args.apply)
     for r in rows:
@@ -144,7 +145,7 @@ def cmd_discord_test(cfg: Config, args: argparse.Namespace) -> int:
 
 def cmd_bot(cfg: Config, args: argparse.Namespace) -> int:
     """bot: 常駐 Bot を起動する。子プロセスにも同じ --config / --db を渡す。"""
-    from ..bot import run_bot  # discord.py の読み込みは bot のときだけ
+    from kawarabanya.bot.client import run_bot
 
     config_args = [*(["--config", str(args.config)] if args.config else []), *(["--db", args.db] if args.db else [])]
     run_bot(cfg, config_args)

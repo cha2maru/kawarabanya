@@ -1,3 +1,3 @@
-from . import main
+from kawarabanya import main
 
 main()

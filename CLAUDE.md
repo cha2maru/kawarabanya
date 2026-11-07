@@ -9,4 +9,5 @@
   - DESIGN.md: 構成・データ（テーブルや列、items.status）・処理の流れ・技術選定・方針が変わったとき、実測値を取り直したとき、未決事項が決まったとき（§7 から消して本文に反映する）。
   - 内部だけのリファクタリングやバグ修正で、上のどれにも当たらなければ更新しない。
 - 購読データ（`feedly.opml`・`genres.toml`）と秘密情報（`.env`）はコミットしない。
-- 変更したら `uv run pytest` と `uvx ruff check src tests` を通す。
+- コードは [docs/CODING.md](docs/CODING.md) の規約に沿って書く（構成・依存の向き・import・docstring など）。
+- 変更したら `uv run pytest` と `uvx ruff check src tests` を通す（ruff の規則は pyproject.toml）。

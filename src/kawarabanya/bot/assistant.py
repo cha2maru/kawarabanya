@@ -11,9 +11,9 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 
-from . import db
-from .llm import Summarizer
-from .rss.genres import INTEREST_LEVELS, Genre
+from kawarabanya.core import db
+from kawarabanya.core.llm import Summarizer
+from kawarabanya.rss.genres import INTEREST_LEVELS, Genre
 
 # コマンド名 → (説明, 実行前に確認するか)
 COMMANDS: dict[str, tuple[str, bool]] = {

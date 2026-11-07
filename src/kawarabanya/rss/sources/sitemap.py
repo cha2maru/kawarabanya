@@ -16,8 +16,8 @@ from datetime import datetime
 
 import lxml.etree
 
-from .fetcher import Fetcher
-from .htmlsource import MAX_ITEMS, normalize_url
+from kawarabanya.rss.sources.fetcher import Fetcher
+from kawarabanya.rss.sources.htmlsource import MAX_ITEMS, normalize_url
 
 OPTIONS = {"link_pattern", "children"}
 

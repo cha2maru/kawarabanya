@@ -11,7 +11,7 @@ from typing import Self
 
 import httpx
 
-from .config import SummarizeConfig
+from kawarabanya.core.config import SummarizeConfig
 
 log = logging.getLogger(__name__)
 
@@ -240,7 +240,7 @@ class Summarizer:
         (選んだ番号, その確率) を返す。「どれにも当てはまらない」を選んだら番号は None。判定に失敗したら None。
         """
         letters = CHOICE_LETTERS[: len(options)] + NONE_LETTER
-        lines = [f"{c}: {name}" + (f"（{desc}）" if desc else "") for c, (name, desc) in zip(letters, options)]
+        lines = [f"{c}: {name}" + (f"（{desc}）" if desc else "") for c, (name, desc) in zip(letters, options, strict=False)]
         lines.append(f"{NONE_LETTER}: どれにも当てはまらない")
         system = CLASSIFY_PROMPT.format(choices="\n".join(lines), letters="・".join(letters))
         probs = await self._choose(system, _headline(title, markdown), letters, f"サブジャンルの判定（{title}）")

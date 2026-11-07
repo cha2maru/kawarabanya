@@ -8,10 +8,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from .. import discord_api
-from ..config import load_config, load_dotenv
-from ..rss import extensions
-from .rss import (
+from kawarabanya.cli.rss import (
     _cmd_set_enabled,
     cmd_check,
     cmd_digest,
@@ -33,7 +30,7 @@ from .rss import (
     cmd_status,
     cmd_summarize,
 )
-from .server import (
+from kawarabanya.cli.server import (
     cmd_bot,
     cmd_discord_channels,
     cmd_discord_delete_duplicates,
@@ -43,6 +40,9 @@ from .server import (
     cmd_discord_setup,
     cmd_discord_test,
 )
+from kawarabanya.core import discord_api
+from kawarabanya.core.config import load_config, load_dotenv
+from kawarabanya.rss.sources import extensions
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from kawarabanya import db
-from kawarabanya.rss import opml
+from kawarabanya.core import db
+from kawarabanya.rss.sources import opml
 
 NESTED = """<?xml version="1.0" encoding="UTF-8"?>
 <opml version="1.0">

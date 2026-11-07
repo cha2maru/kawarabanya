@@ -24,3 +24,38 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.2.0",
 ]
+
+# コーディング規約（docs/CODING.md）を ruff で確かめる: uvx ruff check src tests
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle（PEP 8）
+    "F",        # pyflakes（未使用・未定義）
+    "I",        # import の並び（isort）
+    "UP",       # 新しい書き方（list[str]・X | None など。PEP 585 / 604）
+    "B",        # bugbear（よくある不具合）
+    "SIM",      # 簡単にできる書き方
+    "RUF",      # ruff 独自
+    "BLE",      # 何でも捕まえる except（使うときは noqa と理由を書く）
+    "TID252",   # 相対 import を禁止（絶対 import にそろえる）
+    "N",        # 名前の付け方（PEP 8）
+    "D2", "D3", "D4",  # docstring の書き方（PEP 257。下の ignore を除く）
+]
+ignore = [
+    "E501",     # 行の長さは line-length（120）で十分。日本語のコメント・文字列で超えるのは許す
+    "RUF001", "RUF002", "RUF003",  # 全角の括弧・コロンなど（日本語の文では普通に使う）
+    "D203", "D213",  # D211・D212 と両立しない
+    "D400", "D415",  # 1 行目の末尾は「。」（英語の「.」の規則は使わない）
+    "D401", "D403",  # 命令形・大文字で始める（英語の規則）
+    "D204",     # クラスの docstring の直後に空行を入れない（dataclass のフィールドを続けて書く）
+    "SIM108",   # 三項演算子への書き換えは読みやすいときだけ
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D"]  # テストの docstring は任意
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"

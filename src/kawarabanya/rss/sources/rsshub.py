@@ -79,7 +79,7 @@ def match(url: str, rules: dict) -> list[Route]:
             continue
         sub = host[: -len(domain)].rstrip(".") or "."
         for key, rs in subs.items():
-            if key == "_name" or key not in (sub, "*") and not (key == "." and sub == "www"):
+            if key == "_name" or (key not in (sub, "*") and not (key == "." and sub == "www")):
                 continue
             for r in rs:
                 target = r.get("target") or ""
