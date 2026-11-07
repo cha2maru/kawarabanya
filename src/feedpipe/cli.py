@@ -332,11 +332,15 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
         if pc.tag_overflow:
             print(f"             ※タグの上限 {discord_api.MAX_TAGS} 個を超える {pc.tag_overflow} フィードはタグなしで投稿します")
     for c in plan.orphans:
-        print(f"  未使用      💬{c['name']}（どのジャンルにも対応しません。不要なら Discord で削除してください）")
+        print(f"  {'削除' if args.prune else '未使用'}      💬{c['name']}（どのジャンルにも対応しません）")
     if not args.apply:
-        print("\n--apply を付けると作成します（既存のフォーラムはタグと Webhook だけ用意します）")
+        print("\n--apply を付けると作成します（既存のフォーラムはタグと Webhook だけ用意します。--prune で未使用を削除）")
         return 0
     created = discord_api.apply_plan(client, conn, plan, cfg.discord.webhook_name, nsfw=cfg.discord.nsfw)
+    if args.prune:
+        for c in plan.orphans:
+            client.request("DELETE", f"/channels/{c['id']}")
+        print(f"未使用のフォーラムを {len(plan.orphans)} 件削除しました")
     if genre_defs and not args.categories:
         # ジャンルに対応しなくなった送り先を消す（未割り当てのフィードが古いフォーラムに投稿されないように）
         names = [pc.category for pc in plan.channels]
@@ -432,7 +436,7 @@ def cmd_genres_list(cfg: Config, args: argparse.Namespace) -> int:
 def cmd_genres_apply(cfg: Config, args: argparse.Namespace) -> int:
     defs = _require_genres(cfg)
     conn = _open_db(cfg, args)
-    r = genres.apply_genres(conn, defs, dry_run=args.dry_run)
+    r = genres.apply_genres(conn, defs, dry_run=args.dry_run, disable_unassigned=args.disable_unassigned)
     for feed, new in r.moved:
         print(f"  移動 {feed.id:>4} {_fit(feed.title or feed.url, 36)} {feed.category or '-'} → {new}")
     for f in r.unassigned:
@@ -445,8 +449,10 @@ def cmd_genres_apply(cfg: Config, args: argparse.Namespace) -> int:
         print("--dry-run のため DB は更新していません")
     elif r.moved:
         print("Discord のフォーラム・タグも更新するには: feedpipe discord setup --apply")
-    if r.unassigned:
-        print("未割り当てのフィードの記事は投稿されません（genres.toml のどこかに URL を書いてください）")
+    if r.unassigned and args.disable_unassigned and not args.dry_run:
+        print(f"未割り当ての {len(r.unassigned)} 件は無効にしました（feeds enable で戻せます）")
+    elif r.unassigned:
+        print("未割り当てのフィードの記事は投稿されません（--disable-unassigned で取得も止められます）")
     return 0
 
 
@@ -534,6 +540,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_genres_list)
     s = gs.add_parser("apply", help="genres.toml の割り当てをフィードに反映する")
     s.add_argument("--dry-run", action="store_true", help="DB を更新しない")
+    s.add_argument("--disable-unassigned", action="store_true", help="genres.toml にないフィードを無効にする")
     s.set_defaults(func=cmd_genres_apply)
 
     dc = sub.add_parser("discord", help="Discord の準備（Bot を使う）").add_subparsers(dest="discord_command", required=True)
@@ -544,6 +551,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = dc.add_parser("setup", help="カテゴリごとのフォーラムとタグ・Webhook を作る（既定は確認だけ）")
     s.add_argument("--categories", nargs="+", help="対象のカテゴリ（既定: 有効なフィードの全カテゴリ）")
     s.add_argument("--apply", action="store_true", help="実際に作成する")
+    s.add_argument("--prune", action="store_true", help="--apply と一緒に使い、ジャンルに対応しないフォーラムを削除する（投稿も消える）")
     s.set_defaults(func=cmd_discord_setup)
     s = dc.add_parser("channels", help="登録済みのチャンネル")
     s.set_defaults(func=cmd_discord_channels)

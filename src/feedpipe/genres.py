@@ -88,11 +88,18 @@ class ApplyResult:
     unknown_urls: list[str] = field(default_factory=list)  # genres.toml にあるが未登録の URL
 
 
-def apply_genres(conn: sqlite3.Connection, genres: dict[str, Genre], *, dry_run: bool = False) -> ApplyResult:
+def apply_genres(
+    conn: sqlite3.Connection,
+    genres: dict[str, Genre],
+    *,
+    dry_run: bool = False,
+    disable_unassigned: bool = False,
+) -> ApplyResult:
     """genres.toml の割り当てをフィードの category に反映する。
 
     URL は現在の URL・取り込み時の URL のどちらで書いてもよい。
-    書かれていないフィードの category は変えない（unassigned として報告する）。
+    書かれていない有効なフィードは category を空にし（古い名前のフォーラムに投稿されないように）、
+    disable_unassigned=True なら無効にする。
     """
     result = ApplyResult()
     assigned: set[int] = set()
@@ -109,4 +116,10 @@ def apply_genres(conn: sqlite3.Connection, genres: dict[str, Genre], *, dry_run:
                     if not dry_run:
                         conn.execute("UPDATE feeds SET category = ? WHERE id = ?", (g.path, feed.id))
     result.unassigned = [f for f in db.list_feeds(conn, enabled=True) if f.id not in assigned]
+    if not dry_run:
+        with conn:
+            for f in result.unassigned:
+                conn.execute("UPDATE feeds SET category = NULL WHERE id = ?", (f.id,))
+                if disable_unassigned:
+                    db.set_enabled(conn, f.id, False, "no_genre")
     return result

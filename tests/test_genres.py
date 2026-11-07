@@ -60,3 +60,7 @@ def test_apply(tmp_path):
     assert [f.id for f in r.unassigned] == [x]
     assert r.unknown_urls == ["https://unknown.example/rss"]
     assert db.get_feed(conn, b).category == "news/world"
+    assert db.get_feed(conn, x).category is None and db.get_feed(conn, x).enabled
+
+    apply_genres(conn, load_genres(write(tmp_path, TOML)), disable_unassigned=True)
+    assert db.get_feed(conn, x).disabled_reason == "no_genre"
