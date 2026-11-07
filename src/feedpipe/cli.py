@@ -14,9 +14,9 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import db, opml
+from . import db, discord_api, opml
 from .check import CheckResult, Status, apply_results, check_feeds
-from .config import Config, load_config
+from .config import Config, load_config, load_dotenv
 from .run import FeedReport, run_feeds
 
 STATUS_MARK = {
@@ -250,6 +250,73 @@ def _cmd_set_enabled(cfg: Config, args: argparse.Namespace, enabled: bool) -> in
     return rc
 
 
+# --- discord ---------------------------------------------------------------
+
+TOKEN_HELP = """Bot のトークンが設定されていません。
+  1. https://discord.com/developers/applications で New Application → Bot → Reset Token
+  2. .env に DISCORD_BOT_TOKEN=<トークン> を書く
+  3. feedpipe discord invite-url で表示される URL から、Bot をサーバーに招待する"""
+
+
+def _discord_client(cfg: Config) -> discord_api.DiscordClient:
+    token = cfg.discord.token
+    if not token:
+        raise ValueError(TOKEN_HELP)
+    return discord_api.DiscordClient(token)
+
+
+def cmd_discord_invite_url(cfg: Config, args: argparse.Namespace) -> int:
+    client = _discord_client(cfg)
+    print(discord_api.invite_url(client.application_id()))
+    print("権限: チャンネルを見る / メッセージを送信 / チャンネルの管理 / Webhook の管理", file=sys.stderr)
+    return 0
+
+
+def cmd_discord_guilds(cfg: Config, args: argparse.Namespace) -> int:
+    for g in _discord_client(cfg).guilds():
+        print(f"{g['id']}  {g['name']}")
+    return 0
+
+
+def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
+    conn = _open_db(cfg, args)
+    client = _discord_client(cfg)
+    guild = discord_api.resolve_guild(client, cfg.discord.guild_id)
+    categories = args.categories or discord_api.feed_categories(conn)
+    plan = discord_api.make_plan(client, guild, categories, cfg.discord.parent_category)
+
+    print(f"サーバー: {guild['name']}")
+    parent_state = "既存" if plan.parent_id else "新規作成"
+    print(f"カテゴリ: {plan.parent_name}（{parent_state}）")
+    for pc in plan.channels:
+        print(f"  {'既存' if pc.exists else '作成'}  #{pc.name:<20} ← {pc.category}")
+    if not args.apply:
+        print("\n--apply を付けると作成します（既存のチャンネルは Webhook だけ用意します）")
+        return 0
+    created = discord_api.apply_plan(client, conn, plan, cfg.discord.webhook_name)
+    print(f"\nチャンネルを {len(created)} 件作成し、{len(plan.channels)} 件の Webhook を登録しました")
+    return 0
+
+
+def cmd_discord_channels(cfg: Config, args: argparse.Namespace) -> int:
+    conn = _open_db(cfg, args)
+    rows = conn.execute("SELECT category, channel_name, channel_id FROM discord_channels ORDER BY category")
+    for r in rows:
+        print(f"{_fit(r['category'], 16)} #{r['channel_name']}  ({r['channel_id']})")
+    return 0
+
+
+def cmd_discord_test(cfg: Config, args: argparse.Namespace) -> int:
+    conn = _open_db(cfg, args)
+    row = conn.execute("SELECT webhook_url, channel_name FROM discord_channels WHERE category = ?", (args.category,)).fetchone()
+    if row is None:
+        print(f"{args.category}: チャンネルが未登録です（feedpipe discord setup --apply）", file=sys.stderr)
+        return 1
+    discord_api.send_webhook(row["webhook_url"], {"content": args.message})
+    print(f"#{row['channel_name']} に送信しました")
+    return 0
+
+
 # --- parser ----------------------------------------------------------------
 
 
@@ -317,6 +384,22 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("ids", type=int, nargs="+")
     s.set_defaults(func=lambda c, a: _cmd_set_enabled(c, a, False))
 
+    dc = sub.add_parser("discord", help="Discord の準備（Bot を使う）").add_subparsers(dest="discord_command", required=True)
+    s = dc.add_parser("invite-url", help="Bot をサーバーに招待する URL を表示")
+    s.set_defaults(func=cmd_discord_invite_url)
+    s = dc.add_parser("guilds", help="Bot が参加しているサーバーの一覧")
+    s.set_defaults(func=cmd_discord_guilds)
+    s = dc.add_parser("setup", help="カテゴリごとのチャンネルと Webhook を作る（既定は確認だけ）")
+    s.add_argument("--categories", nargs="+", help="対象のカテゴリ（既定: 有効なフィードの全カテゴリ）")
+    s.add_argument("--apply", action="store_true", help="実際に作成する")
+    s.set_defaults(func=cmd_discord_setup)
+    s = dc.add_parser("channels", help="登録済みのチャンネル")
+    s.set_defaults(func=cmd_discord_channels)
+    s = dc.add_parser("test", help="カテゴリのチャンネルにテスト送信")
+    s.add_argument("category")
+    s.add_argument("message", nargs="?", default="feedpipe からのテスト送信です")
+    s.set_defaults(func=cmd_discord_test)
+
     return p
 
 
@@ -330,9 +413,10 @@ def main(argv: list[str] | None = None) -> int:
     logging.getLogger("trafilatura").setLevel(logging.INFO if args.verbose else logging.CRITICAL)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     try:
+        load_dotenv()
         cfg = load_config(args.config)
         return args.func(cfg, args)
-    except (OSError, ValueError, ET.ParseError) as e:
+    except (OSError, ValueError, ET.ParseError, discord_api.DiscordError) as e:
         print(f"エラー: {e}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

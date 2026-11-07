@@ -49,6 +49,16 @@ CREATE TABLE IF NOT EXISTS items (
     error TEXT,
     UNIQUE (feed_id, key)
 );
+
+-- feedpipe のカテゴリ → Discord のチャンネルと Webhook
+CREATE TABLE IF NOT EXISTS discord_channels (
+    category TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    channel_name TEXT NOT NULL,
+    webhook_url TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 

@@ -2,11 +2,28 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
+DEFAULT_ENV_PATH = Path(".env")
+
+
+def load_dotenv(path: Path = DEFAULT_ENV_PATH) -> None:
+    """KEY=VALUE 形式の .env を読み、未設定の環境変数だけ設定する。"""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip().removeprefix("export ").strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
 
 
 @dataclass
@@ -32,9 +49,24 @@ class FulltextConfig:
 
 
 @dataclass
+class DiscordConfig:
+    # Bot が参加しているサーバーが 1 つだけなら省略できる
+    guild_id: str | None = None
+    # feedpipe のチャンネルをまとめる Discord のカテゴリ名
+    parent_category: str = "feedpipe"
+    webhook_name: str = "feedpipe"
+    token_env: str = "DISCORD_BOT_TOKEN"
+
+    @property
+    def token(self) -> str | None:
+        return os.environ.get(self.token_env) or None
+
+
+@dataclass
 class Config:
     general: GeneralConfig = field(default_factory=GeneralConfig)
     fulltext: FulltextConfig = field(default_factory=FulltextConfig)
+    discord: DiscordConfig = field(default_factory=DiscordConfig)
     path: Path | None = None
 
 
@@ -55,5 +87,6 @@ def load_config(path: Path | None = None) -> Config:
     return Config(
         general=_section(GeneralConfig, raw.get("general", {}), "general", path),
         fulltext=_section(FulltextConfig, raw.get("fulltext", {}), "fulltext", path),
+        discord=_section(DiscordConfig, raw.get("discord", {}), "discord", path),
         path=path,
     )
