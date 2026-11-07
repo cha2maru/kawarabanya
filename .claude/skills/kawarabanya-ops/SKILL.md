@@ -30,5 +30,5 @@ description: kawarabanya を CLI で操作する（サイトの追加・削除�
 - **先に見るだけの実行をする**: `--dry-run` や `--apply` なしのあるコマンドは、まずそれで結果を見せてから本番を実行する（`genres apply`・`genres suggest`・`discord setup`・`discord delete-duplicates`・`notify`・`digest`）。
 - **取り消せない操作は利用者に実行してもらう**: `discord setup --apply --prune`・`discord delete-duplicates --apply`・`digest --delete`。何が消えるかを見せ、`! uv run kawarabanya ...` の形でコマンドを示す。
 - **Discord への投稿**（`run`・`notify`・`digest`）は利用者の Discord に出る。頼まれたときだけ実行する。
-- **genres.toml は Bot も書き換える**（サブジャンルの自動作成・Discord からの依頼）。手で直す前に `git diff` ではなく中身を読み直し、直したら `genres list` で読めることを確かめる（壊れると Bot の定期処理が止まる）。
+- **genres.toml は Bot も書き換える**（サブジャンルの自動作成・Discord からの依頼）。手で直す前に今の中身を読み直し（git 管理外なので差分では分からない）、直したら `genres list` で読めることを確かめる（壊れると Bot の定期処理が止まる）。
 - 長い処理（`run`・`import-opml --genre auto`・`genres suggest`）を Bot の定期処理（毎時・6:30・18:30）と同時に動かすと、要約サーバーを取り合って遅くなる。急がなければ Discord から頼む（Bot が順番に実行する）。
