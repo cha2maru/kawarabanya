@@ -1,12 +1,14 @@
-"""Discord の Bot API を使ったチャンネル・Webhook の準備。"""
+"""Discord の Bot API を使ったフォーラム・Webhook の準備と、Webhook での投稿。"""
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -17,6 +19,7 @@ log = logging.getLogger(__name__)
 API = "https://discord.com/api/v10"
 GUILD_TEXT = 0
 GUILD_CATEGORY = 4
+GUILD_FORUM = 15
 
 # チャンネル表示・メッセージ送信・チャンネル管理・Webhook 管理
 PERM_VIEW_CHANNEL = 1 << 10
@@ -113,15 +116,42 @@ def channel_name(category: str | None) -> str:
     return name[:100] or UNCATEGORIZED
 
 
+MAX_TAGS = 20  # フォーラムに付けられるタグの上限
+MAX_TAG_CHARS = 20
+
+
+def tag_name(feed: db.Feed) -> str:
+    name = (feed.title or urlsplit(feed.url).hostname or "feed").strip()
+    return name[:MAX_TAG_CHARS]
+
+
 @dataclass
 class PlannedChannel:
     category: str
     name: str
-    channel_id: str | None  # 既存のチャンネルがあればその ID
+    feeds: list[db.Feed]
+    channel_id: str | None = None  # 既存のフォーラムがあればその ID
+    existing_tags: list[dict] = field(default_factory=list)
 
     @property
     def exists(self) -> bool:
         return self.channel_id is not None
+
+    def wanted_tags(self) -> list[str]:
+        """フィード名のタグ（重複除去、上限 20 個）。"""
+        names = list(dict.fromkeys(tag_name(f) for f in self.feeds))
+        return names[:MAX_TAGS]
+
+    def missing_tags(self) -> list[str]:
+        have = {t["name"] for t in self.existing_tags}
+        room = MAX_TAGS - len(have)
+        return [n for n in self.wanted_tags() if n not in have][: max(room, 0)]
+
+    @property
+    def tag_overflow(self) -> int:
+        """タグの上限を超えたためタグなしで投稿されるフィードの数。"""
+        names = {tag_name(f) for f in self.feeds}
+        return max(len(names) - MAX_TAGS, 0)
 
 
 @dataclass
@@ -132,26 +162,37 @@ class Plan:
     channels: list[PlannedChannel]
 
 
-def make_plan(client: DiscordClient, guild: dict, categories: list[str], parent_name: str) -> Plan:
+def make_plan(
+    client: DiscordClient, guild: dict, feeds_by_category: dict[str, list[db.Feed]], parent_name: str
+) -> Plan:
     existing = client.channels(guild["id"])
     parent = next(
         (c for c in existing if c["type"] == GUILD_CATEGORY and c["name"].lower() == parent_name.lower()),
         None,
     )
-    by_name = {
-        c["name"]: c["id"]
+    forums = {
+        c["name"]: c
         for c in existing
-        if c["type"] == GUILD_TEXT and parent and c.get("parent_id") == parent["id"]
+        if c["type"] == GUILD_FORUM and parent and c.get("parent_id") == parent["id"]
     }
-    planned = [
-        PlannedChannel(category=cat, name=(n := channel_name(cat)), channel_id=by_name.get(n))
-        for cat in categories
-    ]
+    planned = []
+    for cat, feeds in feeds_by_category.items():
+        name = channel_name(cat)
+        forum = forums.get(name)
+        planned.append(
+            PlannedChannel(
+                category=cat,
+                name=name,
+                feeds=feeds,
+                channel_id=forum["id"] if forum else None,
+                existing_tags=forum.get("available_tags", []) if forum else [],
+            )
+        )
     return Plan(guild=guild, parent_name=parent_name, parent_id=parent["id"] if parent else None, channels=planned)
 
 
 def apply_plan(client: DiscordClient, conn: sqlite3.Connection, plan: Plan, webhook_name: str) -> list[PlannedChannel]:
-    """不足しているチャンネルと Webhook を作り、カテゴリとの対応を DB に保存する。作成したものを返す。"""
+    """不足しているフォーラム・タグ・Webhook を作り、カテゴリとの対応を DB に保存する。作成したものを返す。"""
     guild_id = plan.guild["id"]
     if plan.parent_id is None:
         plan.parent_id = client.create_channel(guild_id, plan.parent_name, GUILD_CATEGORY)["id"]
@@ -160,33 +201,58 @@ def apply_plan(client: DiscordClient, conn: sqlite3.Connection, plan: Plan, webh
     for pc in plan.channels:
         if not pc.exists:
             ch = client.create_channel(
-                guild_id, pc.name, GUILD_TEXT, parent_id=plan.parent_id, topic=f"feedpipe: {pc.category}"
+                guild_id,
+                pc.name,
+                GUILD_FORUM,
+                parent_id=plan.parent_id,
+                topic=f"feedpipe: {pc.category}",
+                available_tags=[{"name": n} for n in pc.wanted_tags()],
             )
-            pc.channel_id = ch["id"]
+            pc.channel_id, pc.existing_tags = ch["id"], ch.get("available_tags", [])
             created.append(pc)
+        elif missing := pc.missing_tags():
+            # 既存のタグは id 付きで渡さないと消えてしまう
+            ch = client.request(
+                "PATCH",
+                f"/channels/{pc.channel_id}",
+                {"available_tags": [*pc.existing_tags, *({"name": n} for n in missing)]},
+            )
+            pc.existing_tags = ch.get("available_tags", [])
+
+        tag_ids = {t["name"]: t["id"] for t in pc.existing_tags}
+        feed_tags = {str(f.id): tag_ids[n] for f in pc.feeds if (n := tag_name(f)) in tag_ids}
+
         hook = next((w for w in client.webhooks(pc.channel_id) if w.get("name") == webhook_name and w.get("token")), None)
         if hook is None:
             hook = client.create_webhook(pc.channel_id, webhook_name)
         url = f"https://discord.com/api/webhooks/{hook['id']}/{hook['token']}"
         with conn:
             conn.execute(
-                "INSERT INTO discord_channels (category, guild_id, channel_id, channel_name, webhook_url, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)"
+                "INSERT INTO discord_channels"
+                " (category, guild_id, channel_id, channel_name, webhook_url, tags, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(category) DO UPDATE SET guild_id = excluded.guild_id,"
                 " channel_id = excluded.channel_id, channel_name = excluded.channel_name,"
-                " webhook_url = excluded.webhook_url",
-                (pc.category, guild_id, pc.channel_id, pc.name, url, db.now_iso()),
+                " webhook_url = excluded.webhook_url, tags = excluded.tags",
+                (pc.category, guild_id, pc.channel_id, pc.name, url, json.dumps(feed_tags), db.now_iso()),
             )
     return created
 
 
-def feed_categories(conn: sqlite3.Connection) -> list[str]:
-    """有効なフィードのカテゴリ（なしは uncategorized）。"""
-    rows = conn.execute("SELECT DISTINCT COALESCE(category, ?) FROM feeds WHERE enabled = 1 ORDER BY 1", (UNCATEGORIZED,))
-    return [r[0] for r in rows]
+def feeds_by_category(conn: sqlite3.Connection, only: list[str] | None = None) -> dict[str, list[db.Feed]]:
+    """有効なフィードをカテゴリ（なしは uncategorized）ごとにまとめる。"""
+    out: dict[str, list[db.Feed]] = {}
+    for f in db.list_feeds(conn, enabled=True):
+        cat = f.category or UNCATEGORIZED
+        if only is None or cat in only:
+            out.setdefault(cat, []).append(f)
+    for cat in only or []:
+        out.setdefault(cat, [])
+    return dict(sorted(out.items()))
 
 
-def send_webhook(url: str, payload: dict, transport: httpx.BaseTransport | None = None) -> None:
+def send_webhook(url: str, payload: dict, transport: httpx.BaseTransport | None = None) -> dict:
+    """Webhook で投稿し、作成されたメッセージを返す（フォーラムなら channel_id がスレッド ID）。"""
     with httpx.Client(transport=transport, timeout=20) as c:
         for _ in range(5):
             resp = c.post(url, json=payload, params={"wait": "true"})
@@ -195,5 +261,5 @@ def send_webhook(url: str, payload: dict, transport: httpx.BaseTransport | None 
                 continue
             if resp.status_code >= 400:
                 raise DiscordError(f"Webhook 送信に失敗: HTTP {resp.status_code} {resp.text[:200]}")
-            return
+            return resp.json()
     raise DiscordError("Webhook 送信: レート制限が解除されません")

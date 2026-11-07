@@ -37,3 +37,14 @@ uv run feedpipe export-opml out.opml [--all]
 ```sh
 uv run pytest
 ```
+
+### Discord（案A: カテゴリごとのフォーラムに 1 記事 = 1 投稿）
+
+事前に Bot を作り、`.env` に `DISCORD_BOT_TOKEN=...` を書く。フォーラムを使うにはサーバーの「コミュニティ」を有効にしておく必要がある。
+
+```sh
+uv run feedpipe discord invite-url           # Bot の招待 URL
+uv run feedpipe discord setup [--apply]      # カテゴリごとにフォーラム（タグ = フィード名）と Webhook を作る
+uv run feedpipe notify [--dry-run]           # 保存済み・未通知の記事を投稿（run の最後にも自動で実行）
+uv run feedpipe run --no-notify              # 通知しない（次回の run / notify で送られる）
+```

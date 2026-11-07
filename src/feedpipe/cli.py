@@ -14,7 +14,7 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import db, discord_api, opml
+from . import db, discord_api, notify, opml
 from .check import CheckResult, Status, apply_results, check_feeds
 from .config import Config, load_config, load_dotenv
 from .run import FeedReport, run_feeds
@@ -182,7 +182,10 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
         f"\n結果: 保存 {saved} 件 / 記事エラー {errors} 件"
         f"（フィード: 初回 {inited} / 更新なし {unchanged} / 取得失敗 {failed}）"
     )
-    return 1 if errors else 0
+    rc = 1 if errors else 0
+    if not args.no_notify and conn.execute("SELECT 1 FROM discord_channels LIMIT 1").fetchone():
+        rc |= _notify(cfg, conn)
+    return rc
 
 
 # --- feeds -----------------------------------------------------------------
@@ -282,19 +285,28 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
     conn = _open_db(cfg, args)
     client = _discord_client(cfg)
     guild = discord_api.resolve_guild(client, cfg.discord.guild_id)
-    categories = args.categories or discord_api.feed_categories(conn)
-    plan = discord_api.make_plan(client, guild, categories, cfg.discord.parent_category)
+    by_cat = discord_api.feeds_by_category(conn, args.categories)
+    plan = discord_api.make_plan(client, guild, by_cat, cfg.discord.parent_category)
 
     print(f"サーバー: {guild['name']}")
     parent_state = "既存" if plan.parent_id else "新規作成"
     print(f"カテゴリ: {plan.parent_name}（{parent_state}）")
     for pc in plan.channels:
-        print(f"  {'既存' if pc.exists else '作成'}  #{pc.name:<20} ← {pc.category}")
+        if pc.exists:
+            missing = pc.missing_tags()
+            state = f"既存（タグ追加 {len(missing)}）" if missing else "既存"
+        else:
+            state = "作成"
+        tags = "、".join(pc.wanted_tags())
+        print(f"  {state:<10} 💬{pc.name:<16} ← {pc.category}（{len(pc.feeds)} フィード）")
+        print(f"             タグ: {tags or '-'}")
+        if pc.tag_overflow:
+            print(f"             ※タグの上限 {discord_api.MAX_TAGS} 個を超える {pc.tag_overflow} フィードはタグなしで投稿します")
     if not args.apply:
-        print("\n--apply を付けると作成します（既存のチャンネルは Webhook だけ用意します）")
+        print("\n--apply を付けると作成します（既存のフォーラムはタグと Webhook だけ用意します）")
         return 0
     created = discord_api.apply_plan(client, conn, plan, cfg.discord.webhook_name)
-    print(f"\nチャンネルを {len(created)} 件作成し、{len(plan.channels)} 件の Webhook を登録しました")
+    print(f"\nフォーラムを {len(created)} 件作成し、{len(plan.channels)} 件の Webhook を登録しました")
     return 0
 
 
@@ -306,13 +318,35 @@ def cmd_discord_channels(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _notify(cfg: Config, conn: sqlite3.Connection, *, limit: int | None = None, dry_run: bool = False) -> int:
+    stats = notify.notify_pending(conn, limit=limit or cfg.discord.max_posts_per_run, dry_run=dry_run)
+    line = f"通知: 送信 {stats.sent} 件"
+    if stats.failed:
+        line += f" / 失敗 {stats.failed} 件"
+    if stats.remaining:
+        line += f" / 上限のため次回に回す {stats.remaining} 件"
+    if stats.no_channel:
+        line += f" / 送り先未登録 {stats.no_channel} 件（feedpipe discord setup）"
+    print(line)
+    for e in stats.errors:
+        print(f"  ! {e}")
+    return 1 if stats.failed else 0
+
+
+def cmd_notify(cfg: Config, args: argparse.Namespace) -> int:
+    return _notify(cfg, _open_db(cfg, args), limit=args.limit, dry_run=args.dry_run)
+
+
 def cmd_discord_test(cfg: Config, args: argparse.Namespace) -> int:
     conn = _open_db(cfg, args)
     row = conn.execute("SELECT webhook_url, channel_name FROM discord_channels WHERE category = ?", (args.category,)).fetchone()
     if row is None:
         print(f"{args.category}: チャンネルが未登録です（feedpipe discord setup --apply）", file=sys.stderr)
         return 1
-    discord_api.send_webhook(row["webhook_url"], {"content": args.message})
+    # フォーラムへの投稿にはスレッド名が必要
+    discord_api.send_webhook(
+        row["webhook_url"], {"thread_name": "feedpipe テスト", "content": args.message, "username": "feedpipe"}
+    )
     print(f"#{row['channel_name']} に送信しました")
     return 0
 
@@ -352,8 +386,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--backfill", type=int, default=0, metavar="N",
                    help="初回のフィードは既読化に加えて、新しい順に N 件を保存する")
     s.add_argument("--no-fulltext", action="store_true", help="元記事を取りに行かず、フィードの本文だけ使う")
+    s.add_argument("--no-notify", action="store_true", help="Discord に通知しない（次回以降に送られる）")
     s.add_argument("-q", "--quiet", action="store_true", help="結果の集計だけ表示する")
     s.set_defaults(func=cmd_run)
+
+    s = sub.add_parser("notify", help="保存済みで未通知の記事を Discord に投稿する")
+    s.add_argument("--limit", type=int, help="投稿する上限（既定: [discord] max_posts_per_run）")
+    s.add_argument("--dry-run", action="store_true", help="送らずに内容を表示する")
+    s.set_defaults(func=cmd_notify)
 
     feeds = sub.add_parser("feeds", help="フィードの管理").add_subparsers(dest="feeds_command", required=True)
 
@@ -389,7 +429,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_discord_invite_url)
     s = dc.add_parser("guilds", help="Bot が参加しているサーバーの一覧")
     s.set_defaults(func=cmd_discord_guilds)
-    s = dc.add_parser("setup", help="カテゴリごとのチャンネルと Webhook を作る（既定は確認だけ）")
+    s = dc.add_parser("setup", help="カテゴリごとのフォーラムとタグ・Webhook を作る（既定は確認だけ）")
     s.add_argument("--categories", nargs="+", help="対象のカテゴリ（既定: 有効なフィードの全カテゴリ）")
     s.add_argument("--apply", action="store_true", help="実際に作成する")
     s.set_defaults(func=cmd_discord_setup)

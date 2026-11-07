@@ -55,6 +55,8 @@ class DiscordConfig:
     # feedpipe のチャンネルをまとめる Discord のカテゴリ名
     parent_category: str = "feedpipe"
     webhook_name: str = "feedpipe"
+    # 1 回の実行で投稿する上限（超えた分は次回に回す）
+    max_posts_per_run: int = 30
     token_env: str = "DISCORD_BOT_TOKEN"
 
     @property
