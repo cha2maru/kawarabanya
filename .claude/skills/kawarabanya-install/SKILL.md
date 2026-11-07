@@ -1,6 +1,6 @@
 ---
 name: kawarabanya-install
-description: kawarabanya をこのマシンに入れる・動かない環境を直す。「インストールして」「セットアップして」「動かない」「doctor が ❌」と頼まれたとき、またはリポジトリを複製した直後に使う。Discord 側の準備は kawarabanya-discord-setup、日々の操作は kawarabanya-ops。
+description: kawarabanya をこのマシンに入れる・動かない環境を直す。「インストールして」「セットアップして」「clone したけど何すればいい？」「要約のモデルも入れたい」「uv sync でこける」「doctor が ❌」「Bot が起動しない」と頼まれたとき、またはリポジトリを複製した直後に、はっきり言われなくても使う。Discord 側の準備は kawarabanya-discord-setup、日々の操作は kawarabanya-ops。
 ---
 
 # kawarabanya のインストール
@@ -13,6 +13,7 @@ description: kawarabanya をこのマシンに入れる・動かない環境を�
 2. 要約を使うかを利用者に聞く（CPU 8 スレッド・メモリ 6 GB・ディスク 3 GB 程度が要る。なくても取り込み・投稿はできる）。
    - 使う: `scripts/install.sh --llm`（llama.cpp と Qwen3.5-4B 約 2.7 GB をダウンロードする。時間がかかるのでバックグラウンドで実行し、終わりを待つ）
    - 使わない: `scripts/install.sh`
+   - `uv sync` で失敗したら、エラーの最後の数行を読む。ネットワーク（プロキシ・DNS）か、Python 3.12 が取れないことが多い（`uv python install 3.12` を試す）。
 3. 最後に出る `kawarabanya doctor` の結果を、❌ → ⚠️ の順に 1 つずつ直す（下の表）。直したら `uv run kawarabanya doctor` をもう一度実行し、❌ が 0 になるまで続ける。
 4. Discord の準備がまだなら kawarabanya-discord-setup に進む。常駐は Discord の準備のあと `scripts/install.sh --service`。
 
@@ -32,6 +33,7 @@ description: kawarabanya をこのマシンに入れる・動かない環境を�
 
 ## 決まり
 
-- `.env`・`config.toml`・`genres.toml` は利用者のもの。上書き・削除しない（`install.sh` もあるものはそのまま）。トークンの値を表示・ログ・コミットに出さない。
-- `sudo` が要る操作（`apt install libgomp1`・`loginctl enable-linger`）は、コマンドを示して利用者に実行してもらう。
+- `.env`・`config.toml`・`genres.toml` は利用者が書いた設定で、消すと作り直せない（購読リストやトークン）。上書き・削除しない（`install.sh` もあるものはそのまま）。
+- トークンの値を表示・ログ・コミットに出さない（会話や履歴に残ると、Bot を乗っ取れる）。
+- `sudo` が要る操作（`apt install libgomp1`・`loginctl enable-linger`）は、パスワードの入力が要り、システム全体を変えるので、コマンドを示して利用者に実行してもらう。
 - `--service` は既存の `~/.config/systemd/user/kawarabanya-bot.service` を書き換える。動いている Bot があるなら、そのことを伝えてから実行する。
