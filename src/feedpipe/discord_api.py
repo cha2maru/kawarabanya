@@ -131,6 +131,7 @@ class PlannedChannel:
     feeds: list[db.Feed]
     channel_id: str | None = None  # 既存のフォーラムがあればその ID
     existing_tags: list[dict] = field(default_factory=list)
+    nsfw: bool = False  # 既存のフォーラムが年齢制限か
 
     @property
     def exists(self) -> bool:
@@ -185,13 +186,19 @@ def make_plan(
                 feeds=feeds,
                 channel_id=forum["id"] if forum else None,
                 existing_tags=forum.get("available_tags", []) if forum else [],
+                nsfw=bool(forum.get("nsfw")) if forum else False,
             )
         )
     return Plan(guild=guild, parent_name=parent_name, parent_id=parent["id"] if parent else None, channels=planned)
 
 
-def apply_plan(client: DiscordClient, conn: sqlite3.Connection, plan: Plan, webhook_name: str) -> list[PlannedChannel]:
-    """不足しているフォーラム・タグ・Webhook を作り、カテゴリとの対応を DB に保存する。作成したものを返す。"""
+def apply_plan(
+    client: DiscordClient, conn: sqlite3.Connection, plan: Plan, webhook_name: str, *, nsfw: bool = False
+) -> list[PlannedChannel]:
+    """不足しているフォーラム・タグ・Webhook を作り、カテゴリとの対応を DB に保存する。作成したものを返す。
+
+    nsfw=True ならフォーラムを年齢制限チャンネルにする（既存のものも揃える）。
+    """
     guild_id = plan.guild["id"]
     if plan.parent_id is None:
         plan.parent_id = client.create_channel(guild_id, plan.parent_name, GUILD_CATEGORY)["id"]
@@ -206,17 +213,20 @@ def apply_plan(client: DiscordClient, conn: sqlite3.Connection, plan: Plan, webh
                 parent_id=plan.parent_id,
                 topic=f"feedpipe: {pc.category}",
                 available_tags=[{"name": n} for n in pc.wanted_tags()],
+                nsfw=nsfw,
             )
-            pc.channel_id, pc.existing_tags = ch["id"], ch.get("available_tags", [])
+            pc.channel_id, pc.existing_tags, pc.nsfw = ch["id"], ch.get("available_tags", []), nsfw
             created.append(pc)
-        elif missing := pc.missing_tags():
-            # 既存のタグは id 付きで渡さないと消えてしまう
-            ch = client.request(
-                "PATCH",
-                f"/channels/{pc.channel_id}",
-                {"available_tags": [*pc.existing_tags, *({"name": n} for n in missing)]},
-            )
-            pc.existing_tags = ch.get("available_tags", [])
+        else:
+            changes: dict = {}
+            if missing := pc.missing_tags():
+                # 既存のタグは id 付きで渡さないと消えてしまう
+                changes["available_tags"] = [*pc.existing_tags, *({"name": n} for n in missing)]
+            if pc.nsfw != nsfw:
+                changes["nsfw"] = nsfw
+            if changes:
+                ch = client.request("PATCH", f"/channels/{pc.channel_id}", changes)
+                pc.existing_tags, pc.nsfw = ch.get("available_tags", []), bool(ch.get("nsfw"))
 
         tag_ids = {t["name"]: t["id"] for t in pc.existing_tags}
         feed_tags = {str(f.id): tag_ids[n] for f in pc.feeds if (n := tag_name(f)) in tag_ids}

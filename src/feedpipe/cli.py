@@ -290,11 +290,15 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
 
     print(f"サーバー: {guild['name']}")
     parent_state = "既存" if plan.parent_id else "新規作成"
-    print(f"カテゴリ: {plan.parent_name}（{parent_state}）")
+    print(f"カテゴリ: {plan.parent_name}（{parent_state}）  年齢制限: {'オン' if cfg.discord.nsfw else 'オフ'}")
     for pc in plan.channels:
         if pc.exists:
-            missing = pc.missing_tags()
-            state = f"既存（タグ追加 {len(missing)}）" if missing else "既存"
+            todo = []
+            if missing := pc.missing_tags():
+                todo.append(f"タグ追加 {len(missing)}")
+            if pc.nsfw != cfg.discord.nsfw:
+                todo.append("年齢制限" + ("オン" if cfg.discord.nsfw else "オフ"))
+            state = f"既存（{'、'.join(todo)}）" if todo else "既存"
         else:
             state = "作成"
         tags = "、".join(pc.wanted_tags())
@@ -305,7 +309,7 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
     if not args.apply:
         print("\n--apply を付けると作成します（既存のフォーラムはタグと Webhook だけ用意します）")
         return 0
-    created = discord_api.apply_plan(client, conn, plan, cfg.discord.webhook_name)
+    created = discord_api.apply_plan(client, conn, plan, cfg.discord.webhook_name, nsfw=cfg.discord.nsfw)
     print(f"\nフォーラムを {len(created)} 件作成し、{len(plan.channels)} 件の Webhook を登録しました")
     return 0
 

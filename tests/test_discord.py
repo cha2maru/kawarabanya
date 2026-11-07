@@ -52,7 +52,10 @@ class FakeDiscord:
             return httpx.Response(201, json=ch)
         if req.method == "PATCH" and path.startswith("/channels/"):
             ch = next(c for c in self.channels if c["id"] == path.split("/")[2])
-            ch["available_tags"] = [t if "id" in t else {"id": self._id(), **t} for t in body["available_tags"]]
+            if "available_tags" in body:
+                ch["available_tags"] = [t if "id" in t else {"id": self._id(), **t} for t in body["available_tags"]]
+            if "nsfw" in body:
+                ch["nsfw"] = body["nsfw"]
             return httpx.Response(200, json=ch)
         if path.endswith("/webhooks"):
             cid = path.split("/")[2]
@@ -90,14 +93,16 @@ def test_plan_and_apply_forums():
     tech = plan.channels[1]
     assert tech.missing_tags() == ["新フィード"]
 
-    created = apply_plan(client, conn, plan, "feedpipe")
+    created = apply_plan(client, conn, plan, "feedpipe", nsfw=True)
     assert [p.name for p in created] == ["news", "ホビー"]
     hobby = next(c for c in fake.channels if c["name"] == "ホビー")
     assert hobby["type"] == GUILD_FORUM and hobby["parent_id"] == "10"
+    assert hobby["nsfw"] is True
     assert [t["name"] for t in hobby["available_tags"]] == ["ホビー誌"]
     tech_ch = next(c for c in fake.channels if c["id"] == "11")
     assert [t["name"] for t in tech_ch["available_tags"]] == ["既存フィード", "新フィード"]
     assert tech_ch["available_tags"][0]["id"] == "t1"  # 既存のタグを消さない
+    assert tech_ch["nsfw"] is True  # 既存のフォーラムも年齢制限にそろえる
 
     rows = {r["category"]: r for r in conn.execute("SELECT * FROM discord_channels")}
     assert rows["tech"]["webhook_url"] == "https://discord.com/api/webhooks/w11/k11"  # 既存を再利用
@@ -105,8 +110,8 @@ def test_plan_and_apply_forums():
 
     # もう一度実行しても作り直さない
     again = make_plan(client, guild, discord_api.feeds_by_category(conn), "feedpipe")
-    assert all(p.exists and not p.missing_tags() for p in again.channels)
-    assert apply_plan(client, conn, again, "feedpipe") == []
+    assert all(p.exists and not p.missing_tags() and p.nsfw for p in again.channels)
+    assert apply_plan(client, conn, again, "feedpipe", nsfw=True) == []
 
 
 def test_notify_posts_forum_threads(tmp_path):
