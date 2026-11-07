@@ -11,17 +11,23 @@ from .common import _discord_client, _fit, _load_genres, _open_db
 
 
 def cmd_discord_invite_url(cfg: Config, args: argparse.Namespace) -> int:
+    """discord invite-url: 必要な権限付きの Bot 招待 URL を表示する。"""
     client = _discord_client(cfg)
     print(discord_api.invite_url(client.application_id()))
     print("権限: チャンネルを見る / チャンネルの管理 / ウェブフックの管理 / メッセージ履歴を読む", file=sys.stderr)
     return 0
 
 def cmd_discord_guilds(cfg: Config, args: argparse.Namespace) -> int:
+    """discord guilds: Bot が参加しているサーバーを表示する。"""
     for g in _discord_client(cfg).guilds():
         print(f"{g['id']}  {g['name']}")
     return 0
 
 def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
+    """discord setup: ジャンルに合わせてフォーラム・タグ・Webhook とまとめの投稿先を揃える。
+
+    --apply がなければ予定を表示するだけ。--prune でジャンルに対応しないフォーラムを削除する。
+    """
     conn = _open_db(cfg, args)
     client = _discord_client(cfg)
     guild = discord_api.resolve_guild(client, cfg.discord.guild_id)
@@ -85,6 +91,7 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def cmd_discord_channels(cfg: Config, args: argparse.Namespace) -> int:
+    """discord channels: 登録済みの送り先（ジャンル → チャンネル）を表示する。"""
     conn = _open_db(cfg, args)
     rows = conn.execute("SELECT category, channel_name, channel_id FROM discord_channels ORDER BY category")
     for r in rows:
@@ -92,6 +99,7 @@ def cmd_discord_channels(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def cmd_discord_test(cfg: Config, args: argparse.Namespace) -> int:
+    """discord test: ジャンルのフォーラムにテスト投稿する。"""
     conn = _open_db(cfg, args)
     row = conn.execute("SELECT webhook_url, channel_name FROM discord_channels WHERE category = ?", (args.category,)).fetchone()
     if row is None:
@@ -105,6 +113,7 @@ def cmd_discord_test(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def cmd_bot(cfg: Config, args: argparse.Namespace) -> int:
+    """bot: 常駐 Bot を起動する。子プロセスにも同じ --config / --db を渡す。"""
     from ..bot import run_bot  # discord.py の読み込みは bot のときだけ
 
     config_args = [*(["--config", str(args.config)] if args.config else []), *(["--db", args.db] if args.db else [])]

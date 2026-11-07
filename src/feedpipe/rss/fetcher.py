@@ -34,6 +34,7 @@ class Fetcher:
         await self._client.aclose()
 
     async def get(self, url: str, headers: dict[str, str] | None = None) -> httpx.Response:
+        """url を GET する。全体とホストごとの同時接続数の枠が空くまで待つ。"""
         host = urlsplit(url).hostname or ""
         async with self._global, self._hosts[host]:
             return await self._client.get(url, headers=headers)

@@ -38,6 +38,7 @@ from .server import (
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """サブコマンドと引数を定義した ArgumentParser を返す。"""
     p = argparse.ArgumentParser(prog="feedpipe", description="RSS を全文 Markdown で保存し通知する")
     p.add_argument("-c", "--config", type=Path, help="設定ファイル（既定: ./config.toml）")
     p.add_argument("--db", help="DB ファイル（設定ファイルの値を上書き）")
@@ -162,6 +163,10 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 def main(argv: list[str] | None = None) -> int:
+    """引数を解釈してサブコマンドを実行し、終了コードを返す。
+
+    想定内のエラー（設定・ファイル・Discord API）はメッセージだけを表示して 1 を返す。
+    """
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,

@@ -27,6 +27,7 @@ from .common import (
 
 
 def cmd_import_opml(cfg: Config, args: argparse.Namespace) -> int:
+    """import-opml: OPML のフィードを登録する。"""
     parsed = opml.parse_opml(args.file)
     conn = _open_db(cfg, args)
     stats = opml.import_entries(conn, parsed.entries, update=args.update)
@@ -38,6 +39,7 @@ def cmd_import_opml(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def cmd_export_opml(cfg: Config, args: argparse.Namespace) -> int:
+    """export-opml: 登録済みのフィードを OPML に書き出す。"""
     conn = _open_db(cfg, args)
     feeds = db.list_feeds(conn, enabled=None if args.all else True)
     opml.export_opml(feeds, args.file)
@@ -45,6 +47,7 @@ def cmd_export_opml(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def _print_result(r: CheckResult) -> None:
+    """死活チェックの結果を 1 行で表示する。"""
     title = r.feed.title or r.feed.url
     line = f"[{STATUS_MARK[r.status]}] {r.feed.id:>4} {_fit(title, 36)} "
     if r.status.is_ok:
@@ -57,6 +60,7 @@ def _print_result(r: CheckResult) -> None:
     print(line, flush=True)
 
 def cmd_check(cfg: Config, args: argparse.Namespace) -> int:
+    """check: フィードの死活チェックをして、結果を DB に反映する。"""
     conn = _open_db(cfg, args)
     if args.id:
         feeds = [f for i in args.id if (f := db.get_feed(conn, i))]
@@ -99,11 +103,13 @@ def cmd_check(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def _select_feeds(conn: sqlite3.Connection, args: argparse.Namespace) -> list[db.Feed]:
+    """--id か --category で指定された有効なフィードを返す。"""
     if args.id:
         return [f for i in args.id if (f := db.get_feed(conn, i))]
     return db.list_feeds(conn, enabled=True, category=args.category)
 
 def _print_report(r: FeedReport) -> None:
+    """フィード 1 件分の取り込み結果を表示する。"""
     title = _fit(r.feed.title or r.feed.url, 36)
     if not r.check.status.is_ok:
         print(f"[{STATUS_MARK[r.check.status]}] {r.feed.id:>4} {title} {r.check.error}", flush=True)
@@ -119,6 +125,7 @@ def _print_report(r: FeedReport) -> None:
         print(f"         ! {it.title}: {err}")
 
 def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
+    """run: 新着記事を取り込み（保存・判定・要約）、投稿して 👍 を集計する。"""
     conn = _open_db(cfg, args)
     feeds = _select_feeds(conn, args)
     if not feeds:
@@ -155,6 +162,7 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
     return rc
 
 def _sync_likes(cfg: Config, conn: sqlite3.Connection, interval_hours: float = 6) -> int:
+    """投稿の 👍 の数を取得する。取得に失敗しても run は止めない。"""
     try:
         n = notify.sync_likes(conn, _discord_client(cfg), interval_hours=interval_hours)
     except discord_api.DiscordError as e:
@@ -165,6 +173,7 @@ def _sync_likes(cfg: Config, conn: sqlite3.Connection, interval_hours: float = 6
     return 0
 
 def cmd_likes(cfg: Config, args: argparse.Namespace) -> int:
+    """likes: 投稿の 👍 の数を、間隔を空けずに今すぐ取得する。"""
     return _sync_likes(cfg, _open_db(cfg, args), interval_hours=0)
 
 def cmd_interests(cfg: Config, args: argparse.Namespace) -> int:
@@ -207,6 +216,7 @@ def cmd_interests(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def cmd_summarize(cfg: Config, args: argparse.Namespace) -> int:
+    """summarize: 保存済み・未投稿で要約のない最近の記事を、重要度を判定してから要約する。"""
     conn = _open_db(cfg, args)
 
     async def go():
@@ -221,6 +231,7 @@ def cmd_summarize(cfg: Config, args: argparse.Namespace) -> int:
     return 1 if r["failed"] else 0
 
 def cmd_feeds_list(cfg: Config, args: argparse.Namespace) -> int:
+    """feeds list: フィードの一覧を表示する。"""
     conn = _open_db(cfg, args)
     enabled = None if args.all else (not args.disabled)
     feeds = db.list_feeds(conn, enabled=enabled, category=args.category)
@@ -241,6 +252,7 @@ def cmd_feeds_list(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def cmd_feeds_add(cfg: Config, args: argparse.Namespace) -> int:
+    """feeds add: フィードを 1 件登録する。"""
     conn = _open_db(cfg, args)
     if existing := db.find_feed_by_url(conn, args.url):
         print(f"登録済みです: {existing.id} {existing.url}", file=sys.stderr)
@@ -251,6 +263,7 @@ def cmd_feeds_add(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def cmd_feeds_option(cfg: Config, args: argparse.Namespace) -> int:
+    """feeds option: フィード個別の設定を変える（値は JSON として解釈し、だめなら文字列）。"""
     conn = _open_db(cfg, args)
     if args.value is None:
         value = None
@@ -267,6 +280,7 @@ def cmd_feeds_option(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def _cmd_set_enabled(cfg: Config, args: argparse.Namespace, enabled: bool) -> int:
+    """feeds enable / disable: フィードを有効・無効にする。"""
     conn = _open_db(cfg, args)
     rc = 0
     with conn:
@@ -286,6 +300,7 @@ def _notify(
     category: str | None = None,
     dry_run: bool = False,
 ) -> int:
+    """保存済み・未投稿の記事を投稿し、結果を表示する。失敗があれば 1 を返す。"""
     stats = notify.notify_pending(
         conn,
         limit=limit or cfg.discord.max_posts_per_run,
@@ -308,9 +323,11 @@ def _notify(
     return 1 if stats.failed else 0
 
 def cmd_notify(cfg: Config, args: argparse.Namespace) -> int:
+    """notify: 保存済み・未投稿の記事を投稿する。"""
     return _notify(cfg, _open_db(cfg, args), limit=args.limit, category=args.category, dry_run=args.dry_run)
 
 def cmd_genres_list(cfg: Config, args: argparse.Namespace) -> int:
+    """genres list: ジャンルと、それぞれの有効なフィード数を表示する。"""
     defs = _require_genres(cfg)
     conn = _open_db(cfg, args)
     counts = Counter(f.category for f in db.list_feeds(conn, enabled=True))
@@ -320,6 +337,7 @@ def cmd_genres_list(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def cmd_genres_apply(cfg: Config, args: argparse.Namespace) -> int:
+    """genres apply: genres.toml の割り当てをフィードの category に反映する。"""
     defs = _require_genres(cfg)
     conn = _open_db(cfg, args)
     r = genres.apply_genres(conn, defs, dry_run=args.dry_run, disable_unassigned=args.disable_unassigned)
@@ -342,6 +360,7 @@ def cmd_genres_apply(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
+    """digest: ジャンルごとの今日のまとめを投稿する（--update で書き換え、--delete で削除）。"""
     from ..rss import digest
 
     conn = _open_db(cfg, args)

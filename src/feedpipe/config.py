@@ -28,6 +28,7 @@ def load_dotenv(path: Path = DEFAULT_ENV_PATH) -> None:
 
 @dataclass
 class GeneralConfig:
+    """[general]: DB・保存先・HTTP 取得・フィードの自動無効化。"""
     db: str = "data/feedpipe.db"
     archive_dir: str = "archive"
     genres_file: str = "genres.toml"
@@ -43,6 +44,7 @@ class GeneralConfig:
 
 @dataclass
 class FulltextConfig:
+    """[fulltext]: 元記事からの本文抽出。"""
     enabled: bool = True
     # 元記事から抽出した本文がこの文字数より短ければ、フィードの本文と長い方を使う
     min_length: int = 200
@@ -51,6 +53,7 @@ class FulltextConfig:
 
 @dataclass
 class SummarizeConfig:
+    """[summarize]: 要約サーバー（OpenAI 互換 API）と、重要度の判定・要約の条件。"""
     enabled: bool = True
     endpoint: str = "http://127.0.0.1:8080/v1"
     model: str = "Qwen3.5-4B"
@@ -68,6 +71,7 @@ class SummarizeConfig:
 @dataclass
 class DiscordConfig:
     # Bot が参加しているサーバーが 1 つだけなら省略できる
+    """[discord]: Bot・フォーラム・投稿の設定。トークンは環境変数（.env）から読む。"""
     guild_id: str | None = None
     # feedpipe のチャンネルをまとめる Discord のカテゴリ名
     parent_category: str = "feedpipe"
@@ -82,11 +86,13 @@ class DiscordConfig:
 
     @property
     def token(self) -> str | None:
+        """Bot トークン（token_env の環境変数）。未設定なら None。"""
         return os.environ.get(self.token_env) or None
 
 
 @dataclass
 class DigestConfig:
+    """[digest]: 1 日のまとめの投稿先・時刻・件数。"""
     enabled: bool = True
     # まとめを投稿するテキストチャンネルの名前（サーバー内で探す。カテゴリは問わない）
     channel: str = "ニュース"
@@ -100,6 +106,7 @@ class DigestConfig:
 @dataclass
 class BotConfig:
     # 常駐中に `feedpipe run` を実行する間隔（分）。0 なら実行しない
+    """[bot]: 常駐 Bot の定期実行と、一緒に起動する要約サーバー。"""
     run_interval_minutes: int = 60
     # run に追加で渡す引数（例: ["--no-summary"]）
     run_args: list[str] = field(default_factory=list)
@@ -109,6 +116,7 @@ class BotConfig:
 
 @dataclass
 class Config:
+    """config.toml 全体。省略したセクション・キーは既定値になる。"""
     general: GeneralConfig = field(default_factory=GeneralConfig)
     fulltext: FulltextConfig = field(default_factory=FulltextConfig)
     summarize: SummarizeConfig = field(default_factory=SummarizeConfig)
@@ -119,6 +127,7 @@ class Config:
 
 
 def _section(cls: type, raw: dict, name: str, path: Path):
+    """TOML の 1 セクションを設定クラスにする。知らないキーがあれば ValueError（書き間違いに気づけるように）。"""
     known = {f.name for f in fields(cls)}
     unknown = set(raw) - known
     if unknown:
@@ -127,6 +136,7 @@ def _section(cls: type, raw: dict, name: str, path: Path):
 
 
 def load_config(path: Path | None = None) -> Config:
+    """config.toml を読む。ファイルがなければすべて既定値。"""
     path = path or DEFAULT_CONFIG_PATH
     if not path.exists():
         return Config()

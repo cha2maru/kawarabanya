@@ -40,6 +40,7 @@ TOP = "CASE WHEN instr(f.category, '/') > 0 THEN substr(f.category, 1, instr(f.c
 
 @dataclass
 class Pending:
+    """投稿待ちの 1 記事と、その送り先。"""
     item_id: int
     feed_id: int
     feed_title: str | None
@@ -57,6 +58,7 @@ class Pending:
 
 @dataclass
 class NotifyStats:
+    """notify_pending の結果の件数。"""
     sent: int = 0
     failed: int = 0
     no_channel: int = 0  # 送り先のチャンネルが未登録
@@ -115,11 +117,13 @@ def excerpt(md_path: str | None, limit: int = EXCERPT_CHARS) -> str:
 
 def _username(feed_title: str | None) -> str:
     # Webhook の表示名に "discord" は使えない
+    """投稿者として表示する名前（フィード名）。Discord の制限で「discord」を含む名前は使えない。"""
     name = (feed_title or "feedpipe").strip()[:MAX_USERNAME]
     return "feedpipe" if "discord" in name.lower() else name
 
 
 def build_payload(p: Pending) -> dict:
+    """記事 1 件をフォーラムに投稿する Webhook の内容（スレッド名・本文・タグ）を作る。"""
     body = p.summary or excerpt(p.md_path)
     meta = []
     if p.published:
@@ -156,6 +160,10 @@ def notify_pending(
     transport: httpx.BaseTransport | None = None,
     interval: float = SEND_INTERVAL,
 ) -> NotifyStats:
+    """保存済み・未投稿の記事を limit 件まで投稿する。
+
+    公開から max_age_days 日を過ぎたものは投稿せず stale にする。投稿後は Markdown に投稿へのリンクを書き込む。
+    """
     stats = NotifyStats()
     items, stats.no_channel = pending_items(conn, category)
     old = [p for p in items if not is_recent(p.published, p.fetched_at, max_age_days)]

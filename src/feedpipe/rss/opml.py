@@ -13,6 +13,7 @@ from .. import db
 
 @dataclass
 class OpmlEntry:
+    """OPML の 1 フィード。"""
     url: str
     title: str | None
     site_url: str | None
@@ -21,6 +22,7 @@ class OpmlEntry:
 
 @dataclass
 class ParseResult:
+    """parse_opml の結果。"""
     entries: list[OpmlEntry] = field(default_factory=list)
     # 同じ URL が複数のフォルダにあったもの（url, 採用しなかったカテゴリ）
     duplicates: list[tuple[str, str | None]] = field(default_factory=list)
@@ -67,6 +69,7 @@ def parse_opml(path: str | Path) -> ParseResult:
 
 @dataclass
 class ImportStats:
+    """import_entries で登録・更新・スキップした件数。"""
     added: int = 0
     updated: int = 0
     skipped: int = 0

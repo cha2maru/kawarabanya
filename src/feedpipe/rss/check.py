@@ -24,6 +24,7 @@ PERMANENT_REDIRECTS = {301, 308}
 
 
 class Status(StrEnum):
+    """フィードを取得した結果の分類。"""
     OK = "ok"
     NOT_FEED = "not_feed"  # 応答はあるがフィードとして解析できない
     GONE = "gone"  # 404 / 410
@@ -34,6 +35,7 @@ class Status(StrEnum):
 
     @property
     def is_ok(self) -> bool:
+        """取得に成功したか（304 も成功）。"""
         return self is Status.OK
 
     @property
@@ -44,6 +46,7 @@ class Status(StrEnum):
 
 @dataclass
 class CheckResult:
+    """フィード 1 件を取得した結果。run では取得した記事と ETag なども運ぶ。"""
     feed: db.Feed
     status: Status
     http_status: int | None = None
@@ -77,6 +80,7 @@ def _is_name_not_found(exc: BaseException) -> bool:
 
 
 def _latest_entry(entries: list) -> datetime | None:
+    """記事のうち最も新しい公開日時（日付のある記事がなければ None）。"""
     stamps = [
         t
         for e in entries
@@ -88,6 +92,7 @@ def _latest_entry(entries: list) -> datetime | None:
 
 
 def _classify_http(code: int) -> Status:
+    """HTTP のエラー状態を Status に分類する。"""
     if code in (404, 410):
         return Status.GONE
     if code in (401, 403):
@@ -159,6 +164,7 @@ async def check_feeds(
     transport: httpx.AsyncBaseTransport | None = None,
     on_result: Callable[[CheckResult], None] | None = None,
 ) -> list[CheckResult]:
+    """フィードをまとめてチェックする（同時接続数は Fetcher が制限）。on_result で 1 件ずつ受け取れる。"""
     async with Fetcher(cfg, transport) as fetcher:
 
         async def one(feed: db.Feed) -> CheckResult:
@@ -172,6 +178,7 @@ async def check_feeds(
 
 @dataclass
 class ApplyStats:
+    """apply_results で DB を変えた件数。"""
     moved: int = 0
     disabled: int = 0
     merged: int = 0  # 移転先がすでに登録済みだったため無効化したもの

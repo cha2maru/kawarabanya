@@ -28,6 +28,7 @@ RESERVED = {"label", "description", "feeds", "priority"}
 
 @dataclass
 class Genre:
+    """genres.toml の 1 ジャンル（またはサブジャンル）。"""
     path: str  # "news" または "news/world"
     label: str
     description: str = ""
@@ -37,14 +38,17 @@ class Genre:
 
     @property
     def top(self) -> str:
+        """トップレベルのジャンル（"news/world" なら "news"）。"""
         return self.path.split("/")[0]
 
     @property
     def is_sub(self) -> bool:
+        """サブジャンルか。"""
         return "/" in self.path
 
 
 def top_genre(category: str | None) -> str | None:
+    """カテゴリのトップレベルのジャンル（"news/world" なら "news"）。なければ None。"""
     return category.split("/")[0] if category else None
 
 
@@ -88,6 +92,7 @@ def load_genres(path: str | Path) -> dict[str, Genre]:
 
 @dataclass
 class ApplyResult:
+    """apply_genres の結果。"""
     moved: list[tuple[db.Feed, str]] = field(default_factory=list)  # (フィード, 新しいジャンル)
     unassigned: list[db.Feed] = field(default_factory=list)  # どのジャンルにも書かれていない有効なフィード
     unknown_urls: list[str] = field(default_factory=list)  # genres.toml にあるが未登録の URL

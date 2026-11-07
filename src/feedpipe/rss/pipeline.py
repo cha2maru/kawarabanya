@@ -83,6 +83,10 @@ async def _process(
     report: FeedReport,
     item: Item,
 ) -> None:
+    """記事 1 件を処理する: 本文の取得 → Markdown 保存 → （最近の記事なら）重要度の判定と要約。
+
+    1 記事の失敗で全体を止めないよう、保存までの例外は error として記録する。
+    """
     try:
         await fill_content(fetcher, item, cfg.fulltext)
         fetched = datetime.now(UTC)
@@ -135,6 +139,7 @@ async def _summarize(
 
 
 def load_genres_if_any(cfg: Config) -> dict[str, Genre] | None:
+    """genres.toml があれば読む。"""
     path = Path(cfg.general.genres_file)
     return load_genres(path) if path.exists() else None
 
@@ -179,6 +184,10 @@ async def run_feeds(
     transport: httpx.AsyncBaseTransport | None = None,
     on_report: Callable[[FeedReport], None] | None = None,
 ) -> list[FeedReport]:
+    """フィードを取得し、未読の記事を処理する（run の本体）。
+
+    初回のフィードは既存記事を既読にするだけ（backfill 件だけ処理）。記事を処理し終えてから ETag を保存するので、途中で落ちても次回また取得できる。
+    """
     genres = load_genres_if_any(cfg)
     async with Fetcher(cfg.general, transport) as fetcher:
 

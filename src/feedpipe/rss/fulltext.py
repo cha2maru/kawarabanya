@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 
 
 def html_to_markdown(html: str | bytes, url: str | None, cfg: FulltextConfig) -> str | None:
+    """HTML から本文を取り出して Markdown にする（trafilatura）。取り出せなければ None。"""
     return trafilatura.extract(
         html,
         url=url,
@@ -29,6 +30,7 @@ def html_to_markdown(html: str | bytes, url: str | None, cfg: FulltextConfig) ->
 
 
 async def _article_markdown(fetcher: Fetcher, url: str, cfg: FulltextConfig) -> str | None:
+    """元記事のページを取得して本文を Markdown にする。取得できない・HTML でなければ None。"""
     try:
         resp = await fetcher.get(url)
     except httpx.HTTPError as e:

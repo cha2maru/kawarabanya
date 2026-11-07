@@ -55,6 +55,7 @@ def lead(markdown: str, chars: int = LEAD_CHARS) -> str:
 
 
 def clean_output(text: str) -> str:
+    """LLM の出力から <think> ブロックと、日本語と英数字の間の余分な空白を除く。"""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     # Qwen 系が入れがちな、日本語と英数字の間の空白を取る（「9 日」→「9日」）
     text = re.sub(rf"(?<=[{CJK}]) +(?=[0-9A-Za-z])", "", text)
@@ -103,6 +104,7 @@ class Summarizer:
         return None
 
     async def summarize(self, title: str | None, markdown: str | None) -> str | None:
+        """本文の先頭 max_input_chars 字から 2〜3 文の要約を作る。失敗したら None。"""
         if not markdown:
             return None
         data = await self._chat(

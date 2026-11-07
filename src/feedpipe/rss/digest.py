@@ -30,6 +30,7 @@ MAX_TREND_TITLES = 150
 
 @dataclass
 class DigestItem:
+    """まとめに載せる 1 記事。"""
     title: str
     thread_id: str | None
     priority: float | None
@@ -57,6 +58,7 @@ def _link_text(title: str) -> str:
 
 
 def render(trend: str | None, items: list[DigestItem], guild_id: str, top: int, limit: int = MAX_CONTENT) -> str:
+    """まとめの本文（傾向＋重要度順の投稿へのリンク＋「ほか N 件」）を limit 字に収めて作る。"""
     lines = [f"{trend}\n\n**注目の記事**" if trend else "**注目の記事**"]
     for it in items[:top]:
         line = f"- [{_link_text(it.title)}]({post_url(guild_id, it.thread_id)})" if it.thread_id else f"- {it.title}"
@@ -145,4 +147,5 @@ def _posted(conn: sqlite3.Connection, genre: str, day: str) -> str | None:
 
 
 def is_due(now: datetime, hour: int) -> bool:
+    """まとめを投稿する時刻（ローカル時刻の hour 時）を過ぎたか。"""
     return now.astimezone().hour >= hour

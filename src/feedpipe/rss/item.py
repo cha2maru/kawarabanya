@@ -12,6 +12,7 @@ from .. import db
 
 @dataclass
 class Item:
+    """パイプラインを流れる 1 記事。取得から保存・要約までの途中結果も持つ。"""
     feed: db.Feed
     key: str
     url: str | None
@@ -28,6 +29,7 @@ class Item:
 
 
 def _entry_key(entry: dict) -> str:
+    """記事を見分けるキー: guid、なければ link、それもなければタイトルと要約のハッシュ。"""
     if key := (entry.get("id") or entry.get("link")):
         return key.strip()
     raw = f"{entry.get('title', '')}\n{entry.get('summary', '')}"
@@ -43,6 +45,7 @@ def _entry_html(entry: dict) -> str | None:
 
 
 def _entry_datetime(entry: dict) -> datetime | None:
+    """記事の公開日時（なければ更新日時）。おかしな値なら None。"""
     stamp = entry.get("published_parsed") or entry.get("updated_parsed")
     if not stamp:
         return None
@@ -53,6 +56,7 @@ def _entry_datetime(entry: dict) -> datetime | None:
 
 
 def from_entry(feed: db.Feed, entry: dict) -> Item:
+    """feedparser の記事（entry）から Item を作る。"""
     return Item(
         feed=feed,
         key=_entry_key(entry),

@@ -81,6 +81,7 @@ ADDED_COLUMNS = {
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
+    """ADDED_COLUMNS のうち、既存の DB にまだない列を追加する。"""
     for table, columns in ADDED_COLUMNS.items():
         existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
         for name, decl in columns.items():
@@ -89,10 +90,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 def now_iso() -> str:
+    """現在時刻（UTC）を ISO 8601 の文字列で返す。DB に保存する日時はすべてこの形式。"""
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
+    """DB を開き、テーブルの作成と列の追加を行う。親ディレクトリがなければ作る。"""
     path = Path(path)
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -108,6 +111,7 @@ def connect(path: str | Path) -> sqlite3.Connection:
 
 @dataclass
 class Feed:
+    """feeds テーブルの 1 行。"""
     id: int
     url: str
     original_url: str
@@ -127,10 +131,12 @@ class Feed:
     options: dict = field(default_factory=dict)
 
     def option(self, name: str, default: object = None) -> object:
+        """フィード個別の設定（feeds option で設定）を返す。"""
         return self.options.get(name, default)
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Feed:
+        """SELECT * FROM feeds の行から作る。"""
         return cls(
             id=row["id"],
             url=row["url"],
@@ -161,6 +167,7 @@ def find_feed_by_url(conn: sqlite3.Connection, url: str) -> Feed | None:
 
 
 def get_feed(conn: sqlite3.Connection, feed_id: int) -> Feed | None:
+    """ID でフィードを返す。なければ None。"""
     row = conn.execute("SELECT * FROM feeds WHERE id = ?", (feed_id,)).fetchone()
     return Feed.from_row(row) if row else None
 
@@ -172,6 +179,7 @@ def insert_feed(
     site_url: str | None,
     category: str | None,
 ) -> int:
+    """フィードを登録し、ID を返す。取り込み時の URL を original_url にも残す。"""
     cur = conn.execute(
         "INSERT INTO feeds (url, original_url, title, site_url, category, created_at)"
         " VALUES (?, ?, ?, ?, ?, ?)",
@@ -186,6 +194,7 @@ def list_feeds(
     enabled: bool | None = None,
     category: str | None = None,
 ) -> list[Feed]:
+    """フィードを、有効・無効とカテゴリで絞って返す（カテゴリ・ID 順）。"""
     sql = "SELECT * FROM feeds WHERE 1 = 1"
     params: list[object] = []
     if enabled is not None:
@@ -201,6 +210,7 @@ def list_feeds(
 def set_enabled(
     conn: sqlite3.Connection, feed_id: int, enabled: bool, reason: str | None = None
 ) -> bool:
+    """フィードを有効・無効にする。有効に戻すときは失敗回数を 0 にする。見つからなければ False。"""
     cur = conn.execute(
         "UPDATE feeds SET enabled = ?, disabled_reason = ?,"
         " fail_count = CASE WHEN ? THEN 0 ELSE fail_count END WHERE id = ?",
@@ -228,11 +238,13 @@ def insert_item(
 
 
 def update_item(conn: sqlite3.Connection, item_id: int, **values: object) -> None:
+    """記事（items）の列を、キーワード引数で指定した値に更新する。"""
     cols = ", ".join(f"{k} = ?" for k in values)
     conn.execute(f"UPDATE items SET {cols} WHERE id = ?", (*values.values(), item_id))
 
 
 def mark_initialized(conn: sqlite3.Connection, feed_id: int) -> None:
+    """フィードの初回取り込み（既存記事の既読化）が済んだことを記録する。"""
     conn.execute("UPDATE feeds SET initialized_at = ? WHERE id = ?", (now_iso(), feed_id))
 
 

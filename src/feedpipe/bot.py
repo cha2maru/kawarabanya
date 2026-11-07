@@ -19,6 +19,8 @@ log = logging.getLogger(__name__)
 
 
 class Bot(discord.Client):
+    """常駐 Bot 本体。Discord に接続したまま、定期的に run と digest を別プロセスで実行する。"""
+
     def __init__(self, cfg: Config, config_args: list[str]):
         super().__init__(intents=discord.Intents.default())
         self.cfg = cfg
@@ -26,6 +28,7 @@ class Bot(discord.Client):
         self.llm: asyncio.subprocess.Process | None = None
 
     async def setup_hook(self) -> None:
+        """接続前の準備。要約サーバーの起動と、定期実行の開始を行う。"""
         if cmd := self.cfg.bot.llm_server_command:
             self.llm = await asyncio.create_subprocess_exec(
                 *shlex.split(cmd), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
@@ -36,10 +39,12 @@ class Bot(discord.Client):
             self.periodic_run.start()
 
     async def on_ready(self) -> None:
+        """ログインできたことをログに残す。"""
         log.info("%s としてログインしました（サーバー %d 件）", self.user, len(self.guilds))
 
     @tasks.loop(minutes=60)
     async def periodic_run(self) -> None:
+        """定期実行の 1 回分。run で記事を取り込み、続けて期限を過ぎていればまとめを投稿する。"""
         await self._feedpipe("run", "-q", *self.cfg.bot.run_args)
         # 要約サーバーを run と取り合わないよう、run の後に続けて実行する
         await self._feedpipe("digest", "--due")
@@ -63,9 +68,11 @@ class Bot(discord.Client):
 
     @periodic_run.before_loop
     async def _wait_ready(self) -> None:
+        """Discord への接続が終わるまで、最初の定期実行を待たせる。"""
         await self.wait_until_ready()
 
     async def close(self) -> None:
+        """Bot を止める。一緒に起動した要約サーバーも止める。"""
         if self.llm and self.llm.returncode is None:
             self.llm.terminate()
             await self.llm.wait()
@@ -73,6 +80,7 @@ class Bot(discord.Client):
 
 
 def run_bot(cfg: Config, config_args: list[str]) -> None:
+    """常駐 Bot を起動し、止められるまで戻らない。トークンがなければ ValueError。"""
     token = cfg.discord.token
     if not token:
         raise ValueError(f"{cfg.discord.token_env} が設定されていません（.env に書いてください）")

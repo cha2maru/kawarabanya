@@ -18,6 +18,7 @@ UNCATEGORIZED = "uncategorized"
 
 
 def slugify(text: str | None, fallback: str) -> str:
+    """タイトルをファイル名に使える文字列にする（使えない文字を _ に、50 字まで）。空なら fallback。"""
     s = SPACES.sub("_", UNSAFE.sub("_", text or "")).strip("._ ")
     s = s[:MAX_SLUG_CHARS].rstrip("._ ")
     return s or fallback
@@ -39,6 +40,7 @@ def _strip_title_heading(md: str, title: str | None) -> str:
 
 
 def render(item: Item, fetched: datetime) -> str:
+    """記事を Front Matter 付きの Markdown 文字列にする。"""
     fm: list[str] = ["---", f"title: {_yaml_str(item.title or '')}"]
     if item.url:
         fm.append(f"url: {_yaml_str(item.url)}")
@@ -62,6 +64,7 @@ def render(item: Item, fetched: datetime) -> str:
 
 
 def build_path(archive_dir: Path, item: Item, fetched: datetime) -> Path:
+    """保存先のパス archive/{カテゴリ}/{年}/{月}/{日付}_{タイトル}.md を返す（日付は公開日、なければ取得日）。"""
     date = (item.published or fetched).astimezone()
     category = item.feed.category or UNCATEGORIZED
     parts = [slugify(p, UNCATEGORIZED) for p in category.split("/")]
@@ -109,4 +112,5 @@ def set_field(path: str | Path, key: str, value: str) -> None:
 
 
 def add_summary(path: str | Path, summary: str) -> None:
+    """Front Matter に要約（summary）を書き込む。"""
     set_field(path, "summary", summary)
