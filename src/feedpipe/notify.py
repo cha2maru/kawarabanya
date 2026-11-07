@@ -8,6 +8,7 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -88,7 +89,8 @@ def excerpt(md_path: str | None, limit: int = EXCERPT_CHARS) -> str:
     text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)  # 画像
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)  # リンクは文字だけ
     lines = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
-    plain = re.sub(r"[*_`>]+", "", " ".join(lines))
+    plain = re.sub(r"(?<!\\)[*_`>]+", "", " ".join(lines))  # 書式記号（エスケープされたものは残す）
+    plain = re.sub(r"\\([\\`*_{}\[\]()#+\-.!~|>])", r"\1", plain)  # Markdown のエスケープを外す
     plain = re.sub(r"\s+", " ", plain).strip()
     return plain if len(plain) <= limit else plain[:limit].rstrip() + "…"
 
@@ -103,7 +105,8 @@ def build_payload(p: Pending) -> dict:
     body = p.summary or excerpt(p.md_path)
     meta = []
     if p.published:
-        meta.append(f"🕒 {p.published[:16].replace('T', ' ')}")
+        local = datetime.fromisoformat(p.published).astimezone()
+        meta.append(f"🕒 {local:%Y-%m-%d %H:%M}")
     parts = [body, " ・ ".join(meta), p.url or ""]
     content = "\n\n".join(x for x in parts if x)
     if len(content) > MAX_CONTENT:

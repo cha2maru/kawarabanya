@@ -120,7 +120,7 @@ def test_notify_posts_forum_threads(tmp_path):
     apply_plan(client, conn, plan, "feedpipe")
 
     md = tmp_path / "a.md"
-    md.write_text('---\ntitle: "x"\n---\n\n# 記事1\n\n本文の **先頭** です。[リンク](https://l)\n\n---\n\n元記事: <https://a>\n')
+    md.write_text('---\ntitle: "x"\n---\n\n# 記事1\n\n本文の **先頭** です。[リンク](https://l) 20\\~50% a\\_b\n\n---\n\n元記事: <https://a>\n')
     feed_id = db.find_feed_by_url(conn, "https://6tech.example/既存フィード").id
     with conn:
         a = db.insert_item(conn, feed_id, "a", "https://a", "記事1", "2026-11-07T01:02:03+00:00", "saved")
@@ -137,7 +137,8 @@ def test_notify_posts_forum_threads(tmp_path):
     assert p1["thread_name"] == "記事1"
     assert p1["username"] == "既存フィード"
     assert p1["applied_tags"] == ["t1"]
-    assert p1["content"].startswith("本文の 先頭 です。リンク")
+    assert p1["content"].startswith("本文の 先頭 です。リンク 20~50% a_b")
+    assert "🕒 " in p1["content"]
     assert p1["content"].endswith("https://a")
     assert p2["content"].startswith("LLM の要約")
     assert p2["allowed_mentions"] == {"parse": []}
