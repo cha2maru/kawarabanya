@@ -343,6 +343,8 @@ def cmd_genres_apply(cfg: Config, args: argparse.Namespace) -> int:
     r = genres.apply_genres(conn, defs, dry_run=args.dry_run, disable_unassigned=args.disable_unassigned)
     for feed, new in r.moved:
         print(f"  移動 {feed.id:>4} {_fit(feed.title or feed.url, 36)} {feed.category or '-'} → {new}")
+    for url in r.added:
+        print(f"  追加（HTML 取り込み） {url}")
     for f in r.unassigned:
         print(f"  未割り当て {f.id:>4} {_fit(f.title or f.url, 36)} {f.url}")
     print(

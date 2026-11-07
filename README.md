@@ -79,6 +79,20 @@ label = "ボードゲーム"
 feeds = [ ... ]
 ```
 
+RSS のないサイトは、`feeds` に URL の代わりにテーブルを書くと一覧ページから記事を取り込む（HTML 取り込み）:
+
+```toml
+feeds = [
+  { url = "https://www.engames-s.com/", name = "エンゲームズ（お知らせ）",
+    item = ".whatnew_list li.list_item_cell",   # 記事 1 件の塊（必須。CSS セレクタ）
+    title = ".list_subject",                     # 省略するとリンクの文字列
+    date = "time",                               # datetime 属性か「2026年11月3日」などの文字列。省略可
+    link_pattern = "/news-detail/" },            # この正規表現に合う URL だけ。省略可（link で <a> も指定できる）
+]
+```
+
+`genres apply` で登録される。セレクタに一致する記事が 0 件になると失敗として数える（サイトの作りが変わったことに気づけるように）。
+
 フィードを移すには URL の行を別のジャンルに移して `genres apply` → `discord setup --apply`。書かれていないフィードの記事は投稿されない（保存はする）。
 
 保存した Markdown の Front Matter には、投稿後に Discord の投稿へのリンク（`discord:`）が入る。

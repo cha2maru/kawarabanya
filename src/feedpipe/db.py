@@ -129,6 +129,7 @@ class Feed:
     last_modified: str | None
     initialized_at: str | None
     options: dict = field(default_factory=dict)
+    source_type: str = "rss"  # rss / html（HTML 取り込み）
 
     def option(self, name: str, default: object = None) -> object:
         """フィード個別の設定（feeds option で設定）を返す。"""
@@ -155,6 +156,7 @@ class Feed:
             last_modified=row["last_modified"],
             initialized_at=row["initialized_at"],
             options=json.loads(row["options"]) if row["options"] else {},
+            source_type=row["source_type"],
         )
 
 

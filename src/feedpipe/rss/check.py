@@ -19,6 +19,7 @@ import httpx
 from .. import db
 from ..config import GeneralConfig
 from .fetcher import Fetcher
+from .htmlsource import HtmlSource, extract, page_title
 
 PERMANENT_REDIRECTS = {301, 308}
 
@@ -138,18 +139,27 @@ async def check_feed(
                 final = str(resp.url)
                 if final != feed.url:
                     result.moved_to = final
-            parsed = feedparser.parse(resp.content, response_headers=dict(resp.headers))
-            if parsed.version:
+            if feed.source_type == "html":
+                entries = extract(resp.content, str(resp.url), HtmlSource.from_dict(feed.option("html") or {}))
+                title = page_title(resp.content)
+                # サイトの作りが変わるとセレクタは黙って 0 件になるので、失敗として数えて気づけるようにする
+                error = "セレクタに一致する記事がありません（サイトの作りが変わった可能性）"
+            else:
+                parsed = feedparser.parse(resp.content, response_headers=dict(resp.headers))
+                entries = parsed.entries if parsed.version else []
+                title = parsed.feed.get("title")
+                error = None if parsed.version else f"フィードではありません（{resp.headers.get('content-type', '?')}）"
+            if entries or (feed.source_type != "html" and error is None):
                 result.status = Status.OK
-                result.feed_title = parsed.feed.get("title")
-                result.parsed_entries = parsed.entries
-                result.entries = len(parsed.entries)
-                result.latest_entry = _latest_entry(parsed.entries)
+                result.feed_title = title
+                result.parsed_entries = entries
+                result.entries = len(entries)
+                result.latest_entry = _latest_entry(entries)
                 result.etag = resp.headers.get("etag")
                 result.last_modified = resp.headers.get("last-modified")
             else:
                 result.status = Status.NOT_FEED
-                result.error = f"フィードではありません（{resp.headers.get('content-type', '?')}）"
+                result.error = error
         else:
             result.status = _classify_http(resp.status_code)
             result.error = f"HTTP {resp.status_code}"

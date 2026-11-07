@@ -7,6 +7,8 @@
 
     priority = "A: ... B: ... C: ..."   # 重要度の判定基準（省略可）
 
+    feeds に { url = ..., item = ..., ... } と書くと HTML 取り込み（rss/htmlsource.py）
+
     [news.world]                # サブジャンル（Discord ではフォーラムのタグ）
     label = "国際"
     feeds = ["https://...", ...]
@@ -22,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import db
+from .htmlsource import HtmlSource
 
 RESERVED = {"label", "description", "feeds", "priority"}
 
@@ -33,6 +36,8 @@ class Genre:
     label: str
     description: str = ""
     feeds: list[str] = field(default_factory=list)
+    # HTML 取り込みの設定（URL → genres.toml に書いたテーブル）
+    html: dict[str, dict] = field(default_factory=dict)
     # 重要度の判定基準（A/B/C の説明）。空ならトップレベルのジャンル → 既定の基準
     priority: str = ""
 
@@ -66,8 +71,22 @@ def load_genres(path: str | Path) -> dict[str, Genre]:
         gpath = f"{parent}/{key}" if parent else key
         if "/" in key:
             raise ValueError(f"{path}: ジャンル名に / は使えません: {key}")
-        feeds = table.get("feeds", [])
-        for url in feeds:
+        feeds: list[str] = []
+        html: dict[str, dict] = {}
+        for entry in table.get("feeds", []):
+            # 文字列はフィードの URL、テーブルは HTML 取り込み（{ url = ..., item = ..., ... }）
+            if isinstance(entry, dict):
+                url = entry.get("url")
+                if not url:
+                    raise ValueError(f"{path}: [{gpath}] の HTML 取り込みに url がありません")
+                try:
+                    HtmlSource.from_dict({k: v for k, v in entry.items() if k not in ("url", "name")})
+                except ValueError as e:
+                    raise ValueError(f"{path}: {url}: {e}") from None
+                html[url] = entry
+            else:
+                url = entry
+            feeds.append(url)
             if url in owner:
                 raise ValueError(f"{path}: {url} が [{owner[url]}] と [{gpath}] の両方にあります")
             owner[url] = gpath
@@ -75,7 +94,8 @@ def load_genres(path: str | Path) -> dict[str, Genre]:
             path=gpath,
             label=table.get("label", key),
             description=table.get("description", ""),
-            feeds=list(feeds),
+            feeds=feeds,
+            html=html,
             priority=table.get("priority", ""),
         )
         for sub_key, sub in table.items():
@@ -93,6 +113,7 @@ def load_genres(path: str | Path) -> dict[str, Genre]:
 @dataclass
 class ApplyResult:
     """apply_genres の結果。"""
+    added: list[str] = field(default_factory=list)  # 新しく登録した HTML 取り込みの URL
     moved: list[tuple[db.Feed, str]] = field(default_factory=list)  # (フィード, 新しいジャンル)
     unassigned: list[db.Feed] = field(default_factory=list)  # どのジャンルにも書かれていない有効なフィード
     unknown_urls: list[str] = field(default_factory=list)  # genres.toml にあるが未登録の URL
@@ -117,6 +138,8 @@ def apply_genres(
         for g in genres.values():
             for url in g.feeds:
                 feed = db.find_feed_by_url(conn, url)
+                if url in g.html:
+                    feed = _sync_html_source(conn, feed, url, g.html[url], result, dry_run)
                 if feed is None:
                     result.unknown_urls.append(url)
                     continue
@@ -133,6 +156,26 @@ def apply_genres(
                 if disable_unassigned:
                     db.set_enabled(conn, f.id, False, "no_genre")
     return result
+
+
+def _sync_html_source(
+    conn: sqlite3.Connection, feed: db.Feed | None, url: str, entry: dict, result: ApplyResult, dry_run: bool
+) -> db.Feed | None:
+    """HTML 取り込みのフィードを登録し、セレクタの設定を options["html"] に保存する。"""
+    selectors = {k: v for k, v in entry.items() if k not in ("url", "name")}
+    if dry_run:
+        if feed is None:
+            result.added.append(url)
+        return feed
+    if feed is None:
+        db.insert_feed(conn, url, entry.get("name"), url, None)
+        feed = db.find_feed_by_url(conn, url)
+        result.added.append(url)
+    if feed.source_type != "html" or feed.option("html") != selectors:
+        conn.execute("UPDATE feeds SET source_type = 'html' WHERE id = ?", (feed.id,))
+        db.set_option(conn, feed.id, "html", selectors)
+        feed = db.get_feed(conn, feed.id)
+    return feed
 
 
 def priority_criteria(genres: dict[str, Genre] | None, category: str | None) -> str | None:

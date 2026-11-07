@@ -45,6 +45,17 @@ cli/        # コマンド
 ### 2.2 RSS のないサイト
 RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードとして登録できる（feedpipe 側には専用の処理を持たない）。**2026-11-07 に試したあと停止・削除した**（使うときは README の手順で起動する）。2026-11-07 時点の版で名前空間は 2,087（日本向けは約 100。Zenn・Qiita・はてな・note はない）。サイト側の変更で動かないルート（例: NHK）や、設定がないと使えないルート（例: GitHub トレンドはトークンが要る）がある。
 
+### 2.3 HTML 取り込み（`rss/htmlsource.py`）
+- `genres.toml` の `feeds` に `{ url, item, title, link, date, link_pattern }` を書くと、一覧ページから CSS セレクタで記事を取り出し、以降は RSS と同じ処理（本文・保存・判定・要約・投稿）を通す。`feeds.source_type = 'html'`、セレクタは `options.html`。
+- 先行例を調べて決めたこと（2026-11-07）:
+  - RSS-Bridge CssSelectorBridge・html2rss・FreshRSS と同じく「記事の塊のセレクタ＋中のタイトル・リンク・日付」。XPath より CSS（クラスの完全一致で壊れやすいという指摘）。
+  - 記事を見分けるキーは、`#` 以降と追跡用パラメータ（utm_ など）を除いた URL（同じ記事の重複取り込みを防ぐ）。
+  - セレクタは黙って 0 件になるので、**0 件は失敗**（not_feed）として数え、5 回で自動無効化される。
+  - 本文は記事ページから trafilatura で取る（RSS-Bridge の content_selector に当たる部分は既存の仕組み）。
+  - JSON-LD などからの自動検出（html2rss の AutoSource）は作っていない。
+- 文字コードの指定がない HTML は lxml が latin-1 とみなすので、先に UTF-8 として読む。
+- **ボット対策で断られるサイトには、ブラウザを装ってまで取りに行かない**（例: すごろくやは feedpipe の User-Agent に 403 を返す）。
+
 ## 3. 主な処理
 
 ### 3.1 フィード管理
