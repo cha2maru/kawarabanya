@@ -12,6 +12,7 @@ import logging
 import re
 import shlex
 import sys
+from pathlib import Path
 
 import discord
 from discord.ext import tasks
@@ -24,6 +25,8 @@ from kawarabanya.rss.pipeline import load_genres_if_any
 
 # Discord のメッセージの上限（2,000 字）に収めるため、コマンドの出力はこの字数で切る
 MAX_OUTPUT = 1800
+# 依頼に添付された OPML を受け取る上限（バイト）
+MAX_UPLOAD = 5 * 1024 * 1024
 
 log = logging.getLogger(__name__)
 
@@ -123,14 +126,25 @@ class Bot(discord.Client):
         if not text:
             await message.reply(assistant.help_text(), mention_author=False)
             return
+        # 添付の OPML は data/uploads/ に保存して取り込みに渡す
+        attachment = next((a for a in message.attachments if a.filename.lower().endswith((".opml", ".xml"))), None)
+        saved = None
+        if attachment and attachment.size <= MAX_UPLOAD:
+            saved = Path(self.db_path).parent / "uploads" / f"{message.id}_{Path(attachment.filename).name}"
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            await attachment.save(saved)
+        export = Path(self.db_path).parent / "exports" / f"kawarabanya-{datetime.datetime.now():%Y%m%d-%H%M}.opml"
         conn = db.connect(self.db_path)
         try:
             genres = load_genres_if_any(self.cfg) or {}
             async with message.channel.typing():
-                data = await assistant.interpret(self.summarizer, text, genres) if self.summarizer else None
-            intent = assistant.build(data, text, conn, genres)
+                data = (await assistant.interpret(self.summarizer, text, genres, attachment and attachment.filename)
+                        if self.summarizer else None)
+            intent = assistant.build(data, text, conn, genres, str(saved) if saved else None, str(export))
         finally:
             conn.close()
+        if intent.attach:
+            Path(intent.attach).parent.mkdir(parents=True, exist_ok=True)
         log.info("依頼: %s → %s %s", text, intent.command, intent.argv)
         if intent.error:
             await message.reply(intent.error, mention_author=False)
@@ -144,16 +158,18 @@ class Bot(discord.Client):
             )
         else:
             reply = await message.reply(f"{intent.summary}を調べています…", mention_author=False)
-            await reply.edit(content=await self.run_requested(intent))
+            content, files = await self.run_requested(intent)
+            await reply.edit(content=content, attachments=files)
 
-    async def run_requested(self, intent: assistant.Intent) -> str:
-        """依頼されたコマンドを（定期実行と重ならないよう順番に）実行し、返事の本文を返す。"""
+    async def run_requested(self, intent: assistant.Intent) -> tuple[str, list[discord.File]]:
+        """依頼されたコマンドを（定期実行と重ならないよう順番に）実行し、返事の本文と添付ファイルを返す。"""
         async with self._lock:
             rc, out = await self._kawarabanya(*intent.argv)
         out = out.strip() or "（出力なし）"
         if len(out) > MAX_OUTPUT:
             out = out[:MAX_OUTPUT] + "\n…（以下略）"
-        return f"{'✅' if rc == 0 else '⚠️'} {intent.summary}\n```\n{out}\n```"
+        files = [discord.File(intent.attach)] if rc == 0 and intent.attach and Path(intent.attach).exists() else []
+        return f"{'✅' if rc == 0 else '⚠️'} {intent.summary}\n```\n{out}\n```", files
 
     @periodic_run.before_loop
     async def _wait_ready(self) -> None:
@@ -194,7 +210,8 @@ class ConfirmView(discord.ui.View):
     async def run(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         waiting = "（定期実行が終わるのを待っています）" if self.bot._lock.locked() else ""
         await self._finish(interaction, f"**{self.intent.summary}** を実行中…{waiting}")
-        await interaction.edit_original_response(content=await self.bot.run_requested(self.intent))
+        content, files = await self.bot.run_requested(self.intent)
+        await interaction.edit_original_response(content=content, attachments=files)
 
     @discord.ui.button(label="やめる", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:

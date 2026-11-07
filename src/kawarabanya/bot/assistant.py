@@ -20,6 +20,8 @@ COMMANDS: dict[str, tuple[str, bool]] = {
     "feed_add": ("サイト・フィードを追加する（url と genre）", True),
     "feed_remove": ("サイト・フィードを外す（feed にサイト名か URL）", True),
     "feed_list": ("登録しているサイトの一覧（genre で絞れる）", False),
+    "opml_import": ("添付された OPML ファイルのサイトをまとめて追加する（genre で入れるジャンルを決められる）", True),
+    "opml_export": ("登録しているサイトを OPML ファイルにして渡す", False),
     "genre_interest": ("ジャンル・サブジャンルの好き嫌いを変える（genre と level）", True),
     "genre_list": ("ジャンル・サブジャンルの一覧", False),
     "run_now": ("今すぐ記事を取り込む", True),
@@ -51,6 +53,7 @@ class Intent:
     summary: str = ""  # 確認・返事に使う日本語の説明
     confirm: bool = False
     error: str | None = None  # 引数が足りない・見つからないとき
+    attach: str | None = None  # 実行後に返事に添付するファイル（OPML の書き出し）
 
 
 def _schema(genres: dict[str, Genre]) -> dict:
@@ -67,13 +70,17 @@ def _schema(genres: dict[str, Genre]) -> dict:
     }
 
 
-async def interpret(summarizer: Summarizer, text: str, genres: dict[str, Genre]) -> dict | None:
+async def interpret(
+    summarizer: Summarizer, text: str, genres: dict[str, Genre], attachment_name: str | None = None
+) -> dict | None:
     """依頼の文を LLM でコマンドと引数（dict）に直す。失敗したら None。"""
     label = {g.path: g.label for g in genres.values() if not g.is_sub}
     lines = [f"- {p}: {label.get(g.top, g.top) + ' / ' if g.is_sub else ''}{g.label}" for p, g in genres.items()]
     system = PROMPT.format(
         commands="\n".join(f"- {name}: {desc}" for name, (desc, _) in COMMANDS.items()), genres="\n".join(lines)
     )
+    if attachment_name:
+        text += f"\n（ファイル {attachment_name} が添付されています）"
     return await summarizer.ask_json(system, text, _schema(genres), "依頼の解釈", max_tokens=200, timeout=120)
 
 
@@ -87,8 +94,15 @@ def find_feeds(conn: sqlite3.Connection, query: str) -> list[db.Feed]:
     return exact or [f for f in feeds if q in (f.title or "").lower() or q in f.url.lower()]
 
 
-def build(data: dict | None, text: str, conn: sqlite3.Connection, genres: dict[str, Genre]) -> Intent:
-    """LLM の答えを確かめて、実行するコマンドにする。"""
+def build(
+    data: dict | None,
+    text: str,
+    conn: sqlite3.Connection,
+    genres: dict[str, Genre],
+    attachment: str | None = None,
+    export_path: str = "data/exports/kawarabanya.opml",
+) -> Intent:
+    """LLM の答えを確かめて、実行するコマンドにする。attachment は依頼に添付された OPML を保存したパス。"""
     command = (data or {}).get("command") or "unknown"
     if command not in COMMANDS:
         command = "unknown"
@@ -102,8 +116,9 @@ def build(data: dict | None, text: str, conn: sqlite3.Connection, genres: dict[s
         case "feed_add":
             if not url:
                 return Intent(command, error="追加するサイトの URL を書いてください")
-            argv = ["feeds", "add", url] + (["--genre", genre] if genre else [])
-            return Intent(command, argv, f"{url} を{f'「{label}」に' if genre else 'ジャンルなしで'}追加", confirm)
+            # ジャンルを言われなければ LLM に決めさせる（フィードの最近の見出しから）
+            argv = ["feeds", "add", url, "--genre", genre or "auto"]
+            return Intent(command, argv, f"{url} を{f'「{label}」に' if genre else '（ジャンルは自動で決めて）'}追加", confirm)
         case "feed_remove":
             query = url or (data or {}).get("feed") or ""
             found = find_feeds(conn, query)
@@ -117,6 +132,13 @@ def build(data: dict | None, text: str, conn: sqlite3.Connection, genres: dict[s
                 return Intent(command, error=f"「{query}」に当たるサイトが{f' {len(found)} 件あります: {names}' if found else '見つかりません'}")
             f = found[0]
             return Intent(command, ["feeds", "remove", str(f.id)], f"{f.title or f.url}（{f.category or '-'}）を外す", confirm)
+        case "opml_import":
+            if not attachment:
+                return Intent(command, error="取り込む OPML ファイルを添付して頼んでください")
+            argv = ["import-opml", attachment, "--genre", genre or "auto"]
+            return Intent(command, argv, f"添付の OPML を{f'「{label}」に' if genre else '（ジャンルはフォルダ名か自動で決めて）'}取り込む", confirm)
+        case "opml_export":
+            return Intent(command, ["export-opml", export_path], "登録しているサイトの OPML", attach=export_path)
         case "feed_list":
             return Intent(command, ["feeds", "list"] + (["--category", genre] if genre else []), "サイトの一覧")
         case "genre_interest":
@@ -144,6 +166,8 @@ def help_text() -> str:
         "https://example.com/news をボードゲームに追加して",
         "GIGAZINE を外して",
         "スポーツはまとめに出さなくていい",
+        "（OPML を添付して）これ取り込んで",
+        "OPML ちょうだい",
         "今すぐまとめを出して",
         "いまどうなってる？",
     ]

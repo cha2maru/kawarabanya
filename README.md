@@ -44,7 +44,7 @@ scripts/install.sh --llm      # 依存・設定の見本・llama.cpp と要約�
 ### 3. フィードとジャンル
 
 ```sh
-uv run kawarabanya import-opml subscriptions.opml   # 今使っている RSS リーダーの OPML があれば取り込む（試すだけなら sample.opml）
+uv run kawarabanya import-opml subscriptions.opml --genre auto   # 今使っている RSS リーダーの OPML を取り込む（ジャンルは LLM が決める。試すだけなら sample.opml）
 uv run kawarabanya feeds add https://example.com/ --genre tech   # 1 件ずつなら、サイトの URL から RSS を探して登録
 uv run kawarabanya check --disable-dead             # つながらないフィードを無効にする
 $EDITOR genres.toml                                 # ジャンル・サブジャンルとフィードの URL を書く（書き方は下の「設定」）
@@ -81,6 +81,8 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 @Bot https://example.com/news をボードゲームに追加して   → feeds add … --genre hobby/boardgame（確認）
 @Bot GIGAZINE を外して                                    → feeds remove 182（確認）
 @Bot スポーツはまとめに出さなくていい                     → genres interest culture/sports low（確認）
+@Bot（OPML を添付して）これ取り込んで                     → import-opml … --genre auto（確認）
+@Bot OPML ちょうだい                                       → export-opml（OPML ファイルを添付して返す）
 @Bot いまどうなってる？                                   → status
 @Bot 何ができるの？                                       → 例の一覧
 ```
@@ -97,9 +99,9 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 | `summarize` | 保存済み・未投稿で要約のない最近の記事を、重要度を判定してから要約する |
 | `notify [--category X] [--limit N] [--dry-run]` | 保存済み・未投稿の記事を投稿する |
 | `likes` / `interests [--days 30]` | 👍 の数を取得する / ジャンル・フィード別の 👍 の割合と、最近 👍 した記事（投稿へのリンク付き）を表示する |
-| `import-opml FILE` / `export-opml FILE [--all]` | OPML の取り込み・書き出し |
+| `import-opml FILE [--genre G\|auto]` / `export-opml FILE [--all]` | OPML の取り込み・書き出し。取り込んだフィードは genres.toml にも書き足す（ジャンルは `--genre`、なければ OPML のフォルダ名と同じジャンル、`auto` ならフォルダ名で決まらないものを LLM が最近の見出しから決める） |
 | `check [--disable-dead]` | 死活チェック（移転していれば URL を更新） |
-| `feeds add URL [--genre G] [--title T] [--no-discover]` | サイトかフィードの URL から登録する。ページ内の案内（`<link rel="alternate">`）やよくある場所（/feed など）から RSS を探し、genres.toml の `G` にも書き足す。初回は既存の記事を既読にするだけ |
+| `feeds add URL [--genre G\|auto] [--title T] [--no-discover]` | サイトかフィードの URL から登録する（`--genre auto` なら LLM がジャンルを決める）。ページ内の案内（`<link rel="alternate">`）やよくある場所（/feed など）から RSS を探し、genres.toml の `G` にも書き足す。初回は既存の記事を既読にするだけ |
 | `feeds rsshub URL` | URL が RSSHub のどのルートで取れるかを調べる（RSSHub の radar ルールを jsDelivr から取って `data/` に 7 日置く。RSSHub は動かさなくてよい）。`feeds add` でフィードが見つからないときも案内する |
 | `feeds remove ID\|URL` | 無効にして genres.toml から外す（保存済みの記事と投稿は残す） |
 | `feeds list\|enable\|disable\|option` | フィードの管理（例: `feeds option ID no_fulltext true`） |

@@ -73,6 +73,7 @@ class ImportStats:
     added: int = 0
     updated: int = 0
     skipped: int = 0
+    new: list[OpmlEntry] = field(default_factory=list)  # 新しく登録したもの
 
 
 def import_entries(
@@ -86,6 +87,7 @@ def import_entries(
             if existing is None:
                 db.insert_feed(conn, e.url, e.title, e.site_url, e.category)
                 stats.added += 1
+                stats.new.append(e)
             elif update:
                 conn.execute(
                     "UPDATE feeds SET title = ?, site_url = ?, category = ? WHERE id = ?",

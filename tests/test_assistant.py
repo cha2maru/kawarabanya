@@ -35,3 +35,46 @@ def test_build_intents(tmp_path):
     assert ask(conn, genres, "x", command="digest_now", genre="tech").argv == ["digest", "--genre", "tech"]
     assert ask(conn, genres, "天気は？").argv == [] and "頼めます" in ask(conn, genres, "?").summary
     assert assistant.build(None, "x", conn, genres).command == "unknown"  # LLM に繋がらない
+
+
+def test_opml_and_auto_genre(tmp_path):
+    conn, genres = make(tmp_path)
+    it = ask(conn, genres, "これ取り込んで", command="opml_import")
+    assert it.error  # 添付がない
+    it = assistant.build({"command": "opml_import", "genre": ""}, "これ取り込んで", conn, genres, "data/uploads/1_a.opml")
+    assert it.argv == ["import-opml", "data/uploads/1_a.opml", "--genre", "auto"] and it.confirm
+    it = assistant.build({"command": "opml_export"}, "OPML ちょうだい", conn, genres, export_path="out.opml")
+    assert it.argv == ["export-opml", "out.opml"] and it.attach == "out.opml" and not it.confirm
+    # ジャンルを言わずに追加 → LLM に決めさせる
+    it = ask(conn, genres, "https://example.com/ を追加して", command="feed_add")
+    assert it.argv == ["feeds", "add", "https://example.com/", "--genre", "auto"]
+
+
+def test_guess_genre_options(tmp_path):
+    import asyncio
+    import json
+    import math
+
+    import httpx
+
+    from kawarabanya.core.config import SummarizeConfig
+    from kawarabanya.core.llm import Summarizer
+    from kawarabanya.rss import placement
+
+    _, genres = make(tmp_path)
+    seen = []
+
+    def llm(req):
+        body = json.loads(req.content)
+        seen.append(body["messages"][0]["content"])
+        top = [{"token": "B", "logprob": math.log(0.9)}, {"token": "A", "logprob": math.log(0.1)}]
+        return httpx.Response(200, json={"choices": [{"message": {"content": "B"},
+                                                      "logprobs": {"content": [{"top_logprobs": top}]}}]})
+
+    async def go(titles):
+        async with Summarizer(SummarizeConfig(), transport=httpx.MockTransport(llm)) as s:
+            return await placement.guess_genre(s, genres, "サイト", titles)
+
+    assert asyncio.run(go(["プラモの新作"])) == "hobby"  # B = ホビー
+    assert "B: ホビー（例: VAPE）" in seen[0]  # サブジャンルの名前を手がかりに添える
+    assert asyncio.run(go([])) == "hobby"  # 見出しが取れなくてもサイト名で選ぶ

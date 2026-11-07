@@ -36,8 +36,20 @@ from kawarabanya.rss.sources.check import (
 
 
 def cmd_import_opml(cfg: Config, args: argparse.Namespace) -> int:
-    """import-opml: OPML のフィードを登録する。"""
+    """import-opml: OPML のフィードを登録し、genres.toml のジャンルにも書き足す。
+
+    ジャンルは --genre、なければ OPML のフォルダ名と同じジャンル（"tech" や "tech/ai"、"tech/dev" なら tech）。
+    --genre auto なら、フォルダ名で決まらないフィードを LLM が決める（フィードの最近の見出しから）。
+    どれにも当たらないフィードは登録だけする（genres.toml に書くまで投稿されない）。
+    """
+    from kawarabanya.rss import placement
+
     parsed = opml.parse_opml(args.file)
+    defs = _load_genres(cfg)
+    auto = args.genre == placement.AUTO
+    if args.genre and not auto and (defs is None or args.genre not in defs):
+        print(f"{args.genre}: genres.toml にないジャンルです", file=sys.stderr)
+        return 1
     conn = _open_db(cfg, args)
     stats = opml.import_entries(conn, parsed.entries, update=args.update)
     print(f"{args.file}: フィード {len(parsed.entries)} 件（重複 {len(parsed.duplicates)} 件は除外）")
@@ -45,7 +57,41 @@ def cmd_import_opml(cfg: Config, args: argparse.Namespace) -> int:
     if args.verbose:
         for url, category in parsed.duplicates:
             print(f"  重複: [{category}] {url}")
+    if defs is None or not stats.new:
+        return 0
+    written = {u for g in defs.values() for u in g.feeds}
+    chosen = {
+        e.url: (None if auto else args.genre)
+        or next((c for c in (e.category, genres.top_genre(e.category)) if c and c in defs), None)
+        for e in stats.new
+    }
+    if auto and (todo := [e for e in stats.new if chosen[e.url] is None and e.url not in written]):
+        print(f"  ジャンルを LLM で決めます: {len(todo)} 件", flush=True)
+
+        async def guess():
+            async with Summarizer(cfg.summarize) as s:
+                for e in todo:
+                    titles = await placement.recent_titles(e.url, cfg.general)
+                    chosen[e.url] = await placement.guess_genre(s, defs, e.title, titles)
+
+        asyncio.run(guess())
+    placed: dict[str, int] = {}
+    unplaced = 0
+    for e in stats.new:
+        genre = chosen[e.url]
+        if genre is None or e.url in written:
+            unplaced += genre is None
+            continue
+        genres.add_feed_url(cfg.general.genres_file, genre, e.url, e.title)
+        with conn:
+            conn.execute("UPDATE feeds SET category = ? WHERE url = ?", (genre, e.url))
+        placed[genre] = placed.get(genre, 0) + 1
+    if placed:
+        print("  genres.toml に書き足しました: " + "、".join(f"{g} {n} 件" for g, n in placed.items()))
+    if unplaced:
+        print(f"  ジャンルの決まらない {unplaced} 件は、genres.toml に書くまで投稿されません（--genre で指定・auto で LLM）")
     return 0
+
 
 def cmd_export_opml(cfg: Config, args: argparse.Namespace) -> int:
     """export-opml: 登録済みのフィードを OPML に書き出す。"""
@@ -264,12 +310,16 @@ def cmd_feeds_list(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def cmd_feeds_add(cfg: Config, args: argparse.Namespace) -> int:
-    """feeds add: サイトかフィードの URL からフィードを探して登録し、genres.toml の --genre にも書き足す。"""
+    """feeds add: サイトかフィードの URL からフィードを探して登録し、genres.toml の --genre にも書き足す。
+
+    --genre auto なら、フィードの最近の見出しから LLM がジャンルを決める。
+    """
+    from kawarabanya.rss import placement
     from kawarabanya.rss.sources.discover import discover
 
     conn = _open_db(cfg, args)
     defs = _load_genres(cfg)
-    if args.genre and defs is not None and args.genre not in defs:
+    if args.genre and args.genre != placement.AUTO and defs is not None and args.genre not in defs:
         print(f"{args.genre}: genres.toml にないジャンルです（{', '.join(g for g in defs if '/' not in g)}）", file=sys.stderr)
         return 1
     url, title = args.url, args.title
@@ -289,6 +339,16 @@ def cmd_feeds_add(cfg: Config, args: argparse.Namespace) -> int:
     if existing := db.find_feed_by_url(conn, url):
         print(f"登録済みです: {existing.id} {existing.title or ''} {existing.url}（{existing.category or '-'}）", file=sys.stderr)
         return 1
+    if args.genre == placement.AUTO:
+        args.genre = None
+        if defs is not None:
+
+            async def guess():
+                async with Summarizer(cfg.summarize) as s:
+                    return await placement.guess_genre(s, defs, title, await placement.recent_titles(url, cfg.general))
+
+            args.genre = asyncio.run(guess())
+            print(f"LLM が選んだジャンル: {args.genre or '決められませんでした（ジャンルなしで登録）'}")
     with conn:
         feed_id = db.insert_feed(conn, url, title, None, args.genre)
     if args.genre and defs is not None:

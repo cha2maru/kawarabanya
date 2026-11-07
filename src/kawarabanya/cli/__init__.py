@@ -54,9 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-v", "--verbose", action="store_true", help="詳細なログを出す")
     sub = p.add_subparsers(dest="command", required=True)
 
-    s = sub.add_parser("import-opml", help="OPML を取り込む")
+    s = sub.add_parser("import-opml", help="OPML を取り込む（genres.toml のジャンルにも書き足す）")
     s.add_argument("file", type=Path)
     s.add_argument("--update", action="store_true", help="登録済みフィードのタイトル・カテゴリを更新する")
+    s.add_argument("--genre", help="新しいフィードをすべてこのジャンルに入れる。auto ならフォルダ名で決まらないものを LLM が決める（省略時はフォルダ名と同じジャンルだけ）")
     s.set_defaults(func=cmd_import_opml)
 
     s = sub.add_parser("export-opml", help="OPML に書き出す")
@@ -132,7 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = feeds.add_parser("add", help="サイトかフィードの URL から登録する（RSS を自動で探し、genres.toml にも書く）")
     s.add_argument("url")
-    s.add_argument("--genre", help="ジャンルかサブジャンル（news、hobby/boardgame など）")
+    s.add_argument("--genre", help="ジャンルかサブジャンル（news、hobby/boardgame など）。auto なら LLM が決める")
     s.add_argument("--title")
     s.add_argument("--no-discover", action="store_true", help="フィードを探さず、URL をそのまま登録する")
     s.set_defaults(func=cmd_feeds_add)

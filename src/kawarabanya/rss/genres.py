@@ -261,12 +261,19 @@ def set_interest(file: str | Path, gpath: str, level: str) -> None:
 
 
 def add_feed_url(file: str | Path, gpath: str, url: str, comment: str | None = None) -> None:
-    """ジャンルの feeds の末尾に URL を書き足す（feeds がなければ作る）。"""
+    """ジャンルの feeds の末尾に URL を書き足す（feeds がなければ作る。1 行の feeds = [...] は複数行に直す）。"""
     line = f"  {json.dumps(url)},{f'  # {comment}' if comment else ''}\n"
 
     def edit(sec: str) -> str:
-        if m := re.search(r"^feeds\s*=\s*\[[^\]]*?(?=^\])", sec, re.MULTILINE | re.DOTALL):
-            return sec[: m.end()] + line + sec[m.end():]
+        # 複数行の feeds = [ ... ]。終わりは行頭の ]（コメントの「[N]ネタフル」などの ] で止まらないように）
+        if start := re.search(r"^feeds\s*=\s*\[[ \t]*(?:#.*)?\n", sec, re.MULTILINE):
+            end = re.compile(r"^\][ \t]*(?:#.*)?$", re.MULTILINE).search(sec, start.end())
+            if end:
+                return sec[: end.start()] + line + sec[end.start():]
+        if one := re.search(r"^feeds\s*=\s*\[(.*)\][ \t]*$", sec, re.MULTILINE):
+            items = one.group(1).strip().rstrip(",")
+            block = "feeds = [\n" + (f"  {items},\n" if items else "") + line + "]"
+            return sec[: one.start()] + block + sec[one.end():]
         head, _, rest = sec.partition("\n")
         return f"{head}\nfeeds = [\n{line}]\n{rest}"
 

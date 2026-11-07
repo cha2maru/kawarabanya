@@ -195,9 +195,10 @@ def test_edit_genres_toml(tmp_path):
     from kawarabanya.rss import genres
 
     p = tmp_path / "genres.toml"
-    p.write_text('# 手書きのコメント\n[news]\nlabel = "ニュース"\nfeeds = [\n  "https://a.example/feed",  # A\n'
-                 '  { url = "https://h.example/", item = "li" },\n]\n\n[news.world]\nlabel = "国際"\ndigest = false\n\n'
-                 '[tech]\nlabel = "テック"\n', encoding="utf-8")
+    p.write_text('# 手書きのコメント\n[news]\nlabel = "ニュース"\nfeeds = [\n  "https://a.example/feed",  # A [N]ネタフル\n'
+                 '  { url = "https://h.example/", item = "li" },\n]\n\n[news.world]\nlabel = "国際"\ndigest = false\n'
+                 'feeds = ["https://w.example/feed"]\n\n[tech]\nlabel = "テック"\n', encoding="utf-8")
+    genres.add_feed_url(p, "news/world", "https://w2.example/feed")  # 1 行の feeds = [...]
     genres.add_feed_url(p, "news", "https://b.example/rss", "B")
     genres.add_feed_url(p, "tech", "https://c.example/rss")  # feeds がなければ作る
     genres.set_interest(p, "news/world", "mute")  # digest = false を置き換える
@@ -205,6 +206,7 @@ def test_edit_genres_toml(tmp_path):
     g = genres.load_genres(p)
     assert g["news"].feeds == ["https://a.example/feed", "https://h.example/", "https://b.example/rss"]
     assert g["tech"].feeds == ["https://c.example/rss"]
+    assert g["news/world"].feeds == ["https://w.example/feed", "https://w2.example/feed"]
     assert (g["news/world"].interest, g["tech"].interest) == ("mute", "like")
     assert genres.remove_feed_urls(p, ["https://a.example/feed", "https://h.example/"]) == 2
     genres.set_interest(p, "tech", "normal")  # normal は書かない

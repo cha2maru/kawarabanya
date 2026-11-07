@@ -70,3 +70,28 @@ def test_sample_opml():
     assert len(r.entries) == 11
     assert len(r.duplicates) == 1  # GIGAZINE は 2 つのフォルダにある
     assert {e.category for e in r.entries} == {"news", "tech", "tech/dev", "game", "culture"}  # 入れ子のフォルダ
+
+
+def test_import_opml_writes_genres(tmp_path, capsys):
+    import argparse
+
+    from kawarabanya.cli.rss import cmd_import_opml
+    from kawarabanya.core.config import Config, GeneralConfig
+    from kawarabanya.rss.genres import load_genres
+
+    g = tmp_path / "genres.toml"
+    g.write_text('[news]\nlabel = "ニュース"\n\n[tech]\nlabel = "テック"\nfeeds = [\n  "https://gigazine.net/news/rss_2.0/",\n]\n',
+                 encoding="utf-8")
+    cfg = Config(general=GeneralConfig(db=str(tmp_path / "k.db"), genres_file=str(g)))
+    sample = Path(__file__).parent.parent / "sample.opml"
+    args = argparse.Namespace(file=sample, update=False, verbose=False, genre=None, db=None)
+    assert cmd_import_opml(cfg, args) == 0
+    defs = load_genres(g)
+    assert len(defs["news"].feeds) == 4  # フォルダ news → ジャンル news
+    assert len(defs["tech"].feeds) == 4  # tech と tech/dev → tech（GIGAZINE は書いてあるので足さない）
+    assert "3 件は、genres.toml に書くまで" in capsys.readouterr().out  # game・culture のジャンルはない
+
+    conn = db.connect(tmp_path / "k.db")
+    assert conn.execute("SELECT category FROM feeds WHERE url LIKE '%zenn%'").fetchone()[0] == "tech"
+    args.genre = "nope"
+    assert cmd_import_opml(cfg, args) == 1
