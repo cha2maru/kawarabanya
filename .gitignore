@@ -19,3 +19,4 @@ config.toml
 feedly.opml
 genres.toml
 docs/api/
+.claude/settings.local.json
