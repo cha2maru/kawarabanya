@@ -35,7 +35,7 @@ LIKE_EMOJI = "👍"
 DEFAULT_REACTION = {"emoji_id": None, "emoji_name": LIKE_EMOJI}
 
 UNCATEGORIZED = "uncategorized"
-# discord_channels で、1 日のまとめの投稿先（テキストチャンネル）を表すキー
+# discord_channels で、まとめの投稿先（テキストチャンネル）を表すキー
 DIGEST_KEY = "#digest"
 
 

@@ -1,6 +1,6 @@
 # feedpipe 設計（v0.2）
 
-最終更新: 2026-11-07（1 日のまとめ・投稿へのリンクを追加）
+最終更新: 2026-11-07（全サブジャンルからの振り分け・サブジャンルの自動作成と統合・まとめを 1 日 2 回に）
 
 ## 1. 目的と方針
 
@@ -15,7 +15,7 @@
 systemd --user: feedpipe-bot.service
 └─ feedpipe bot（常駐。discord.py で Gateway に接続）
    ├─ 子プロセス: scripts/llama-server.sh（llama.cpp + Qwen3.5-4B、OpenAI 互換 API :8080）
-   └─ 60 分ごとに子プロセス: feedpipe run → feedpipe digest --due（21 時以降に 1 日 1 回）
+   └─ 60 分ごと・まとめの時刻（6:30・18:30）に子プロセスを順に: feedpipe run → feedpipe genres suggest --apply --due → feedpipe digest --due（後の 2 つはまとめの時刻ごとに 1 回）
         取得 ─▶ 既読判定 ─▶ 全文抽出 ─▶ Markdown 保存 ─▶ サブジャンル・重要度判定 ─▶ 要約 ─▶ 投稿 ─▶ 👍 集計
         (httpx)  (SQLite)   (trafilatura) (archive/)     (LLM 1 トークン) (LLM)  (Webhook) (Bot API)
 
@@ -35,7 +35,7 @@ systemd --user: feedpipe-bot.service
 config.py  db.py  bot.py  discord_api.py  llm.py   # 共通: 設定・SQLite・常駐 Bot・Discord REST/Webhook・LLM クライアント
 rss/        # RSS 機能
   fetcher.py check.py item.py fulltext.py opml.py genres.py
-  archive.py（Markdown 保存） pipeline.py（取得〜要約の流れ = run） notify.py（投稿・👍） digest.py（1 日のまとめ）
+  archive.py（Markdown 保存） pipeline.py（取得〜要約の流れ = run） notify.py（投稿・👍） digest.py（まとめ） suggest.py（サブジャンルの自動作成・統合）
 cli/        # コマンド
   __init__.py（引数の定義と main） common.py（表示の補助・DB/Discord の用意） rss.py（RSS のコマンド） server.py（Discord 管理・bot）
 ```
@@ -73,7 +73,12 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 
 ### 3.3 重要度の判定と要約
 - **公開から 3 日以内の記事だけ**対象にする（投稿しない古い記事に CPU を使わない）。
-- **サブジャンルの判定（Jev 風）**: トップレベルのジャンルのフィードの記事は、そのジャンルのサブジャンル（`label`＋`description`）を A〜T、「どれにも当てはまらない」を Z として 1 文字で選ばせ、`items.subgenre` に記録する（1 件 約 1.5 秒）。サブジャンルの下に書いた（固定した）フィードは判定しない。判定したサブジャンルの重要度の基準を、次の判定に使う。
+- **サブジャンルの判定（Jev 風）**: トップレベルのジャンルのフィードの記事は、**全ジャンルのサブジャンル**（「ジャンル / サブジャンル」＋`description`）を A〜Y・a〜z、「どれにも当てはまらない」を Z として 1 文字で選ばせ、`items.subgenre` に記録する（1 件 約 1.5 秒）。RSS の URL の分類はあてにならない（tech のフィードにゴジラの映画の記事が来る）ので、フィードのジャンルの外も選べる。
+  - 採用する確率: フィードのジャンルの中なら 0.5 以上、**別のジャンルなら 0.8 以上**（`pipeline.MATCH_P` / `MOVE_P`）。11/07 の 220 件では、別のジャンルへの 0.8 以上はほぼ正しく（ゴジラの映画 tech → culture/映画 0.93、スポーツ news → culture/スポーツ、偽メール news → tech/セキュリティ）、0.6 未満は誤りが多かった。
+  - 別のジャンルに振り分けた記事は、**そのジャンルのフォーラムに投稿**し、まとめもそのジャンルに載る。投稿済みの記事はフォーラムを移せないので、付け直し（`discord retag`）ではフィードのジャンルの中だけで選ぶ。
+  - どれにも当てはまらなければ `items.subgenre` をトップレベルのジャンル（`news`）にする（タグなしで投稿。新しいサブジャンルの候補）。サブジャンルの下に書いた（固定した）フィードは判定しない。判定したサブジャンルの重要度の基準を、次の判定に使う。
+- **新しいサブジャンルの自動作成**（`genres suggest`、`rss/suggest.py`）: 直近 7 日の当てはまらなかった記事（最大 100 件）の見出しと、今のジャンル・サブジャンルの一覧を渡し、**思考モードで時間をかけて**「どのジャンルに、どんなサブジャンル（key / label / description）を作り、どの記事が入るか」を JSON で答えさせる（最大 3 個）。3 件以上の記事が入り、既存と名前が重ならない案だけを採用する。人の確認は挟まず、`--apply` で genres.toml の末尾に書き足し、記事の `items.subgenre` を書き換え、Discord のタグを揃えて投稿済みの記事のタグを付け直す。Bot はまとめの時刻ごとに、まとめの前に実行する（最後に実行した時刻は `state` テーブルの `suggest_at`）。
+- **サブジャンルの統合**: 足すとジャンルのサブジャンルがタグの上限（20）を超えるときは、先に思考モードで「似たもの・重なるものをまとめて 19 個以下に」させる（残す key・まとめた後の label / description を JSON で）。フィードを固定したサブジャンルはまとめない。まとめた分は genres.toml から消し、記事のサブジャンルを付け替える（Discord のタグも消える）。まとめきれなければ、そのジャンルには足さない。
 - **重要度の判定（Jev 風）**: 見出し＋冒頭 200 字を渡し、A（高い）/ B / C の 1 トークンだけを文法制約で出させて、A の確率を `items.priority` に記録する（1 件 約 1.5 秒）。判定基準はジャンルごとに `genres.toml` の `priority` で変えられる。ラベルの割合は偏る（tech では A が 7 割）ので、ラベルではなく確率で選ぶ。
 - **A の確率が 0.8 以上の記事だけ要約する**（`priority_threshold`。0 なら全件）。tech の 1 日分では約 3 割。判定に失敗したときは取りこぼさないよう要約する。
 - 要約: 本文の先頭 1,000 字を渡し、2〜3 文・120 字程度で要約させる（1 件 約 9 秒）。思考モードは切る。日本語と英数字の間の余分な空白は除く。
@@ -86,25 +91,27 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 - **1 記事 = 1 投稿**: スレッド名 = 記事タイトル、表示名 = フィード名、本文 = 要約（なければ本文の先頭 200 字）＋公開日時＋URL。メンションは無効化。
 - 公開から 3 日を過ぎた未通知の記事は投稿せず `stale` にする。1 回の実行で投稿するのは 30 件まで。
 - `discord setup` はジャンル構成に合わせてフォーラム・タグ・Webhook・既定リアクションを揃える（何度実行しても同じ結果）。`--prune` で対応しないフォーラムを削除する。
-- 投稿へのリンク（`https://discord.com/channels/{サーバー}/{スレッド}`）は、Markdown の Front Matter（`discord`）、1 日のまとめ、`interests` に載せる。
+- 投稿へのリンク（`https://discord.com/channels/{サーバー}/{スレッド}`）は、Markdown の Front Matter（`discord`）、まとめ、`interests` に載せる。
 - **👍 は「興味あり」の印**として集計するだけで、投稿の取捨選択には使わない（押されていない投稿は「見ていない」可能性があるので、興味なしとは扱わない）。投稿から 7 日以内の記事を 6 時間ごとに確認する。
 
-### 3.5 1 日のまとめ（digest）
-- まとめ用のテキストチャンネル（`[digest] channel`、既定 **#ニュース**。サーバー内を名前で探し、feedpipe 配下でなくてよい。なければ作らずに知らせる）に、**ジャンルごとに 1 メッセージ**「## 📰 テック MM/DD のまとめ（N 件）」（見出しは genres.toml の label）を 1 日 1 回投稿する（`[digest] hour` 以降の最初の定期実行で。投稿済みの日は `digests` テーブルで飛ばす）。リンク先は各ジャンルのフォーラムの投稿。
+### 3.5 まとめ（digest）
+- まとめ用のテキストチャンネル（`[digest] channel`、既定 **#ニュース**。サーバー内を名前で探し、feedpipe 配下でなくてよい。なければ作らずに知らせる）に、**ジャンルごとに 1 メッセージ**「## 📰 テック MM/DD HH:MM のまとめ（N 件）」（見出しは genres.toml の label）を投稿する。リンク先は各ジャンルのフォーラムの投稿。
+- 投稿するのは **`[digest] times` の時刻（既定 6:30 と 18:30）** と、**`feedpipe digest` を実行したとき**。どちらも**前回のまとめ以降の記事**（最大 `window_hours` = 24 時間）をまとめるので、記事は重ならない。定時は「その時刻より後にそのジャンルのまとめを投稿済みなら飛ばす」（Bot が止まっていた分は次の実行で投稿する）。
 - `genres.toml` で `digest = false` と書いたジャンル・サブジャンル（興味のうすいもの）の記事は、投稿はするがまとめには載せない（記事のサブジャンル＝`items.subgenre`、なければフィードのカテゴリで判断）。
-- 本文 = LLM が直近 24 時間の見出しから書く「今日の傾向」（2 文）＋ **重要度の高い順の投稿へのリンク**（上位 10 件、👍 の数付き）＋「ほか N 件」。2,000 字に収める。
+- 本文 = LLM が対象の記事の見出しから書く「傾向」（2 文）＋ **重要度の高い順の投稿へのリンク**（上位 10 件、👍 の数付き）＋「ほか N 件」。2,000 字に収める。
 - 「主な話題」を LLM に箇条書きさせる案は、関係のない話題を 1 行に混ぜたので採らず、一覧はコードで作る。
 - run の後に続けて実行する（要約サーバーを run と取り合わないため）。
-- 投稿したメッセージの ID を `digests` に残し、同じ Webhook で書き換え（`--update`、今日の分だけ）・削除（`--delete`、記録も消す）ができる。まとめの投稿先を別のチャンネルに替えると、それより前のまとめは書き換え・削除できない（Webhook は自分が投稿したメッセージしか操作できない）。
+- 投稿したメッセージの ID を `digests` に残し、同じ Webhook で書き換え（`--update`、最後のまとめ）・削除（`--delete`、最後のまとめか `--day` の日のすべて。記録も消す）ができる。まとめの投稿先を別のチャンネルに替えると、それより前のまとめは書き換え・削除できない（Webhook は自分が投稿したメッセージしか操作できない）。
 
 ## 4. データ（SQLite）
 
 | テーブル | 主な列 |
 |---|---|
 | `feeds` | url（移転で更新）/ original_url / title / category（= ジャンルのパス）/ enabled / disabled_reason / etag / last_modified / last_status / fail_count / latest_entry_at / initialized_at / options（JSON） |
-| `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ subgenre（LLM が判定したサブジャンル）/ content_hash（重複判定用の本文のハッシュ）/ notified_at / discord_thread_id / likes / likes_checked_at |
+| `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ subgenre（LLM が判定したサブジャンル。当てはまらなければトップレベルのジャンル）/ content_hash（重複判定用の本文のハッシュ）/ notified_at / discord_thread_id / likes / likes_checked_at |
 | `discord_channels` | category（トップレベルのジャンル。まとめの投稿先は `#digest`）/ guild_id / channel_id / webhook_url / tags（JSON: `feed:<id>` と `sub:<パス>` → タグ ID） |
-| `digests` | genre / day（ローカル日付）/ thread_id（投稿したメッセージの ID）— 投稿済みのまとめ |
+| `digests` | genre / day（投稿したローカル日時。11/07 までは日付）/ thread_id（投稿したメッセージの ID）/ created_at — 投稿済みのまとめ |
+| `state` | key / value — 定期処理の最後の実行時刻など（`suggest_at`） |
 
 `items.status`: `seen`（初回の既読化）→ `new` → `saved` → `notified`。投稿しなかったものは `stale`、同じ記事が保存済みだったものは `duplicate`（error に元の記事の id）、失敗は `error`。状態を記録するので、途中で落ちても次の実行で続きから処理する。列の追加は `db.ADDED_COLUMNS` で自動的に行う。
 

@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import httpx
 
@@ -293,11 +293,15 @@ def test_digest_render_and_post(tmp_path):
     assert lines[4] == "ほか 1 件"
     assert "thread_name" not in fake.posts[-1]  # テキストチャンネルへの普通のメッセージ
     t = httpx.MockTransport(fake.handler)
-    # 同じ日は二度投稿しない
-    assert asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24, transport=t)) is None
-    [mid] = [r[0] for r in conn.execute("SELECT thread_id FROM digests")]
+    # 定時（due_after）より後に投稿済みなら投稿しない。前回のまとめ以降の記事がなければ、指示されても投稿しない
+    slot = now - timedelta(minutes=10)
+    assert asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24, due_after=slot,
+                                          transport=t)) is None
+    assert asyncio.run(digest.post_digest(conn, None, "tech", now=now + timedelta(minutes=1), top=2,
+                                          window_hours=24, transport=t)) is None
+    [(mid, day)] = conn.execute("SELECT thread_id, day FROM digests").fetchall()
 
-    # 更新: 重要度が変わったら並びが変わって書き換わる
+    # 更新: 重要度が変わったら並びが変わって書き換わる（前のまとめがないので window_hours 分）
     with conn:
         conn.execute("UPDATE items SET priority = 0.99 WHERE key = 'a'")
     updated = asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24,
@@ -306,17 +310,29 @@ def test_digest_render_and_post(tmp_path):
     assert asyncio.run(digest.post_digest(conn, None, "other", now=now, top=2, window_hours=24,
                                           update=True, transport=t)) is None  # 未投稿は更新しない
 
-    # 削除: メッセージと記録が消え、もう一度投稿できる
-    day = now.astimezone().strftime("%Y-%m-%d")
+    # 次の定時: 前回のまとめ以降に投稿した記事だけ
+    later = now + timedelta(hours=12)
+    with conn:
+        iid = db.insert_item(conn, feed_id, "d", None, "新着", ago(hours=0), "notified")
+        db.update_item(conn, iid, notified_at=(now + timedelta(hours=1)).isoformat(timespec="seconds"), discord_thread_id="t-d")
+    nxt = asyncio.run(digest.post_digest(conn, None, "tech", now=later, top=2, window_hours=24,
+                                         due_after=later - timedelta(minutes=5), transport=t))
+    assert "（1 件）" in nxt.splitlines()[0] and "新着" in nxt
+
+    # 削除: メッセージと記録が消える
     assert digest.delete_digest(conn, "tech", day, transport=t)
     assert mid not in fake.messages and not digest.delete_digest(conn, "tech", day, transport=t)
-    assert asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24, transport=t))
+
+    # 投稿時刻: 直近の times
+    jst = timezone(timedelta(hours=9))
+    assert digest.last_slot(datetime(2026, 11, 8, 7, 0, tzinfo=jst), ["06:30", "18:30"]) == datetime(2026, 11, 8, 6, 30, tzinfo=jst).astimezone()
+    assert digest.last_slot(datetime(2026, 11, 8, 5, 0, tzinfo=jst), ["06:30", "18:30"]) == datetime(2026, 11, 7, 18, 30, tzinfo=jst).astimezone()
 
     # 興味のうすいサブジャンル（digest = false）は載せない
     since = datetime.now(UTC) - timedelta(hours=24)
     with conn:
         conn.execute("UPDATE items SET subgenre = 'tech/sports' WHERE key = 'b'")
-    assert {i.title for i in digest.collect(conn, "tech", since, frozenset({"tech/sports"}))} == {"小ネタ", "判定なし"}
+    assert {i.title for i in digest.collect(conn, "tech", since, frozenset({"tech/sports"}))} == {"小ネタ", "判定なし", "新着"}
     assert digest.collect(conn, "tech", since, frozenset({"tech"})) == []
 
     many = [digest.DigestItem(f"記事{i}" * 20, f"t{i}", 0.5, None) for i in range(50)]
@@ -371,3 +387,16 @@ def test_delete_duplicate_posts():
     assert fake.deleted == ["/channels/thread-c", "/channels/thread-b"]
     assert notify.delete_duplicate_posts(conn, client) == []
     assert conn.execute("SELECT discord_thread_id FROM items WHERE key = 'a'").fetchone()[0] == "thread-a"
+
+
+def test_pending_items_follow_item_genre(tmp_path):
+    _fake, client, conn = setup()
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "feedpipe",
+                     tech_genres(tmp_path))
+    apply_plan(client, conn, plan, "feedpipe")
+    feed_id = db.find_feed_by_url(conn, "https://6tech.example/既存フィード").id
+    with conn:
+        a = db.insert_item(conn, feed_id, "a", "https://a", "映画の記事", ago(hours=1), "saved")
+        db.update_item(conn, a, subgenre="culture/movie")  # tech のフィードでも、LLM が別のジャンルに振り分けた
+    assert notify.pending_items(conn, "culture") == ([], 1)  # culture のフォーラムへ（テストでは未作成なので送り先なし）
+    assert notify.pending_items(conn, "tech") == ([], 0)

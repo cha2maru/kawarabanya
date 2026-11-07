@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import shlex
 import sys
@@ -19,13 +20,15 @@ log = logging.getLogger(__name__)
 
 
 class Bot(discord.Client):
-    """常駐 Bot 本体。Discord に接続したまま、定期的に run と digest を別プロセスで実行する。"""
+    """常駐 Bot 本体。Discord に接続したまま、定期的に run・genres suggest・digest を別プロセスで実行する。"""
 
     def __init__(self, cfg: Config, config_args: list[str]):
         super().__init__(intents=discord.Intents.default())
         self.cfg = cfg
         self.config_args = config_args  # 子プロセスにも同じ --config / --db を渡す
         self.llm: asyncio.subprocess.Process | None = None
+        # 毎時の実行と定時の実行が重ならないよう、1 つずつ実行する
+        self._lock = asyncio.Lock()
 
     async def setup_hook(self) -> None:
         """接続前の準備。要約サーバーの起動と、定期実行の開始を行う。"""
@@ -37,6 +40,13 @@ class Bot(discord.Client):
         if self.cfg.bot.run_interval_minutes > 0:
             self.periodic_run.change_interval(minutes=self.cfg.bot.run_interval_minutes)
             self.periodic_run.start()
+        if self.cfg.digest.enabled and self.cfg.digest.times:
+            # まとめの時刻（6:30・18:30）ちょうどにも実行する
+            tz = datetime.datetime.now().astimezone().tzinfo
+            times = [datetime.time(*map(int, t.split(":")), tzinfo=tz) for t in self.cfg.digest.times]
+            self.scheduled_run = tasks.loop(time=times)(self.cycle)
+            self.scheduled_run.before_loop(self._wait_ready)
+            self.scheduled_run.start()
 
     async def on_ready(self) -> None:
         """ログインできたことをログに残す。"""
@@ -44,10 +54,17 @@ class Bot(discord.Client):
 
     @tasks.loop(minutes=60)
     async def periodic_run(self) -> None:
-        """定期実行の 1 回分。run で記事を取り込み、続けて期限を過ぎていればまとめを投稿する。"""
-        await self._feedpipe("run", "-q", *self.cfg.bot.run_args)
-        # 要約サーバーを run と取り合わないよう、run の後に続けて実行する
-        await self._feedpipe("digest", "--due")
+        """毎時の定期実行。"""
+        await self.cycle()
+
+    async def cycle(self) -> None:
+        """定期実行の 1 回分。run で記事を取り込み、まとめの時刻を過ぎていれば、サブジャンルを作ってからまとめを投稿する。"""
+        async with self._lock:
+            await self._feedpipe("run", "-q", *self.cfg.bot.run_args)
+            # 要約サーバーを run と取り合わないよう、run の後に続けて実行する。
+            # 新しいサブジャンルを先に作り、振り分け直した記事をまとめに反映する（まとめの時刻ごと）
+            await self._feedpipe("genres", "suggest", "--apply", "--due")
+            await self._feedpipe("digest", "--due")
 
     async def _feedpipe(self, *args: str) -> None:
         """feedpipe のサブコマンドを別プロセスで実行し、出力をログに流す。

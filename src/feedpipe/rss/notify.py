@@ -38,7 +38,9 @@ EXCERPT_CHARS = 200
 SEND_INTERVAL = 0.5
 
 
-TOP = "CASE WHEN instr(f.category, '/') > 0 THEN substr(f.category, 1, instr(f.category, '/') - 1) ELSE f.category END"
+# 記事のカテゴリ（LLM が判定したサブジャンル、なければフィードのカテゴリ）と、そのトップレベルのジャンル
+CAT = "COALESCE(i.subgenre, f.category)"
+TOP = f"CASE WHEN instr({CAT}, '/') > 0 THEN substr({CAT}, 1, instr({CAT}, '/') - 1) ELSE {CAT} END"
 
 
 @dataclass
@@ -236,11 +238,15 @@ def sync_likes(
 
 
 async def retag_posts(
-    conn: sqlite3.Connection, client: DiscordClient, summarizer: Summarizer | None, genres: dict[str, Genre] | None
+    conn: sqlite3.Connection,
+    client: DiscordClient,
+    summarizer: Summarizer | None,
+    genres: dict[str, Genre] | None,
+    item_ids: list[int] | None = None,
 ) -> tuple[int, int]:
     """投稿済みの記事のタグを、サブジャンルに付け直す。(書き換えた投稿数, 確認した投稿数) を返す。
 
-    サブジャンルが未判定の記事は（summarizer があれば）LLM で判定してから付ける。
+    サブジャンルが未判定の記事は（summarizer があれば）LLM で判定してから付ける。item_ids があればその記事だけ。
     """
     rows = conn.execute(
         "SELECT i.id, i.title, i.md_path, i.subgenre, i.discord_thread_id, f.category, d.tags"
@@ -249,12 +255,16 @@ async def retag_posts(
         " WHERE i.status = 'notified' AND i.discord_thread_id IS NOT NULL",
         (UNCATEGORIZED,),
     ).fetchall()
+    if item_ids is not None:
+        rows = [r for r in rows if r["id"] in set(item_ids)]
     changed = 0
     for r in rows:
         subgenre = r["subgenre"]
         if subgenre is None and summarizer and r["md_path"] and Path(r["md_path"]).exists():
             body = archive.read_body(r["md_path"])
-            category = await classify_item(conn, summarizer, genres, r["id"], r["title"], r["category"], body)
+            category = await classify_item(
+                conn, summarizer, genres, r["id"], r["title"], r["category"], body, allow_move=False
+            )
             subgenre = category if category != r["category"] else None
         tags = json.loads(r["tags"]) if r["tags"] else {}
         wanted = [t for t in [tags.get(f"sub:{subgenre or r['category']}")] if t]

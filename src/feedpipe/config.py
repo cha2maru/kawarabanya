@@ -94,13 +94,13 @@ class DiscordConfig:
 
 @dataclass
 class DigestConfig:
-    """[digest]: 1 日のまとめの投稿先・時刻・件数。"""
+    """[digest]: まとめの投稿先・時刻・件数。"""
     enabled: bool = True
     # まとめを投稿するテキストチャンネルの名前（サーバー内で探す。カテゴリは問わない）
     channel: str = "ニュース"
-    # この時刻（ローカル時刻の時）以降の最初の定期実行で、その日のまとめを投稿する
-    hour: int = 21
-    # まとめに載せる直近の時間数と、リンクを並べる件数
+    # まとめを投稿する時刻（ローカル時刻 "HH:MM"）。前回のまとめ以降の記事をまとめる
+    times: list[str] = field(default_factory=lambda: ["06:30", "18:30"])
+    # 前回のまとめがない・古いときに、さかのぼる時間数の上限と、リンクを並べる件数
     window_hours: int = 24
     top: int = 10
 

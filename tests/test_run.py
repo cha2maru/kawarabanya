@@ -229,7 +229,8 @@ def test_classify_subgenre(tmp_path):
 
     (tmp_path / "genres.toml").write_text(
         '[tech]\nfeeds = ["https://site.example/feed"]\n'
-        '[tech.ai]\nlabel = "AI"\ndescription = "生成 AI・機械学習"\n[tech.gadget]\nlabel = "ガジェット"\n',
+        '[tech.ai]\nlabel = "AI"\ndescription = "生成 AI・機械学習"\n[tech.gadget]\nlabel = "ガジェット"\n'
+        '[culture]\nlabel = "カルチャー"\n[culture.movie]\nlabel = "映画"\n',
         encoding="utf-8",
     )
     calls = []
@@ -238,9 +239,9 @@ def test_classify_subgenre(tmp_path):
         body = _json.loads(request.content)
         calls.append(body)
         user = body["messages"][1]["content"]
-        if "Z" in body.get("grammar", ""):  # サブジャンルの判定: 記事C は B（ガジェット）、それ以外は Z
-            best = "B" if "記事C" in user else "Z"
-            top = [{"token": best, "logprob": math.log(0.8)}, {"token": "A", "logprob": math.log(0.2)}]
+        if "Z" in body.get("grammar", ""):  # サブジャンルの判定: 記事C は C（別のジャンルの映画）、それ以外は Z
+            best = "C" if "記事C" in user else "Z"
+            top = [{"token": best, "logprob": math.log(0.85)}, {"token": "A", "logprob": math.log(0.15)}]
         else:  # 重要度の判定: すべて低い
             top = [{"token": "C", "logprob": math.log(0.9)}, {"token": "A", "logprob": math.log(0.1)}]
         return httpx.Response(200, json={"choices": [{"message": {"content": "A"},
@@ -259,11 +260,12 @@ def test_classify_subgenre(tmp_path):
     asyncio.run(go())
     classify = [c for c in calls if "Z" in c.get("grammar", "")]
     assert len(classify) == 2
-    assert "A: AI（生成 AI・機械学習）" in classify[0]["messages"][0]["content"]
-    assert classify[0]["grammar"] == 'root ::= "A" | "B" | "Z"'
+    assert "A: tech / AI（生成 AI・機械学習）" in classify[0]["messages"][0]["content"]  # 全ジャンルのサブジャンルから選ぶ
+    assert "C: カルチャー / 映画" in classify[0]["messages"][0]["content"]
+    assert classify[0]["grammar"] == 'root ::= "A" | "B" | "C" | "Z"'
     assert dict(conn.execute("SELECT key, subgenre FROM items WHERE status != 'seen'").fetchall()) == {
-        "b": None,  # どれにも当てはまらない
-        "c": "tech/gadget",
+        "b": "tech",  # どれにも当てはまらない（新しいサブジャンルの候補）
+        "c": "culture/movie",  # 別のジャンルでも確率が MOVE_P 以上なら移る
     }
 
 

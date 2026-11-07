@@ -221,6 +221,12 @@ async def _summarize(
     return "summarized"
 
 
+# 全サブジャンルから選ばせた結果の確率が、フィードのジャンルの中ならこれ以上、別のジャンルならこれ以上で採用する。
+# 11/07 の 220 件で、別のジャンルへの 0.8 以上はほぼ正しく（ゴジラの映画 tech → culture/movie 0.93 など）、0.6 未満は誤りが多い
+MATCH_P = 0.5
+MOVE_P = 0.8
+
+
 async def classify_item(
     conn: sqlite3.Connection,
     summarizer: Summarizer,
@@ -229,24 +235,35 @@ async def classify_item(
     title: str | None,
     category: str | None,
     content_md: str | None,
+    *,
+    allow_move: bool = True,
 ) -> str | None:
-    """トップレベルのジャンルのフィードの記事を、LLM でサブジャンルに振り分けて items.subgenre に記録する。
+    """トップレベルのジャンルのフィードの記事を、LLM で全サブジャンルから 1 つに振り分けて items.subgenre に記録する。
 
+    フィードのジャンル（RSS の URL の分類）とは別のジャンルのサブジャンルも選べる（MOVE_P 以上のとき）。
+    どれにも当てはまらなければ items.subgenre はトップレベルのジャンル（"news"）にする（新しいサブジャンルの候補）。
     サブジャンルに固定したフィード（genres.toml でサブジャンルの下に書いたもの）は判定しない。
-    振り分けたカテゴリ（なければ元のカテゴリ）を返す。
+    allow_move=False なら、フィードのジャンルの中だけで選ぶ（投稿済みの記事はフォーラムを移せないので）。
+    振り分けたカテゴリ（判定できなければ元のカテゴリ）を返す。
     """
     if not genres or not category or "/" in category:
         return category
-    subs = [g for g in genres.values() if g.is_sub and g.top == category]
+    subs = [g for g in genres.values() if g.is_sub and (allow_move or g.top == category)]
     if not subs:
         return category
-    result = await summarizer.classify(title, content_md, [(g.label, g.description) for g in subs])
-    if result is None or result[0] is None:
+    options = [(f"{genres[g.top].label if g.top in genres else g.top} / {g.label}", g.description) for g in subs]
+    result = await summarizer.classify(title, content_md, options)
+    if result is None:
         return category
-    sub = subs[result[0]].path
+    idx, p = result
+    sub = subs[idx] if idx is not None else None
+    if sub and p >= (MATCH_P if sub.top == category else MOVE_P):
+        path = sub.path
+    else:
+        path = category  # どれにも当てはまらない
     with conn:
-        db.update_item(conn, item_id, subgenre=sub)
-    return sub
+        db.update_item(conn, item_id, subgenre=path)
+    return path
 
 
 def load_genres_if_any(cfg: Config) -> dict[str, Genre] | None:

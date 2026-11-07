@@ -363,23 +363,93 @@ def cmd_genres_apply(cfg: Config, args: argparse.Namespace) -> int:
         print("未割り当てのフィードの記事は投稿されません（--disable-unassigned で取得も止められます）")
     return 0
 
+def cmd_genres_suggest(cfg: Config, args: argparse.Namespace) -> int:
+    """genres suggest: 当てはまるサブジャンルのなかった記事から、新しいサブジャンルを LLM に決めさせる。
+
+    タグの上限（20）を超えるジャンルは、似たサブジャンルを先にまとめる。
+    --apply で genres.toml に反映し、記事のサブジャンルを書き換え、Discord のタグを揃えて付け直す。
+    --due は Bot の定期実行用（まとめの時刻 [digest] times を過ぎて、まだ実行していなければ実行する）。
+    """
+    from ..rss import digest, suggest
+
+    defs = _require_genres(cfg)
+    conn = _open_db(cfg, args)
+    now = datetime.now(UTC)
+    if args.due:
+        slot = digest.last_slot(now, cfg.digest.times)
+        last = db.get_state(conn, "suggest_at")
+        if slot is None or (last and datetime.fromisoformat(last) >= slot):
+            return 0
+        db.set_state(conn, "suggest_at", now.isoformat(timespec="seconds"))
+    rows = suggest.unmatched_items(conn, defs, args.days)
+    print(f"どのサブジャンルにも当てはまらなかった記事: {len(rows)} 件（直近 {args.days} 日）", flush=True)
+
+    async def go():
+        async with Summarizer(cfg.summarize) as summarizer:
+            found = await suggest.suggest(conn, summarizer, defs, args.days)
+            return await suggest.plan_merges(summarizer, defs, found)
+
+    found, merges = asyncio.run(go())
+    titles = {r["id"]: r["title"] for r in rows}
+    for s in found:
+        print(f"  [{s.path}] {s.label}（{s.description}）: {len(s.item_ids)} 件")
+        for i in s.item_ids:
+            print(f"      - {titles.get(i)}")
+    for mg in merges:
+        names = "、".join(defs[f"{mg.genre}/{k}"].label if f"{mg.genre}/{k}" in defs else k for k in mg.keys)
+        print(f"  統合 [{mg.genre}] {names} → {mg.label}（{mg.description}）")
+    print(f"新しいサブジャンル: {len(found)} 件 / 統合: {len(merges)} 件")
+    if not found or not args.apply:
+        if found:
+            print("--apply で genres.toml に反映します")
+        return 0
+    removed = [r for mg in merges for r in mg.removed]
+    merged_ids = [r[0] for r in conn.execute(
+        f"SELECT id FROM items WHERE subgenre IN ({','.join('?' * len(removed))})", removed
+    )] if removed else []
+    suggest.apply(conn, cfg.general.genres_file, found, merges)
+    print(f"genres.toml に反映しました: {', '.join(s.path for s in found)}")
+    if not (cfg.discord.token and conn.execute("SELECT 1 FROM discord_channels LIMIT 1").fetchone()):
+        return 0
+    defs = _load_genres(cfg)
+    client = _discord_client(cfg)
+    guild = discord_api.resolve_guild(client, cfg.discord.guild_id)
+    only = [g.path for g in defs.values() if not g.is_sub]
+    plan = discord_api.make_plan(
+        client, guild, discord_api.feeds_by_category(conn, only), cfg.discord.parent_category, defs
+    )
+    discord_api.apply_plan(client, conn, plan, cfg.discord.webhook_name, nsfw=cfg.discord.nsfw)
+    ids = [i for s in found for i in s.item_ids] + merged_ids
+    changed, _ = asyncio.run(notify.retag_posts(conn, client, None, defs, ids))
+    print(f"Discord のタグを作り、投稿済みの {changed} 件のタグを付け直しました")
+    return 0
+
+
 def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
-    """digest: ジャンルごとの今日のまとめを投稿する（--update で書き換え、--delete で削除）。"""
+    """digest: ジャンルごとのまとめ（前回のまとめ以降の記事）を投稿する（--update で書き換え、--delete で削除）。"""
     from ..rss import digest
 
     conn = _open_db(cfg, args)
     now = datetime.now(UTC)
 
     if args.delete:
-        day = args.day or now.astimezone().strftime("%Y-%m-%d")
-        targets = args.genre or [r[0] for r in conn.execute("SELECT genre FROM digests WHERE day = ?", (day,))]
-        deleted = [g for g in targets if digest.delete_digest(conn, g, day)]
-        print(f"まとめ: {day} の {len(deleted)} 件を削除しました（{', '.join(deleted) or 'なし'}）")
+        if args.day:  # その日のまとめをすべて
+            rows = conn.execute("SELECT genre, day FROM digests WHERE day LIKE ?", (f"{args.day}%",)).fetchall()
+        else:  # ジャンルごとに最後のまとめ
+            rows = conn.execute(
+                "SELECT genre, day FROM digests d WHERE created_at = (SELECT MAX(created_at) FROM digests WHERE genre = d.genre)"
+            ).fetchall()
+        deleted = [r["genre"] for r in rows if (not args.genre or r["genre"] in args.genre)
+                   and digest.delete_digest(conn, r["genre"], r["day"])]
+        print(f"まとめ: {len(deleted)} 件を削除しました（{', '.join(deleted) or 'なし'}）")
         return 0
     if args.day:
-        raise ValueError("--day は --delete と一緒に使います（投稿・更新は今日のまとめだけ）")
-    if args.due and not (cfg.digest.enabled and digest.is_due(now, cfg.digest.hour)):
-        return 0
+        raise ValueError("--day は --delete と一緒に使います")
+    due_after = None
+    if args.due:
+        due_after = digest.last_slot(now, cfg.digest.times)
+        if not cfg.digest.enabled or due_after is None:
+            return 0
 
     defs = _load_genres(cfg)
     genre_list = args.genre or (
@@ -397,7 +467,7 @@ def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
                 g: await digest.post_digest(
                     conn, summarizer, g, label=defs[g].label if defs and g in defs else None,
                     excluded=excluded, now=now, top=cfg.digest.top, window_hours=cfg.digest.window_hours,
-                    update=args.update, dry_run=args.dry_run,
+                    due_after=due_after, update=args.update, dry_run=args.dry_run,
                 )
                 for g in genre_list
             }

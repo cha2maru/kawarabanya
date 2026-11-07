@@ -20,6 +20,7 @@ from .rss import (
     cmd_feeds_option,
     cmd_genres_apply,
     cmd_genres_list,
+    cmd_genres_suggest,
     cmd_import_opml,
     cmd_interests,
     cmd_likes,
@@ -87,14 +88,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dry-run", action="store_true", help="送らずに内容を表示する")
     s.set_defaults(func=cmd_notify)
 
-    s = sub.add_parser("digest", help="ジャンルごとの 1 日のまとめを投稿する（その日に投稿済みのジャンルは飛ばす）")
+    s = sub.add_parser("digest", help="ジャンルごとのまとめ（前回のまとめ以降の記事）を今すぐ投稿する")
     s.add_argument("--genre", nargs="+", help="このジャンルだけ")
-    s.add_argument("--due", action="store_true", help="[digest] hour を過ぎていなければ何もしない（Bot の定期実行用）")
+    s.add_argument("--due", action="store_true", help="[digest] times の直近の時刻より後に投稿済みなら何もしない（Bot の定期実行用）")
     s.add_argument("--dry-run", action="store_true", help="投稿せずに内容を表示する")
     g = s.add_mutually_exclusive_group()
-    g.add_argument("--update", action="store_true", help="投稿済みの今日のまとめを、最新の内容で書き換える")
-    g.add_argument("--delete", action="store_true", help="まとめを削除する（その日にもう一度投稿できるようになる）")
-    s.add_argument("--day", help="--delete で消す日（YYYY-MM-DD。既定は今日）")
+    g.add_argument("--update", action="store_true", help="最後に投稿したまとめを、最新の内容で書き換える")
+    g.add_argument("--delete", action="store_true", help="ジャンルごとに最後のまとめを削除する")
+    s.add_argument("--day", help="--delete で、この日（YYYY-MM-DD）のまとめをすべて消す")
     s.set_defaults(func=cmd_digest)
 
     s = sub.add_parser("bot", help="常駐 Bot を起動する（定期的に run を実行）")
@@ -144,6 +145,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dry-run", action="store_true", help="DB を更新しない")
     s.add_argument("--disable-unassigned", action="store_true", help="genres.toml にないフィードを無効にする")
     s.set_defaults(func=cmd_genres_apply)
+    s = gs.add_parser("suggest", help="当てはまるサブジャンルのなかった記事から、新しいサブジャンルを LLM に考えさせる")
+    s.add_argument("--apply", action="store_true", help="genres.toml に追加し、Discord のタグも作る")
+    s.add_argument("--days", type=int, default=7, help="直近この日数の記事から考える（既定 7）")
+    s.add_argument("--due", action="store_true", help="まとめの時刻を過ぎていて、今日まだ実行していなければ実行する（Bot 用）")
+    s.set_defaults(func=cmd_genres_suggest)
 
     dc = sub.add_parser("discord", help="Discord の準備（Bot を使う）").add_subparsers(dest="discord_command", required=True)
     s = dc.add_parser("invite-url", help="Bot をサーバーに招待する URL を表示")

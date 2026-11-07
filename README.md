@@ -44,10 +44,10 @@ uv run feedpipe feeds add "http://127.0.0.1:1200/github/repos/DIYgod" --category
 
 | コマンド | 内容 |
 |---|---|
-| `bot` | 常駐 Bot。60 分ごとに `run` と `digest --due` を別プロセスで実行する |
-| `digest [--genre X] [--due] [--dry-run]` | ジャンルごとの 1 日のまとめ（今日の傾向＋重要度順の投稿へのリンク）を #ニュース に投稿する |
-| `digest --update [--genre X]` | 投稿済みの今日のまとめを、最新の記事・重要度で作り直して書き換える |
-| `digest --delete [--genre X] [--day YYYY-MM-DD]` | まとめを削除する（記録も消えるので、その日にもう一度投稿できる） |
+| `bot` | 常駐 Bot。60 分ごとと、まとめの時刻（6:30・18:30）に `run`・`genres suggest --apply --due`・`digest --due` を順に別プロセスで実行する |
+| `digest [--genre X] [--due] [--dry-run]` | ジャンルごとのまとめ（前回のまとめ以降の記事の傾向＋重要度順の投稿へのリンク）を今すぐ #ニュース に投稿する。Bot は 6:30・18:30 に投稿する |
+| `digest --update [--genre X]` | 最後に投稿したまとめを、最新の記事・重要度で作り直して書き換える |
+| `digest --delete [--genre X] [--day YYYY-MM-DD]` | ジャンルごとに最後のまとめ（`--day` ならその日のすべて）を削除する |
 | `run [--category X] [--backfill N] [--no-fulltext] [--no-summary] [--no-notify]` | 取得 → 保存 → 重要度の判定 → 要約 → 投稿 → 👍 集計。初回のフィードは既存記事を既読にするだけ |
 | `summarize` | 保存済み・未投稿で要約のない最近の記事を、重要度を判定してから要約する |
 | `notify [--category X] [--limit N] [--dry-run]` | 保存済み・未投稿の記事を投稿する |
@@ -56,6 +56,7 @@ uv run feedpipe feeds add "http://127.0.0.1:1200/github/repos/DIYgod" --category
 | `check [--disable-dead]` | 死活チェック（移転していれば URL を更新） |
 | `feeds list\|add\|enable\|disable\|option` | フィードの管理（例: `feeds option ID no_fulltext true`） |
 | `genres list` / `genres apply [--dry-run] [--disable-unassigned]` | ジャンルの一覧 / genres.toml の反映 |
+| `genres suggest [--apply] [--days 7] [--due]` | どのサブジャンルにも当てはまらなかった記事から、新しいサブジャンルを LLM（思考モード）に決めさせる。タグの上限（20）を超えるジャンルは似たサブジャンルを先にまとめる。`--apply` で genres.toml に反映し、Discord のタグを揃えて付け直す（Bot はまとめの時刻ごとに自動で実行する） |
 | `discord setup [--apply] [--prune]` / `channels` / `test GENRE` / `guilds` / `invite-url` | フォーラム・タグ・Webhook の管理 |
 | `discord retag` | 投稿済みの記事のタグをサブジャンルに付け直す（未判定なら LLM で判定。Bot に「スレッドの管理」が必要） |
 | `discord delete-duplicates [--apply]` | 重複（同じ URL・同じ本文）と判定した記事のフォーラムの投稿を消す（なしは一覧だけ。「スレッドの管理」が必要） |
@@ -76,7 +77,7 @@ feeds = [
 
 priority = "A: 高い（…） B: 普通（…） C: 低い（…）"   # 重要度の判定基準（省略可）
 
-[tech.ai]                    # サブジャンル = フォーラムのタグ。記事ごとにローカル LLM が振り分ける
+[tech.ai]                    # サブジャンル = フォーラムのタグ。記事ごとにローカル LLM が全サブジャンルから振り分ける
 label = "AI"
 description = "生成 AI・機械学習・AI サービス"   # LLM が判定する手がかり
 
@@ -86,7 +87,7 @@ feeds = [ ... ]              # サブジャンルの下に書いたフィード�
 
 [culture.sports]
 label = "スポーツ"
-digest = false               # 投稿はするが、1 日のまとめには載せない（興味のうすいもの。ジャンルにも書ける）
+digest = false               # 投稿はするが、まとめには載せない（興味のうすいもの。ジャンルにも書ける）
 ```
 
 RSS のないサイトは、`feeds` に URL の代わりにテーブルを書くと一覧ページから記事を取り込む（HTML 取り込み）:
@@ -134,8 +135,8 @@ max_posts_per_run = 30
 [digest]
 enabled = true
 channel = "ニュース"         # まとめを投稿するテキストチャンネル（サーバー内を名前で探す。事前に作っておく）
-hour = 21                    # この時刻以降の最初の定期実行で、その日のまとめを投稿する
-window_hours = 24
+times = ["06:30", "18:30"]   # まとめを投稿する時刻。前回のまとめ以降の記事をまとめる（feedpipe digest で随時も投稿できる）
+window_hours = 24            # 前回のまとめがない・古いときに、さかのぼる時間数の上限
 top = 10                     # まとめに並べる投稿へのリンクの数
 
 [bot]

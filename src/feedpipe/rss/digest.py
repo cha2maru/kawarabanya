@@ -1,4 +1,7 @@
-"""ジャンルごとの 1 日のまとめを、まとめ用のテキストチャンネル（既定 #ニュース）に投稿する。
+"""ジャンルごとのまとめを、まとめ用のテキストチャンネル（既定 #ニュース）に投稿する。
+
+投稿するのは [digest] times の時刻（既定 6:30 と 18:30）と、`feedpipe digest` を実行したとき。
+どちらも前回のまとめ以降（最大 window_hours 時間）の記事をまとめる。
 
 まとめ = LLM が見出しの一覧から書く「今日の傾向」（2 文）＋ 重要度の高い順の投稿へのリンク。
 一覧は LLM に書かせない（関係のない話題を 1 行に混ぜることがあったため）。
@@ -8,11 +11,10 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 import httpx
 
-from .. import db
 from ..discord_api import (
     DIGEST_KEY,
     delete_webhook_message,
@@ -88,40 +90,48 @@ async def post_digest(
     now: datetime,
     top: int,
     window_hours: int,
+    due_after: datetime | None = None,
     update: bool = False,
     dry_run: bool = False,
     transport: httpx.BaseTransport | None = None,
 ) -> str | None:
-    """genre の今日のまとめを投稿し、本文を返す。見出しには label（なければ genre）を使う。
+    """genre のまとめ（前回のまとめ以降の記事）を投稿し、本文を返す。見出しには label（なければ genre）を使う。
 
-    update=True なら、投稿済みの今日のまとめを作り直して書き換える。
-    投稿する記事がない・送り先がない・（投稿なら）投稿済み・（更新なら）未投稿のときは None。
+    due_after があれば、その時刻より後にまとめを投稿済みなら何もしない（定時の投稿用）。
+    update=True なら、最後に投稿したまとめを作り直して書き換える。
+    投稿する記事がない・送り先がない・（更新なら）未投稿のときは None。
     """
-    day = now.astimezone().strftime("%Y-%m-%d")
     channel = _channel(conn)
-    posted = _posted(conn, genre, day)
-    if channel is None or (posted is not None) != update:
+    last, before = (_history(conn, genre) + [None, None])[:2]
+    if channel is None or (update and last is None):
         return None
-    items = collect(conn, genre, now - timedelta(hours=window_hours), excluded)
+    if not update and due_after and last and datetime.fromisoformat(last["created_at"]) >= due_after:
+        return None
+    # 前回のまとめ以降（更新なら、その前のまとめ以降）の記事。ただし window_hours 時間まで
+    prev = before if update else last
+    since = now - timedelta(hours=window_hours)
+    if prev:
+        since = max(since, datetime.fromisoformat(prev["created_at"]))
+    items = collect(conn, genre, since, excluded)
     if not items:
         return None
     trend = None
     if summarizer:
         trend = await summarizer.trend([i.title for i in items[:MAX_TREND_TITLES]])
-    header = f"## 📰 {label or genre} {now.astimezone():%m/%d} のまとめ（{len(items)} 件）"
+    header = f"## 📰 {label or genre} {now.astimezone():%m/%d %H:%M} のまとめ（{len(items)} 件）"
     content = header + "\n" + render(trend, items, channel["guild_id"], top, limit=MAX_CONTENT - len(header) - 1)
     if dry_run:
         return content
     payload = {"content": content, "allowed_mentions": {"parse": []}}
     if update:
-        edit_webhook_message(channel["webhook_url"], posted, payload, transport=transport)
+        edit_webhook_message(channel["webhook_url"], last["thread_id"], payload, transport=transport)
         return content
     # まとめはテキストチャンネル（#ニュース）に、ジャンルごとに 1 メッセージで投稿する
     msg = send_webhook(channel["webhook_url"], {"username": "feedpipe まとめ", **payload}, transport=transport)
     with conn:
         conn.execute(
-            "INSERT INTO digests (genre, day, thread_id, created_at) VALUES (?, ?, ?, ?)",
-            (genre, day, msg.get("id"), db.now_iso()),
+            "INSERT OR REPLACE INTO digests (genre, day, thread_id, created_at) VALUES (?, ?, ?, ?)",
+            (genre, now.astimezone().strftime("%Y-%m-%d %H:%M:%S"), msg.get("id"), now.isoformat(timespec="seconds")),
         )
     return content
 
@@ -129,7 +139,7 @@ async def post_digest(
 def delete_digest(
     conn: sqlite3.Connection, genre: str, day: str, *, transport: httpx.BaseTransport | None = None
 ) -> bool:
-    """day（YYYY-MM-DD）の genre のまとめを消す。投稿済みの記録も消すので、同じ日にもう一度投稿できる。"""
+    """genre のまとめ（digests.day が day のもの）を消す。投稿済みの記録も消す。"""
     channel = _channel(conn)
     message_id = _posted(conn, genre, day)
     if message_id is None:
@@ -139,6 +149,13 @@ def delete_digest(
     with conn:
         conn.execute("DELETE FROM digests WHERE genre = ? AND day = ?", (genre, day))
     return True
+
+
+def _history(conn: sqlite3.Connection, genre: str) -> list[sqlite3.Row]:
+    """genre の投稿済みのまとめ（新しい順）。"""
+    return conn.execute(
+        "SELECT day, thread_id, created_at FROM digests WHERE genre = ? ORDER BY created_at DESC", (genre,)
+    ).fetchall()
 
 
 def _channel(conn: sqlite3.Connection) -> sqlite3.Row | None:
@@ -153,6 +170,13 @@ def _posted(conn: sqlite3.Connection, genre: str, day: str) -> str | None:
     return row[0] if row else None
 
 
-def is_due(now: datetime, hour: int) -> bool:
-    """まとめを投稿する時刻（ローカル時刻の hour 時）を過ぎたか。"""
-    return now.astimezone().hour >= hour
+def last_slot(now: datetime, times: list[str]) -> datetime | None:
+    """now 以前で最も新しい投稿時刻（times は "HH:MM"、ローカル時刻）。times が空なら None。"""
+    local = now.astimezone()
+    slots = [
+        datetime.combine(day, time(*map(int, t.split(":"))), local.tzinfo)
+        for day in (local.date() - timedelta(days=1), local.date())
+        for t in times
+    ]
+    past = [s for s in slots if s <= local]
+    return max(past) if past else None

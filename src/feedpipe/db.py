@@ -50,13 +50,19 @@ CREATE TABLE IF NOT EXISTS items (
     UNIQUE (feed_id, key)
 );
 
--- 投稿済みの 1 日のまとめ（同じ日に二重に投稿しないため）
+-- 投稿済みのまとめ（day は投稿したローカル日時。書き換え・削除と、前回のまとめ以降の記事を選ぶため）
 CREATE TABLE IF NOT EXISTS digests (
     genre TEXT NOT NULL,
     day TEXT NOT NULL,          -- ローカル日付 YYYY-MM-DD
     thread_id TEXT,             -- 投稿したメッセージの ID
     created_at TEXT NOT NULL,
     PRIMARY KEY (genre, day)
+);
+
+-- 定期処理の最後の実行日など、小さな状態（key → value）
+CREATE TABLE IF NOT EXISTS state (
+    key TEXT PRIMARY KEY,
+    value TEXT
 );
 
 -- feedpipe のカテゴリ → Discord のチャンネルと Webhook
@@ -87,6 +93,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
         for name, decl in columns.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
+def get_state(conn: sqlite3.Connection, key: str) -> str | None:
+    """state テーブルの値（なければ None）。"""
+    row = conn.execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """state テーブルに値を書く。"""
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))
 
 
 def now_iso() -> str:

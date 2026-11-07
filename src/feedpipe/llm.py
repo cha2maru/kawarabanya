@@ -37,8 +37,8 @@ CLASSIFY_PROMPT = (
     "{choices}\n"
     "{letters} のいずれか 1 文字だけで答えてください。"
 )
-# 選択肢の記号（Discord のフォーラムのタグは 20 個までなので、サブジャンルも 20 個まで）
-CHOICE_LETTERS = "ABCDEFGHIJKLMNOPQRST"
+# 選択肢の記号（全ジャンルのサブジャンルから選ぶので 51 個まで）
+CHOICE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXY" + "abcdefghijklmnopqrstuvwxyz"
 NONE_LETTER = "Z"
 SAME_STORY_PROMPT = (
     "2 つのニュース記事が、同じ出来事（同じ事件・発表・話題）を報じたものかを判定します。"
@@ -97,7 +97,7 @@ class Summarizer:
     async def __aexit__(self, *exc: object) -> None:
         await self._client.aclose()
 
-    async def _chat(self, body: dict, what: str) -> dict | None:
+    async def _chat(self, body: dict, what: str, timeout: float | None = None) -> dict | None:
         """API を呼び、応答の JSON を返す。失敗したら None（接続できなければ以降も諦める）。"""
         if not self.available:
             return None
@@ -109,7 +109,7 @@ class Summarizer:
         }
         async with self._sem:
             try:
-                resp = await self._client.post("/chat/completions", json=body)
+                resp = await self._client.post("/chat/completions", json=body, timeout=timeout or self.cfg.timeout)
                 resp.raise_for_status()
                 return resp.json()
             except httpx.ConnectError as e:
@@ -138,6 +138,23 @@ class Summarizer:
             return None
         try:
             return clean_output(data["choices"][0]["message"]["content"]) or None
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    async def think(self, system: str, user: str, what: str, max_tokens: int = 8192, timeout: float = 1800) -> str | None:
+        """思考モードで時間をかけて答えさせ、答え（思考を除く）を返す。CPU では数分〜十数分かかる。"""
+        data = await self._chat(
+            {
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                "temperature": 0.6,
+                "max_tokens": max_tokens,
+                "chat_template_kwargs": {"enable_thinking": True},
+            },
+            what,
+            timeout,
+        )
+        try:
+            return re.sub(r"<think>.*?</think>", "", data["choices"][0]["message"]["content"], flags=re.DOTALL).strip()
         except (KeyError, IndexError, TypeError):
             return None
 
