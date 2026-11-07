@@ -9,7 +9,7 @@
 # - feeds にはフィードの URL を書く（取り込み時の URL でも、移転後の URL でもよい）。1 つの URL は 1 か所だけ
 # - フィードを移すには URL の行を別のジャンルに移して `kawarabanya genres apply`
 # - priority で、そのジャンルの重要度の判定基準を書ける（サブジャンルに書けばそちらが優先）
-# - digest = false と書いたジャンル・サブジャンルの記事は、投稿はするが まとめには載せない（興味のうすいもの）
+# - interest で好き嫌いを書ける: like（まとめの上位に寄せる）/ low（投稿はするが、まとめに載せない）/ mute（投稿もしない）
 # - RSS のないサイトは、feeds にテーブルで HTML 取り込み（CSS セレクタ）か拡張（extension = "名前"、extensions/名前.py）を書く（README）
 # - ジャンルを足したら `kawarabanya discord setup --apply` でフォーラム・タグを作る
 
