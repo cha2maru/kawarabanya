@@ -1,96 +1,102 @@
 # feedpipe
 
-RSS を全文 Markdown で保存し、Discord に通知するパイプライン（開発中）。設計は [DESIGN.md](DESIGN.md) を参照。
+個人用 Discord サーバーを管理する Bot。今ある機能は RSS: 記事を全文 Markdown で保存し、ローカル LLM で要約して、ジャンルごとの Discord フォーラムに投稿する。設計は [DESIGN.md](DESIGN.md)。
 
-## 使い方
-
-### 記事の取り込み
+## セットアップ
 
 ```sh
-uv run feedpipe run                          # 新着を取得し、全文 Markdown を archive/ に保存
-uv run feedpipe run --backfill 3             # 初回のフィードは、既読化に加えて新しい順に 3 件保存
-uv run feedpipe run --category tech --no-fulltext
-uv run feedpipe feeds option ID no_fulltext true   # このフィードは元記事を取りに行かない
+uv sync
+
+# 1. Discord Bot（https://discord.com/developers/applications で作成）
+cp .env.example .env                         # DISCORD_BOT_TOKEN を書く
+uv run feedpipe discord invite-url           # この URL からサーバーに招待する（サーバーは「コミュニティ」を有効に）
+
+# 2. フィードとジャンル
+uv run feedpipe import-opml feedly.opml
+uv run feedpipe check --disable-dead         # つながらないフィードを無効化
+cp genres.example.toml genres.toml           # ジャンルとフィードの URL を書く
+uv run feedpipe genres apply --disable-unassigned
+
+# 3. Discord のフォーラム（ジャンルごと）を作る
+uv run feedpipe discord setup                # 予定を表示
+uv run feedpipe discord setup --apply
+
+# 4. 要約用のモデル（llama.cpp と Qwen3.5-4B）を用意し、scripts/llama-server.sh のパスを合わせる
+
+# 5. 常駐 Bot をサービスとして起動
+cp scripts/feedpipe-bot.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now feedpipe-bot
+journalctl --user -u feedpipe-bot -f         # ログ
 ```
 
-- **初回のフィードは既存記事を既読にするだけ**で保存しない（通知の殺到を防ぐため）。2 回目以降に増えた記事が保存される。
-- 保存先: `archive/{カテゴリ}/{年}/{月}/{日付}_{タイトル}.md`（Front Matter 付き）
-- 本文は元記事から trafilatura で抽出し、取れない・短すぎる場合はフィード内の本文を使う（Front Matter の `source` に記録）。
+## コマンド
 
-### フィード管理
+| コマンド | 内容 |
+|---|---|
+| `bot` | 常駐 Bot。60 分ごとに `run` を別プロセスで実行する |
+| `run [--category X] [--backfill N] [--no-fulltext] [--no-summary] [--no-notify]` | 取得 → 保存 → 要約 → 投稿 → 👍 集計。初回のフィードは既存記事を既読にするだけ |
+| `summarize` | 保存済み・未投稿で要約のない最近の記事を要約する |
+| `notify [--category X] [--limit N] [--dry-run]` | 保存済み・未投稿の記事を投稿する |
+| `likes` / `interests [--days 30]` | 👍 の数を取得する / ジャンル・フィード別の 👍 の割合を表示する |
+| `import-opml FILE` / `export-opml FILE [--all]` | OPML の取り込み・書き出し |
+| `check [--disable-dead]` | 死活チェック（移転していれば URL を更新） |
+| `feeds list\|add\|enable\|disable\|option` | フィードの管理（例: `feeds option ID no_fulltext true`） |
+| `genres list` / `genres apply [--dry-run] [--disable-unassigned]` | ジャンルの一覧 / genres.toml の反映 |
+| `discord setup [--apply] [--prune]` / `channels` / `test GENRE` / `guilds` / `invite-url` | フォーラム・タグ・Webhook の管理 |
 
-```sh
-uv run feedpipe [-v] import-opml sample.opml # OPML を取り込む（-v で除外した重複を表示）
-uv run feedpipe check                        # 死活チェック（301/308 で移転していれば URL を更新）
-uv run feedpipe check --disable-dead         # 404/410・ホスト消滅・非フィードは即無効化
-uv run feedpipe feeds list [--all|--disabled] [--category tech]
-uv run feedpipe feeds add URL --category tech
-uv run feedpipe feeds enable|disable ID...
-uv run feedpipe export-opml out.opml [--all]
+全体のオプション: `-c config.toml`、`--db PATH`、`-v`（詳しいログ）。
+
+## 設定
+
+### genres.toml（git 管理外。見本: genres.example.toml）
+
+```toml
+[tech]                       # ジャンル = Discord のフォーラム 1 つ
+label = "テック"
+description = "IT・ガジェット・開発"
+feeds = [
+  "https://gigazine.net/news/rss_2.0/",  # GIGAZINE
+]
+
+[hobby.boardgame]            # サブジャンル = フォーラムのタグ
+label = "ボードゲーム"
+feeds = [ ... ]
 ```
 
-- DB は既定で `data/feedpipe.db`（`--db` か `config.toml` の `[general] db` で変更可）。
-- 連続 5 回失敗したフィードは自動で無効化される（`max_failures`）。
+フィードを移すには URL の行を別のジャンルに移して `genres apply` → `discord setup --apply`。書かれていないフィードの記事は投稿されない（保存はする）。
 
-## テスト
+### config.toml（git 管理外。すべて省略可）
+
+```toml
+[general]
+db = "data/feedpipe.db"
+archive_dir = "archive"
+max_failures = 5             # 連続失敗でフィードを無効化する回数
+
+[fulltext]
+min_length = 200             # 元記事の本文がこれより短ければフィードの本文と長い方を使う
+
+[summarize]
+endpoint = "http://127.0.0.1:8080/v1"
+model = "Qwen3.5-4B"
+max_age_days = 3             # 公開からこの日数以内の記事だけ要約する
+
+[discord]
+nsfw = true                  # フォーラムを年齢制限にする
+max_age_days = 3             # これより古い記事は投稿しない
+max_posts_per_run = 30
+
+[bot]
+run_interval_minutes = 60    # 0 なら定期実行しない
+run_args = []                # run に渡す追加の引数（例: ["--no-summary"]）
+llm_server_command = "scripts/llama-server.sh"   # Bot と一緒に要約サーバーを起動・停止する
+```
+
+## 開発
 
 ```sh
 uv run pytest
-```
-
-### Discord（案A: カテゴリごとのフォーラムに 1 記事 = 1 投稿）
-
-事前に Bot を作り、`.env` に `DISCORD_BOT_TOKEN=...` を書く。フォーラムを使うにはサーバーの「コミュニティ」を有効にしておく必要がある。
-
-```sh
-uv run feedpipe discord invite-url           # Bot の招待 URL
-uv run feedpipe discord setup [--apply]      # カテゴリごとにフォーラム（タグ = フィード名）と Webhook を作る
-uv run feedpipe notify [--dry-run]           # 保存済み・未通知の記事を投稿（run の最後にも自動で実行）
-uv run feedpipe run --no-notify              # 通知しない（次回の run / notify で送られる）
-```
-
-### 要約（ローカル LLM）
-
-`scripts/llama-server.sh` で llama.cpp の `llama-server`（既定モデル: Qwen3.5-4B Q4_K_M）を起動しておくと、
-`run` が保存した記事を要約し、Front Matter の `summary` と Discord の投稿本文に使う。サーバーが止まっていれば要約なしで続行する。
-
-```sh
-scripts/llama-server.sh &                    # http://127.0.0.1:8080/v1
-uv run feedpipe summarize                    # 保存済み・未通知で要約のない最近の記事を要約
-uv run feedpipe run --no-summary             # 要約しない
-```
-
-- 要約と投稿は **公開から 3 日以内の記事だけ**（`[summarize] max_age_days` / `[discord] max_age_days`）。
-  それより古い未通知の記事は投稿せず `stale` にする（Markdown の保存はする）。
-
-### ジャンル（genres.toml）
-
-投稿先のジャンルは `genres.toml`（git 管理外。書き方は `genres.example.toml`）で定義する。
-
-- `[news]` がジャンル（Discord のフォーラム 1 つ）、`[news.world]` がサブジャンル（フォーラム内のタグ）
-- フィードの移動は、URL の行を別のジャンルの `feeds` に移して反映する
-
-```sh
-uv run feedpipe genres list                  # ジャンルとフィード数
-uv run feedpipe genres apply [--dry-run]     # genres.toml の割り当てをフィードに反映
-uv run feedpipe discord setup --apply        # フォーラム・タグを更新（ジャンルに対応しないフォーラムは「未使用」と表示）
-```
-
-genres.toml に書かれていないフィードの記事は投稿されない（Markdown の保存はする）。
-
-### 常駐 Bot
-
-```sh
-uv run feedpipe bot                          # Discord に接続したまま、60 分ごとに run を別プロセスで実行
-```
-
-`config.toml` で調整する（すべて省略可）:
-
-```toml
-[bot]
-run_interval_minutes = 60                    # 0 なら定期実行しない
-run_args = []                                # run に渡す追加の引数（例: ["--no-summary"]）
-llm_server_command = "scripts/llama-server.sh"   # Bot と一緒に要約サーバーを起動・停止する
+uvx ruff check src tests
 ```
 
 対話機能（スラッシュコマンドなど）は `src/feedpipe/bot.py` の `Bot` に足していく。
