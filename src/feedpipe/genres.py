@@ -5,6 +5,8 @@
     description = "国内・国際・社会の総合ニュース"
     feeds = ["https://...", ...]
 
+    priority = "A: ... B: ... C: ..."   # 重要度の判定基準（省略可）
+
     [news.world]                # サブジャンル（Discord ではフォーラムのタグ）
     label = "国際"
     feeds = ["https://...", ...]
@@ -21,7 +23,7 @@ from pathlib import Path
 
 from . import db
 
-RESERVED = {"label", "description", "feeds"}
+RESERVED = {"label", "description", "feeds", "priority"}
 
 
 @dataclass
@@ -30,6 +32,8 @@ class Genre:
     label: str
     description: str = ""
     feeds: list[str] = field(default_factory=list)
+    # 重要度の判定基準（A/B/C の説明）。空ならトップレベルのジャンル → 既定の基準
+    priority: str = ""
 
     @property
     def top(self) -> str:
@@ -68,6 +72,7 @@ def load_genres(path: str | Path) -> dict[str, Genre]:
             label=table.get("label", key),
             description=table.get("description", ""),
             feeds=list(feeds),
+            priority=table.get("priority", ""),
         )
         for sub_key, sub in table.items():
             if sub_key in RESERVED:
@@ -123,3 +128,13 @@ def apply_genres(
                 if disable_unassigned:
                     db.set_enabled(conn, f.id, False, "no_genre")
     return result
+
+
+def priority_criteria(genres: dict[str, Genre] | None, category: str | None) -> str | None:
+    """カテゴリの判定基準。サブジャンル → トップレベルのジャンルの順に探す。"""
+    if not genres or not category:
+        return None
+    for path in (category, top_genre(category)):
+        if (g := genres.get(path)) and g.priority:
+            return g.priority
+    return None

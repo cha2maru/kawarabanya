@@ -128,6 +128,7 @@ def test_markdown_path_and_collision(tmp_path):
 
 def test_summarize_on_save(tmp_path):
     import json as _json
+    import math
 
     from feedpipe.summarize import Summarizer, clean_output
 
@@ -136,7 +137,13 @@ def test_summarize_on_save(tmp_path):
     def llm(request: httpx.Request) -> httpx.Response:
         body = _json.loads(request.content)
         calls.append(body)
-        title = body["messages"][1]["content"].split("\n")[0]
+        user = body["messages"][1]["content"]
+        if body["max_tokens"] == 1:  # 重要度の判定: 記事C だけ A の確率が高い
+            p_a = 0.9 if "記事C" in user else 0.2
+            top = [{"token": "A", "logprob": math.log(p_a)}, {"token": "C", "logprob": math.log(1 - p_a)}]
+            return httpx.Response(200, json={"choices": [{"message": {"content": "A"},
+                                                          "logprobs": {"content": [{"top_logprobs": top}]}}]})
+        title = user.split("\n")[0]
         return httpx.Response(200, json={"choices": [{"message": {"content": f"<think></think>{title} の要約。11 月 30 日まで"}}]})
 
     conn, cfg = make(tmp_path)
@@ -151,13 +158,30 @@ def test_summarize_on_save(tmp_path):
                                    transport=httpx.MockTransport(site.handler))
 
     asyncio.run(go())
-    assert len(calls) == 2
-    assert calls[0]["chat_template_kwargs"] == {"enable_thinking": False}
-    summaries = sorted(r[0] for r in conn.execute("SELECT summary FROM items WHERE summary IS NOT NULL"))
-    assert summaries == ["タイトル: 記事Bの要約。11月30日まで", "タイトル: 記事Cの要約。11月30日まで"]
+    judged = [c for c in calls if c["max_tokens"] == 1]
+    summarized = [c for c in calls if c["max_tokens"] != 1]
+    assert len(judged) == 2 and len(summarized) == 1  # 基準（0.8）以上の記事C だけ要約
+    assert judged[0]["grammar"] == 'root ::= "A" | "B" | "C"'
+    assert summarized[0]["chat_template_kwargs"] == {"enable_thinking": False}
+    rows = dict(conn.execute("SELECT key, priority FROM items WHERE priority IS NOT NULL").fetchall())
+    assert rows == {"b": 0.2, "c": 0.9}
+    [summary] = [r[0] for r in conn.execute("SELECT summary FROM items WHERE summary IS NOT NULL")]
+    assert summary == "タイトル: 記事Cの要約。11月30日まで"
     md = next(p for p in (tmp_path / "archive").rglob("*.md") if "記事C" in p.name).read_text()
     assert 'summary: "タイトル: 記事Cの要約。11月30日まで"' in md
     assert clean_output("AI 技術と 9 日") == "AI技術と9日"
+
+    # 基準を 0 にすると判定せず全件要約する
+    calls.clear()
+    cfg.summarize.priority_threshold = 0
+    from feedpipe.run import summarize_pending
+
+    async def go2():
+        async with Summarizer(cfg.summarize, transport=httpx.MockTransport(llm)) as s:
+            return await summarize_pending(conn, s, cfg)
+
+    assert asyncio.run(go2())["summarized"] == 1  # 残っていた記事B
+    assert all(c["max_tokens"] != 1 for c in calls)
 
 
 def test_summarize_skips_old_and_unavailable(tmp_path):

@@ -1,6 +1,6 @@
 # feedpipe 設計（v0.2）
 
-最終更新: 2026-11-07
+最終更新: 2026-11-07（重要度の判定を追加）
 
 ## 1. 目的と方針
 
@@ -16,8 +16,8 @@ systemd --user: feedpipe-bot.service
 └─ feedpipe bot（常駐。discord.py で Gateway に接続）
    ├─ 子プロセス: scripts/llama-server.sh（llama.cpp + Qwen3.5-4B、OpenAI 互換 API :8080）
    └─ 60 分ごとに子プロセス: feedpipe run
-        取得 ─▶ 既読判定 ─▶ 全文抽出 ─▶ Markdown 保存 ─▶ 要約 ─▶ 投稿 ─▶ 👍 集計
-        (httpx)  (SQLite)   (trafilatura) (archive/)     (LLM)   (Webhook) (Bot API)
+        取得 ─▶ 既読判定 ─▶ 全文抽出 ─▶ Markdown 保存 ─▶ 重要度判定 ─▶ 要約 ─▶ 投稿 ─▶ 👍 集計
+        (httpx)  (SQLite)   (trafilatura) (archive/)     (LLM 1 トークン) (LLM)  (Webhook) (Bot API)
 
 設定・データ:
   config.toml   … 動作設定（git 管理外）        .env         … Bot トークン（git 管理外）
@@ -42,10 +42,13 @@ systemd --user: feedpipe-bot.service
 - 本文は元記事から trafilatura で Markdown 抽出。取れない・短すぎる（200 字未満）ときはフィードの本文と長い方を使い、Front Matter の `source` に記録する。
 - 保存先: `archive/{カテゴリ}/{年}/{月}/{日付}_{タイトル}.md`（Front Matter: title / url / feed / category / published / fetched / source / summary）。
 
-### 3.3 要約
-- llama-server（OpenAI 互換 API）に本文の先頭 3,000 字を渡し、2〜3 文・120 字程度で要約させる。思考モードは切る。日本語と英数字の間の余分な空白は除く。
-- **公開から 3 日以内の記事だけ**要約する（投稿しない古い記事に CPU を使わない）。
-- サーバーに繋がらなければ、その回は要約なしで続ける（後から `summarize` で補える）。
+### 3.3 重要度の判定と要約
+- **公開から 3 日以内の記事だけ**対象にする（投稿しない古い記事に CPU を使わない）。
+- **重要度の判定（Jev 風）**: 見出し＋冒頭 200 字を渡し、A（高い）/ B / C の 1 トークンだけを文法制約で出させて、A の確率を `items.priority` に記録する（1 件 約 1.5 秒）。判定基準はジャンルごとに `genres.toml` の `priority` で変えられる。ラベルの割合は偏る（tech では A が 7 割）ので、ラベルではなく確率で選ぶ。
+- **A の確率が 0.8 以上の記事だけ要約する**（`priority_threshold`。0 なら全件）。tech の 1 日分では約 3 割。判定に失敗したときは取りこぼさないよう要約する。
+- 要約: 本文の先頭 1,000 字を渡し、2〜3 文・120 字程度で要約させる（1 件 約 9 秒）。思考モードは切る。日本語と英数字の間の余分な空白は除く。
+- 要約しなかった記事も、本文の先頭 200 字で投稿する（👍 で好みを集めるため）。
+- サーバーに繋がらなければ、その回は判定・要約なしで続ける（後から `summarize` で補える）。
 
 ### 3.4 Discord
 - **ジャンル 1 つ = フォーラム 1 つ**（親カテゴリ「feedpipe」の下。年齢制限オン）。**サブジャンルとフィード名はフォーラムのタグ**（上限 20 個、名前は 20 字）。
@@ -59,7 +62,7 @@ systemd --user: feedpipe-bot.service
 | テーブル | 主な列 |
 |---|---|
 | `feeds` | url（移転で更新）/ original_url / title / category（= ジャンルのパス）/ enabled / disabled_reason / etag / last_modified / last_status / fail_count / latest_entry_at / initialized_at / options（JSON） |
-| `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / notified_at / discord_thread_id / likes / likes_checked_at |
+| `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ notified_at / discord_thread_id / likes / likes_checked_at |
 | `discord_channels` | category（トップレベルのジャンル）/ channel_id / webhook_url / tags（JSON: `feed:<id>` と `sub:<パス>` → タグ ID） |
 
 `items.status`: `seen`（初回の既読化）→ `new` → `saved` → `notified`。投稿しなかったものは `stale`、失敗は `error`。状態を記録するので、途中で落ちても次の実行で続きから処理する。列の追加は `db.ADDED_COLUMNS` で自動的に行う。
@@ -92,14 +95,19 @@ LFM（軽さ優先で最初に選んだ）は事実の誤りがあったため�
 |---|---|
 | feedly.opml | 333 フィード → つながる 189 → 1 年以内に更新あり 103 → 重複を除いて **94 件をジャンルに割り当て** |
 | 記事の量 | tech だけで 1 日約 120 件。news は重複フィード 9 件を外して約 160 件/日（外す前は 500 件超） |
-| Qwen3.5-4B の速さ（CPU） | 読み込み約 130 トークン/秒、出力約 14 トークン/秒 → **要約 1 件 約 16 秒** |
-| 全件要約した場合 | 1 日 400 件で約 1.8 時間の CPU |
+| Qwen3.5-4B の速さ（CPU） | 読み込み約 130 トークン/秒、出力約 14 トークン/秒 |
+| 要約 1 件 | 入力 3,000 字で約 16 秒 → **1,000 字で約 9 秒**（品質はほぼ同じ） |
+| 重要度の判定 1 件 | **約 1.45 秒**（入力 約 240 トークン、出力 1 トークン） |
+| tech 1 日分（118 件）の判定 | A の確率 0.9 以上 23 件 / **0.8 以上 36 件** / 0.7 以上 51 件。上位は大きな事件、下位はアクセサリー・グッズ紹介 |
+| 1 日 400 件の CPU 時間 | 全件を 3,000 字で要約: 約 107 分 → **全件判定＋上位 3 割を 1,000 字で要約: 約 28 分** |
+| 似た見出しの記事をまとめる | 118 件 → 109 話題（8% 減）。効果が小さいので採用しない |
 
 ## 7. 今後の候補・未決事項
 
 1. **1 日のまとめ（ジャンルごとのダイジェスト）**: 見出しの一覧から「今日の傾向」と「主な話題 5 つ」を作る試作中。1 日 100 件を超えると全件の一覧は載せられない（Discord は 1 メッセージ 2,000 字、LLM の入力は 8,192 トークン）。
-2. **要約前のふるい（Jev 風の判定）**: 見出し＋冒頭で「要約・投稿する価値があるか」を 1 トークン＋確率で判定する（見込み 1.2 秒/件）。CPU 時間を 1 日 107 分 → 40 分程度に減らせる見込み。精度は 👍 のデータと照らして確かめる。
-3. **スラッシュコマンド**: `/feed add` など。次に作る機能が決まってから。
-4. **WSL2 での常駐**: Windows が起動している間だけ動く。WSL の起動時に自動で立ち上げるには `loginctl enable-linger` が必要。
-5. **プロジェクト名**: Bot 全体の名前にするか（今は `feedpipe`）。
-6. タグ名が 20 字で途中から切れる（必要なら genres.toml でフィードごとの短い名前を指定できるようにする）。
+2. **重要度の基準の調整**: 0.8 は tech の 1 日分で決めた仮の値。👍 がたまったら、👍 の付いた記事の priority と照らして調整する。tech 以外のジャンルの判定基準も書く。
+3. **llama-server のスレッド数**: 8 → 16 で読み込みが速くなるかは未測定。
+4. **スラッシュコマンド**: `/feed add` など。次に作る機能が決まってから。
+5. **WSL2 での常駐**: Windows が起動している間だけ動く。WSL の起動時に自動で立ち上げるには `loginctl enable-linger` が必要。
+6. **プロジェクト名**: Bot 全体の名前にするか（今は `feedpipe`）。
+7. タグ名が 20 字で途中から切れる（必要なら genres.toml でフィードごとの短い名前を指定できるようにする）。

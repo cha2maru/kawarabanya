@@ -4,6 +4,7 @@
 # - [ジャンル.サブジャンル] はフォーラム内のタグになる（サブジャンルの下にはジャンルを作れない）
 # - feeds にはフィードの URL を書く（取り込み時の URL でも、移転後の URL でもよい）。1 つの URL は 1 か所だけ
 # - フィードを移すには URL の行を別のジャンルに移して `feedpipe genres apply`
+# - priority で、そのジャンルの重要度の判定基準を書ける（サブジャンルに書けばそちらが優先）
 # - ジャンルを足したら `feedpipe discord setup --apply` でフォーラム・タグを作る
 
 [news]
@@ -22,6 +23,8 @@ feeds = [
 [tech]
 label = "テック"
 description = "IT・ガジェット・開発"
+# 重要度の判定基準（省略すると既定の基準）。A の確率が [summarize] priority_threshold 以上の記事だけ要約する
+priority = "A: 高い（多くの人に影響する事件・大きな発表・業界の転換点） B: 普通（一般的な新製品・アップデート・解説） C: 低い（セール・広告・小ネタ・ランキング）"
 feeds = [
   "https://gigazine.net/news/rss_2.0/",  # GIGAZINE
 ]

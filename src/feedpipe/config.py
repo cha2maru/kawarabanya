@@ -54,12 +54,15 @@ class SummarizeConfig:
     enabled: bool = True
     endpoint: str = "http://127.0.0.1:8080/v1"
     model: str = "Qwen3.5-4B"
-    max_input_chars: int = 3000
+    # 読み込みが CPU 時間の大半なので短めにする（3,000 → 1,000 字で 16 秒 → 9 秒、品質はほぼ同じ）
+    max_input_chars: int = 1000
     max_tokens: int = 300
     temperature: float = 0.3
     timeout: float = 180.0
     # 公開からこの日数以内の記事だけ要約する（通知しない古い記事に CPU を使わない）
     max_age_days: int = 3
+    # 要約の前に重要度（A の確率）を判定し、これ以上の記事だけ要約する。0 なら判定せず全件要約する
+    priority_threshold: float = 0.8
 
 
 @dataclass

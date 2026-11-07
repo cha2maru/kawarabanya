@@ -34,8 +34,8 @@ journalctl --user -u feedpipe-bot -f         # ログ
 | コマンド | 内容 |
 |---|---|
 | `bot` | 常駐 Bot。60 分ごとに `run` を別プロセスで実行する |
-| `run [--category X] [--backfill N] [--no-fulltext] [--no-summary] [--no-notify]` | 取得 → 保存 → 要約 → 投稿 → 👍 集計。初回のフィードは既存記事を既読にするだけ |
-| `summarize` | 保存済み・未投稿で要約のない最近の記事を要約する |
+| `run [--category X] [--backfill N] [--no-fulltext] [--no-summary] [--no-notify]` | 取得 → 保存 → 重要度の判定 → 要約 → 投稿 → 👍 集計。初回のフィードは既存記事を既読にするだけ |
+| `summarize` | 保存済み・未投稿で要約のない最近の記事を、重要度を判定してから要約する |
 | `notify [--category X] [--limit N] [--dry-run]` | 保存済み・未投稿の記事を投稿する |
 | `likes` / `interests [--days 30]` | 👍 の数を取得する / ジャンル・フィード別の 👍 の割合を表示する |
 | `import-opml FILE` / `export-opml FILE [--all]` | OPML の取り込み・書き出し |
@@ -57,6 +57,8 @@ description = "IT・ガジェット・開発"
 feeds = [
   "https://gigazine.net/news/rss_2.0/",  # GIGAZINE
 ]
+
+priority = "A: 高い（…） B: 普通（…） C: 低い（…）"   # 重要度の判定基準（省略可）
 
 [hobby.boardgame]            # サブジャンル = フォーラムのタグ
 label = "ボードゲーム"
@@ -80,6 +82,8 @@ min_length = 200             # 元記事の本文がこれより短ければフ�
 endpoint = "http://127.0.0.1:8080/v1"
 model = "Qwen3.5-4B"
 max_age_days = 3             # 公開からこの日数以内の記事だけ要約する
+max_input_chars = 1000       # 要約に渡す本文の文字数
+priority_threshold = 0.8     # 重要度（A の確率）がこれ以上の記事だけ要約する。0 なら全件
 
 [discord]
 nsfw = true                  # フォーラムを年齢制限にする

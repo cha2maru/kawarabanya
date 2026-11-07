@@ -254,11 +254,14 @@ def cmd_summarize(cfg: Config, args: argparse.Namespace) -> int:
 
     async def go():
         async with Summarizer(cfg.summarize) as summarizer:
-            return await summarize_pending(conn, summarizer, cfg.summarize.max_age_days, args.limit)
+            return await summarize_pending(conn, summarizer, cfg, args.limit)
 
-    done, total = asyncio.run(go())
-    print(f"要約: {done} / {total} 件（公開から {cfg.summarize.max_age_days} 日以内・未通知の記事）")
-    return 0 if done == total else 1
+    r = asyncio.run(go())
+    print(
+        f"要約 {r['summarized']} 件 / 重要度が基準（{cfg.summarize.priority_threshold}）未満のため要約しない {r['low']} 件"
+        f" / 失敗 {r['failed']} 件（公開から {cfg.summarize.max_age_days} 日以内・未通知の記事）"
+    )
+    return 1 if r["failed"] else 0
 
 
 # --- feeds -----------------------------------------------------------------
