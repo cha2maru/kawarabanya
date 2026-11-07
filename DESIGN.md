@@ -32,9 +32,10 @@ systemd --user: kawarabanya-bot.service
 ### 2.1 コードの構成（`src/kawarabanya/`）
 
 ```
-config.py  db.py  bot.py  discord_api.py  llm.py   # 共通: 設定・SQLite・常駐 Bot・Discord REST/Webhook・LLM クライアント
+config.py  db.py  bot.py  assistant.py  discord_api.py  llm.py   # 共通: 設定・SQLite・常駐 Bot・日本語の依頼の解釈・Discord REST/Webhook・LLM クライアント
 rss/        # RSS 機能
-  fetcher.py check.py item.py fulltext.py opml.py genres.py
+  fetcher.py check.py item.py fulltext.py opml.py genres.py discover.py（RSS の自動検出）
+  htmlsource.py（HTML 取り込み・文字コードの判別） extensions.py（サイト別の拡張）
   archive.py（Markdown 保存） pipeline.py（取得〜要約の流れ = run） notify.py（投稿・👍） digest.py（まとめ） suggest.py（サブジャンルの自動作成・統合）
 cli/        # コマンド
   __init__.py（引数の定義と main） common.py（表示の補助・DB/Discord の用意） rss.py（RSS のコマンド） server.py（Discord 管理・bot）
