@@ -244,6 +244,10 @@ uv run --with pdoc pdoc kawarabanya -o docs/api   # API ドキュメント（doc
 
 コードの構成と依存の向き（`cli`・`bot` → `rss` → `core`）、書き方は [docs/CODING.md](docs/CODING.md)。Discord から頼めることを足すときは `src/kawarabanya/bot/assistant.py` の `COMMANDS` に、サイト別の取り込みは `extensions/` に足す。
 
+## 変更の記録
+
+[CHANGELOG.md](CHANGELOG.md)。リリースは [GitHub の Releases](https://github.com/cha2maru/kawarabanya/releases)。
+
 ## ライセンス
 
 [MIT](LICENSE)
