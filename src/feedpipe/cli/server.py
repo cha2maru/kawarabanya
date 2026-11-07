@@ -14,7 +14,7 @@ def cmd_discord_invite_url(cfg: Config, args: argparse.Namespace) -> int:
     """discord invite-url: 必要な権限付きの Bot 招待 URL を表示する。"""
     client = _discord_client(cfg)
     print(discord_api.invite_url(client.application_id()))
-    print("権限: チャンネルを見る / チャンネルの管理 / ウェブフックの管理 / メッセージ履歴を読む", file=sys.stderr)
+    print("権限: チャンネルを見る / チャンネルの管理 / ウェブフックの管理 / メッセージ履歴を読む / スレッドの管理", file=sys.stderr)
     return 0
 
 def cmd_discord_guilds(cfg: Config, args: argparse.Namespace) -> int:
@@ -97,6 +97,25 @@ def cmd_discord_channels(cfg: Config, args: argparse.Namespace) -> int:
     for r in rows:
         print(f"{_fit(r['category'], 16)} #{r['channel_name']}  ({r['channel_id']})")
     return 0
+
+def cmd_discord_retag(cfg: Config, args: argparse.Namespace) -> int:
+    """discord retag: 投稿済みの記事のタグを、サブジャンルに付け直す（未判定なら LLM で判定）。"""
+    import asyncio
+
+    from ..llm import Summarizer
+    from ..rss.notify import retag_posts
+
+    conn = _open_db(cfg, args)
+    client = _discord_client(cfg)
+
+    async def go():
+        async with Summarizer(cfg.summarize) as summarizer:
+            return await retag_posts(conn, client, summarizer, _load_genres(cfg))
+
+    changed, total = asyncio.run(go())
+    print(f"タグを付け直しました: {changed} / {total} 件")
+    return 0
+
 
 def cmd_discord_test(cfg: Config, args: argparse.Namespace) -> int:
     """discord test: ジャンルのフォーラムにテスト投稿する。"""

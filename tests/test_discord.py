@@ -28,6 +28,7 @@ class FakeDiscord:
         self.posts: list[dict] = []
         self.likes: dict[str, int] = {}
         self.messages: dict[str, dict] = {}  # Webhook で投稿したメッセージ
+        self.thread_tags: dict[str, list] = {}
         self.next_id = 100
         self.rate_limited_once = False
 
@@ -66,7 +67,11 @@ class FakeDiscord:
             self.channels.append(ch)
             return httpx.Response(201, json=ch)
         if req.method == "PATCH" and path.startswith("/channels/"):
-            ch = next(c for c in self.channels if c["id"] == path.split("/")[2])
+            cid = path.split("/")[2]
+            if cid.startswith("thread"):  # フォーラムの投稿（スレッド）のタグの書き換え
+                self.thread_tags[cid] = body["applied_tags"]
+                return httpx.Response(200, json={"id": cid, **body})
+            ch = next(c for c in self.channels if c["id"] == cid)
             if "available_tags" in body:
                 ch["available_tags"] = [t if "id" in t else {"id": self._id(), **t} for t in body["available_tags"]]
             if "nsfw" in body:
@@ -319,3 +324,22 @@ def test_notify_writes_discord_link(tmp_path):
     fake.rate_limited_once = True
     notify.notify_pending(conn, limit=5, max_age_days=3, transport=httpx.MockTransport(fake.handler), interval=0)
     assert 'discord: "https://discord.com/channels/1/thread1"' in md.read_text()
+
+
+def test_retag_posts(tmp_path):
+    import asyncio
+
+    fake, client, conn = setup()
+    genres = tech_genres(tmp_path)
+    plan = make_plan(client, {"id": "1", "name": "srv"}, discord_api.feeds_by_category(conn), "feedpipe", genres)
+    apply_plan(client, conn, plan, "feedpipe")
+    feed_id = db.list_feeds(conn, category="tech")[0].id
+    with conn:
+        a = db.insert_item(conn, feed_id, "a", None, "判定済み", ago(hours=1), "notified")
+        db.update_item(conn, a, discord_thread_id="thread-a", subgenre="tech/security")
+        b = db.insert_item(conn, feed_id, "b", None, "未判定・本文なし", ago(hours=1), "notified")
+        db.update_item(conn, b, discord_thread_id="thread-b")
+    changed, total = asyncio.run(notify.retag_posts(conn, client, None, genres))
+    sec = next(t["id"] for c in fake.channels if c["id"] == "11" for t in c["available_tags"] if t["name"] == "セキュリティ")
+    assert (changed, total) == (2, 2)
+    assert fake.thread_tags == {"thread-a": [sec], "thread-b": []}  # 古いフィード名のタグは外れる

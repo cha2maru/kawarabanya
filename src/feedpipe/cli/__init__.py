@@ -32,6 +32,7 @@ from .server import (
     cmd_discord_channels,
     cmd_discord_guilds,
     cmd_discord_invite_url,
+    cmd_discord_retag,
     cmd_discord_setup,
     cmd_discord_test,
 )
@@ -155,6 +156,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_discord_setup)
     s = dc.add_parser("channels", help="登録済みのチャンネル")
     s.set_defaults(func=cmd_discord_channels)
+    s = dc.add_parser("retag", help="投稿済みの記事のタグを、サブジャンルに付け直す（未判定なら LLM で判定）")
+    s.set_defaults(func=cmd_discord_retag)
     s = dc.add_parser("test", help="カテゴリのチャンネルにテスト送信")
     s.add_argument("category")
     s.add_argument("message", nargs="?", default="feedpipe からのテスト送信です")

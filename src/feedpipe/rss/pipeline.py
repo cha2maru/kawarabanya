@@ -119,7 +119,7 @@ async def _summarize(
     priority: float | None = None,
 ) -> str:
     """サブジャンルと重要度を判定し、基準以上なら要約する。"summarized" / "low"（基準未満）/ "failed" を返す。"""
-    category = await _classify(conn, summarizer, genres, item_id, title, category, content_md)
+    category = await classify_item(conn, summarizer, genres, item_id, title, category, content_md)
     threshold = cfg.summarize.priority_threshold
     if threshold > 0:
         if priority is None:
@@ -139,7 +139,7 @@ async def _summarize(
     return "summarized"
 
 
-async def _classify(
+async def classify_item(
     conn: sqlite3.Connection,
     summarizer: Summarizer,
     genres: dict[str, Genre] | None,

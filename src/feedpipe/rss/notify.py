@@ -22,8 +22,11 @@ from ..discord_api import (
     post_url,
     send_webhook,
 )
+from ..llm import Summarizer
 from . import archive
+from .genres import Genre
 from .item import is_recent
+from .pipeline import classify_item
 
 log = logging.getLogger(__name__)
 
@@ -230,3 +233,38 @@ def sync_likes(
         with conn:
             db.update_item(conn, r["id"], likes=likes, likes_checked_at=db.now_iso())
     return len(due)
+
+
+async def retag_posts(
+    conn: sqlite3.Connection, client: DiscordClient, summarizer: Summarizer | None, genres: dict[str, Genre] | None
+) -> tuple[int, int]:
+    """投稿済みの記事のタグを、サブジャンルに付け直す。(書き換えた投稿数, 確認した投稿数) を返す。
+
+    サブジャンルが未判定の記事は（summarizer があれば）LLM で判定してから付ける。
+    """
+    rows = conn.execute(
+        "SELECT i.id, i.title, i.md_path, i.subgenre, i.discord_thread_id, f.category, d.tags"
+        " FROM items i JOIN feeds f ON f.id = i.feed_id"
+        " LEFT JOIN discord_channels d ON d.category = COALESCE(" + TOP + ", ?)"
+        " WHERE i.status = 'notified' AND i.discord_thread_id IS NOT NULL",
+        (UNCATEGORIZED,),
+    ).fetchall()
+    changed = 0
+    for r in rows:
+        subgenre = r["subgenre"]
+        if subgenre is None and summarizer and r["md_path"] and Path(r["md_path"]).exists():
+            body = archive.read_body(r["md_path"])
+            category = await classify_item(conn, summarizer, genres, r["id"], r["title"], r["category"], body)
+            subgenre = category if category != r["category"] else None
+        tags = json.loads(r["tags"]) if r["tags"] else {}
+        wanted = [t for t in [tags.get(f"sub:{subgenre or r['category']}")] if t]
+        try:
+            client.request("PATCH", f"/channels/{r['discord_thread_id']}", {"applied_tags": wanted})
+        except DiscordError as e:
+            if "HTTP 404" in str(e):  # 投稿が消えている
+                continue
+            if "HTTP 403" in str(e):
+                raise DiscordError(f"{e}（Bot に「スレッドの管理」の権限が必要です）") from None
+            raise
+        changed += 1
+    return changed, len(rows)
