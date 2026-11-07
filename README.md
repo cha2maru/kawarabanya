@@ -29,6 +29,17 @@ systemctl --user daemon-reload && systemctl --user enable --now feedpipe-bot
 journalctl --user -u feedpipe-bot -f         # ログ
 ```
 
+### RSS のないサイト（RSSHub・任意）
+
+[RSSHub](https://docs.rsshub.app/) を Docker で動かすと、RSS のないサイトも普通のフィードとして登録できる（feedpipe 側の変更は不要）。
+
+```sh
+docker run -d --name rsshub --restart unless-stopped -p 127.0.0.1:1200:1200 diygod/rsshub
+uv run feedpipe feeds add "http://127.0.0.1:1200/github/repos/DIYgod" --category tech   # genres.toml にも URL を書く
+```
+
+ルートの一覧は `curl http://127.0.0.1:1200/api/namespace`。ルートによっては API キーなどの設定（環境変数）が要る。
+
 ## コマンド
 
 | コマンド | 内容 |
