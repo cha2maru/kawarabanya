@@ -18,3 +18,4 @@ config.toml
 # 個人の購読リスト
 feedly.opml
 genres.toml
+docs/api/

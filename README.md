@@ -113,6 +113,7 @@ llm_server_command = "scripts/llama-server.sh"   # Bot と一緒に要約サー�
 ```sh
 uv run pytest
 uvx ruff check src tests
+uv run --with pdoc pdoc feedpipe -o docs/api   # API ドキュメント（docstring から HTML。docs/api/index.html を開く）
 ```
 
 対話機能（スラッシュコマンドなど）は `src/feedpipe/bot.py` の `Bot` に足していく。
