@@ -108,6 +108,8 @@ class DigestConfig:
     # 前回のまとめがない・古いときに、さかのぼる時間数の上限と、リンクを並べる件数
     window_hours: int = 24
     top: int = 10
+    # Google トレンドの急上昇ワードの地域（話題になった記事をまとめの上に寄せる）。空なら使わない
+    trends_geo: str = "JP"
 
 
 @dataclass

@@ -217,7 +217,23 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
         rc |= _notify(cfg, conn)
         if cfg.discord.token:
             _sync_likes(cfg, conn)
+    if cfg.digest.enabled and cfg.digest.trends_geo:
+        _fetch_trends(cfg, conn)
     return rc
+
+
+def _fetch_trends(cfg: Config, conn: sqlite3.Connection) -> None:
+    """Google トレンドの急上昇ワードをためる。取れなくても run は止めない（まとめの加点がなくなるだけ）。"""
+    from xml.etree.ElementTree import ParseError
+
+    from kawarabanya.rss import trends
+
+    try:
+        n = trends.fetch(conn, cfg.digest.trends_geo, cfg.general.user_agent, cfg.general.timeout)
+    except (httpx.HTTPError, ParseError) as e:
+        print(f"Google トレンドの取得に失敗: {e}", file=sys.stderr)
+        return
+    print(f"Google トレンド: {n} 語（直近 24 時間）")
 
 def _sync_likes(cfg: Config, conn: sqlite3.Connection, interval_hours: float = 6) -> int:
     """投稿の 👍 の数を取得する。取得に失敗しても run は止めない。"""

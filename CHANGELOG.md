@@ -4,6 +4,7 @@
 
 ## 未リリース
 
+- まとめの並びに話題になり方を足す（同じ出来事を報じたサイトの数、Google トレンドの急上昇ワード。`[digest] trends_geo`）
 - 語とジャンルの紐づけ（`genres keyword`・genres.toml の `keywords`、「@Bot Cloudflareはtech」）。見出しか冒頭にある語で記事のジャンルを決める
 - 記事を別のジャンルに移す（`items move`、記事の投稿のスレッドで「@Bot これは映画」）
 - Bot の招待の権限に「スレッドでメッセージを送る」を足す

@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
+from pathlib import Path
 
 import httpx
 
@@ -22,7 +23,8 @@ from kawarabanya.core.discord_api import (
     post_url,
     send_webhook,
 )
-from kawarabanya.core.llm import Summarizer
+from kawarabanya.core.llm import Summarizer, lead
+from kawarabanya.rss import archive, trends
 from kawarabanya.rss.genres import interest_of, top_genre
 
 MAX_CONTENT = 2000
@@ -44,16 +46,22 @@ LIKE_BONUS = 0.3
 
 
 def collect(
-    conn: sqlite3.Connection, genre: str, since: datetime, levels: dict[str, str] | None = None
+    conn: sqlite3.Connection,
+    genre: str,
+    since: datetime,
+    levels: dict[str, str] | None = None,
+    words: dict[str, int] | None = None,
 ) -> list[DigestItem]:
     """since 以降に投稿したジャンルの記事を、重要度の高い順に返す（判定のないものは最後）。
 
     levels（genres.interest_levels）とサイトごとの interest（feeds option）で、うすい・ミュートの記事は除き、
-    好きの記事は上に、低めの記事は下に寄せる。
+    好きの記事は上に、低めの記事は下に寄せる。世間での話題になり方（rss/trends.py）でも上に寄せる:
+    同じ出来事を報じたサイトの数と、words（Google トレンドの急上昇ワード → 検索数）に当たること。
     """
     levels = levels or {}
+    sources = trends.source_counts(conn, since - timedelta(days=1))
     rows = conn.execute(
-        "SELECT COALESCE(i.subgenre, f.category) AS category, i.title, i.discord_thread_id, i.priority, i.likes,"
+        "SELECT i.id, i.md_path, COALESCE(i.subgenre, f.category) AS category, i.title, i.discord_thread_id, i.priority, i.likes,"
         " json_extract(f.options, '$.interest') AS feed_interest FROM items i"
         " JOIN feeds f ON f.id = i.feed_id WHERE i.status = 'notified' AND i.notified_at >= ?",
         (since.isoformat(timespec="seconds"),),
@@ -64,7 +72,10 @@ def collect(
         if top_genre(r["category"]) != genre or level in ("low", "mute"):
             continue
         bonus = {"like": LIKE_BONUS, "down": -LIKE_BONUS}.get(level, 0)
-        score = (r["priority"] if r["priority"] is not None else -1) + bonus
+        score = (r["priority"] if r["priority"] is not None else -1) + bonus + trends.source_bonus(sources.get(r["id"], 1))
+        if words:
+            body = archive.read_body(r["md_path"]) if r["md_path"] and Path(r["md_path"]).exists() else ""
+            score += trends.trend_bonus(f"{r['title'] or ''}\n{lead(body or '')}", words)
         scored.append((score, DigestItem(r["title"] or "(無題)", r["discord_thread_id"], r["priority"], r["likes"])))
     return [it for _, it in sorted(scored, key=lambda x: -x[0])]
 
@@ -123,7 +134,7 @@ async def post_digest(
     since = now - timedelta(hours=window_hours)
     if prev:
         since = max(since, datetime.fromisoformat(prev["created_at"]))
-    items = collect(conn, genre, since, levels)
+    items = collect(conn, genre, since, levels, trends.load(conn, now.astimezone(UTC)))
     if not items:
         return None
     trend = []
