@@ -23,13 +23,16 @@ from kawarabanya.rss import archive
 from kawarabanya.rss.genres import normalize_word, top_genre
 
 K = 5
+# 「二回」「九回」のような漢数字＋助数詞（fugashi で名詞だけ取ると「交差点」が「交差」に割れるので、形態素解析は使わない）
+NUMERAL_RE = re.compile(r"[〇一二三四五六七八九十百千万]+[回点人年月日時分秒本件個位勝敗度番打]")
 WINDOW_DAYS = 180  # 半減期 60 日なら 180 日前の票は 1/8
 TOP_WORDS = 3
 # 投稿のこの割合以上に出る語（「発表」「公開」など）は、どの記事にもある語として外す
 COMMON_DF = 0.05
 COMMON_MIN = 10
-# 名詞の代わり: カタカナ 3 字以上・漢字 2 字以上・英数字の語（形態素解析はしない）
-WORD_RE = re.compile(r"[ァ-ヺー]{3,}|[一-鿿々]{2,}|[0-9a-z][0-9a-z+#.\-]*[0-9a-z+#]")
+# 名詞の代わり: カタカナ 3 字以上・漢字 2 字以上・英数字の語（形態素解析はしない）。
+# 漢字は数字の直後から始まるもの（「第97回日本選手権」の「回日本選手権」、「2死満塁」の「死満塁」）を取らない
+WORD_RE = re.compile(r"[ァ-ヺー]{3,}|(?<![0-9一-鿿々])[一-鿿々]{2,}|[0-9a-z][0-9a-z+#.\-]*[0-9a-z+#]")
 
 
 @dataclass
@@ -41,7 +44,10 @@ class Prefs:
 
 def words(text: str) -> set[str]:
     """見出しや冒頭から名詞らしい語を取り出す（NFKC・小文字。数字だけ・2 字以下の英数字は除く）。"""
-    return {w for w in WORD_RE.findall(normalize_word(text)) if not (w.isascii() and (len(w) < 3 or not re.search("[a-z]", w)))}
+    return {
+        w for w in WORD_RE.findall(normalize_word(text))
+        if not (w.isascii() and (len(w) < 3 or not re.search("[a-z]", w))) and not NUMERAL_RE.fullmatch(w)
+    }
 
 
 def features(category: str | None, title: str | None, body: str | None) -> set[str]:

@@ -6,6 +6,7 @@ from kawarabanya.rss import digest, prefs
 
 def test_words():
     assert prefs.words("Ｃｌｏｕｄｆｌａｒｅが新サービスを発表、AIとGPU 2026") == {"cloudflare", "サービス", "発表", "gpu"}
+    assert prefs.words("第97回日本選手権、二回に2死満塁から先制。千葉県の一括") == {"先制", "千葉県", "一括"}
 
 
 def setup():
