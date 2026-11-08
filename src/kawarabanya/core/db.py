@@ -122,10 +122,16 @@ def _v3(conn: sqlite3.Connection) -> None:
     )
 
 
+def _v4(conn: sqlite3.Connection) -> None:
+    """版 4: 投稿に付いた 👎 の数（items.dislikes。👍 と合わせて好みを学ぶ）。"""
+    conn.execute("ALTER TABLE items ADD COLUMN dislikes INTEGER")
+
+
 MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("テーブルの作成（0.1）", _v1),
     ("見出しの訳の列（items.title_ja）", _v2),
     ("予定のテーブル（events）", _v3),
+    ("👎 の数の列（items.dislikes）", _v4),
 ]
 
 

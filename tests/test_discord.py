@@ -86,6 +86,7 @@ class FakeDiscord:
                 return httpx.Response(404, json={"message": "Unknown Message"})
             return httpx.Response(200, json={"id": tid, "reactions": [
                 {"emoji": {"id": None, "name": "👍"}, "count": self.likes[tid]},
+                {"emoji": {"id": None, "name": "👎"}, "count": 1},
                 {"emoji": {"id": None, "name": "🎉"}, "count": 9},
             ]})
         if path.endswith("/webhooks"):
@@ -252,8 +253,8 @@ def test_default_reaction_and_like_sync():
     fake.likes = {"t-a": 2, "t-b": 0}
 
     assert notify.sync_likes(conn, client, interval_hours=6) == 3
-    likes = dict(conn.execute("SELECT key, likes FROM items WHERE key IN ('a','b','gone')").fetchall())
-    assert likes == {"a": 2, "b": 0, "gone": None}
+    rows = conn.execute("SELECT key, likes, dislikes FROM items WHERE key IN ('a','b','gone')").fetchall()
+    assert {r[0]: (r[1], r[2]) for r in rows} == {"a": (2, 1), "b": (0, 1), "gone": (None, None)}
     assert notify.sync_likes(conn, client, interval_hours=6) == 0  # 6 時間以内は再確認しない
     assert notify.sync_likes(conn, client, interval_hours=0) == 3
 

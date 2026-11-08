@@ -112,6 +112,10 @@ class DigestConfig:
     top: int = 10
     # Google トレンドの急上昇ワードの地域（話題になった記事をまとめの上に寄せる）。空なら使わない
     trends_geo: str = "JP"
+    # 👍・👎 から学ぶ好み（rss/prefs.py）: 票の半減期（日）と、まとめの点に足す上限（記事の特徴 / サイト）
+    pref_half_life_days: float = 60
+    pref_max: float = 0.2
+    site_pref_max: float = 0.1
 
 
 @dataclass

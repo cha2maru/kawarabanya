@@ -33,6 +33,7 @@ BOT_PERMISSIONS = (
     | PERM_SEND_MESSAGES | PERM_SEND_MESSAGES_IN_THREADS
 )
 LIKE_EMOJI = "👍"
+DISLIKE_EMOJI = "👎"
 DEFAULT_REACTION = {"emoji_id": None, "emoji_name": LIKE_EMOJI}
 
 UNCATEGORIZED = "uncategorized"
@@ -211,15 +212,16 @@ def send_webhook(url: str, payload: dict, transport: httpx.BaseTransport | None 
     raise DiscordError("Webhook 送信: レート制限が解除されません")
 
 
-def count_likes(client: DiscordClient, thread_id: str) -> int | None:
-    """フォーラム投稿の 👍 の数（最初のメッセージの ID はスレッド ID と同じ）。投稿が消えていれば None。"""
+def count_reactions(client: DiscordClient, thread_id: str) -> tuple[int, int] | None:
+    """フォーラム投稿の (👍, 👎) の数（最初のメッセージの ID はスレッド ID と同じ）。投稿が消えていれば None。"""
     try:
         msg = client.request("GET", f"/channels/{thread_id}/messages/{thread_id}")
     except DiscordError as e:
         if "HTTP 404" in str(e):
             return None
         raise
-    return next((r["count"] for r in msg.get("reactions", []) if r["emoji"].get("name") == LIKE_EMOJI), 0)
+    counts = {r["emoji"].get("name"): r["count"] for r in msg.get("reactions", [])}
+    return counts.get(LIKE_EMOJI, 0), counts.get(DISLIKE_EMOJI, 0)
 
 
 def _webhook_request(

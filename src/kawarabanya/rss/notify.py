@@ -18,7 +18,7 @@ from kawarabanya.core.discord_api import (
     UNCATEGORIZED,
     DiscordClient,
     DiscordError,
-    count_likes,
+    count_reactions,
     post_url,
     send_webhook,
 )
@@ -226,7 +226,7 @@ def sync_likes(
     within_days: int = 7,
     interval_hours: float = 6,
 ) -> int:
-    """投稿から within_days 日以内の記事の 👍 の数を記録する。確認した件数を返す。
+    """投稿から within_days 日以内の記事の 👍・👎 の数を記録する。確認した件数を返す。
 
     同じ投稿は interval_hours 時間に 1 回だけ確認する（毎回全件を読みに行かない）。
     """
@@ -242,9 +242,9 @@ def sync_likes(
         or datetime.fromisoformat(r["likes_checked_at"]) <= now - timedelta(hours=interval_hours)
     ]
     for r in due:
-        likes = count_likes(client, r["discord_thread_id"])
+        likes, dislikes = count_reactions(client, r["discord_thread_id"]) or (None, None)
         with conn:
-            db.update_item(conn, r["id"], likes=likes, likes_checked_at=db.now_iso())
+            db.update_item(conn, r["id"], likes=likes, dislikes=dislikes, likes_checked_at=db.now_iso())
     return len(due)
 
 
@@ -330,7 +330,7 @@ def move_post(conn: sqlite3.Connection, client: DiscordClient, item_id: int, pat
     )
     new_thread = (send_webhook(p.webhook_url, build_payload(p)) or {}).get("channel_id")
     with conn:
-        db.update_item(conn, item_id, subgenre=path, discord_thread_id=new_thread, likes=0, likes_checked_at=None)
+        db.update_item(conn, item_id, subgenre=path, discord_thread_id=new_thread, likes=0, dislikes=0, likes_checked_at=None)
     if new_thread and p.guild_id and p.md_path and Path(p.md_path).exists():
         archive.set_field(p.md_path, "discord", post_url(p.guild_id, new_thread))
     try:

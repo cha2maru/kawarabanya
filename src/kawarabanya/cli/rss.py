@@ -24,7 +24,7 @@ from kawarabanya.cli.common import (
 from kawarabanya.core import db, discord_api
 from kawarabanya.core.config import Config
 from kawarabanya.core.llm import Summarizer
-from kawarabanya.rss import forums, genres, notify
+from kawarabanya.rss import forums, genres, notify, prefs
 from kawarabanya.rss.pipeline import FeedReport, run_feeds, summarize_pending
 from kawarabanya.rss.sources import opml
 from kawarabanya.rss.sources.check import (
@@ -287,7 +287,21 @@ def cmd_interests(cfg: Config, args: argparse.Namespace) -> int:
             print(f"  [{r['category']}] {r['title']}")
             if guild and r["discord_thread_id"]:
                 print(f"      {discord_api.post_url(guild[0], r['discord_thread_id'])}")
+    _print_prefs(conn, prefs.learn(conn, datetime.now(UTC), cfg.digest.pref_half_life_days), args.top)
     return 0
+
+
+def _print_prefs(conn: sqlite3.Connection, learned: prefs.Prefs, top: int) -> None:
+    """👍・👎 から学んだ好み（まとめの並べ替えに使う w）の上位と下位を表示する。"""
+    if not learned.words and not learned.sites:
+        print("\n学んだ好み: まだありません（👍・👎 が付くとたまります）")
+        return
+    names = dict(conn.execute("SELECT id, title FROM feeds").fetchall())
+    for label, ws in [("ジャンル・語", learned.words), ("サイト", {names.get(k, k): v for k, v in learned.sites.items()})]:
+        ranked = sorted(ws.items(), key=lambda kv: -kv[1])
+        print(f"\n学んだ好み（{label}。+ は 👍 寄り、- は 👎 寄り）")
+        for k, v in [*ranked[:top], *(x for x in ranked[-top:] if x[1] < 0 and x not in ranked[:top])]:
+            print(f"  {_fit(str(k), 30)} {v:+.2f}")
 
 def cmd_summarize(cfg: Config, args: argparse.Namespace) -> int:
     """summarize: 保存済み・未投稿で要約のない最近の記事を、重要度を判定してから要約する。"""
@@ -705,13 +719,17 @@ def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
 
     levels = genres.interest_levels(defs)
 
+    d = cfg.digest
+    learned = prefs.learn(conn, now, d.pref_half_life_days)
+
     async def go():
         async with Summarizer(cfg.summarize) as summarizer:
             return {
                 g: await digest.post_digest(
                     conn, summarizer, g, label=defs[g].label if defs and g in defs else None,
                     levels=levels, now=now, top=cfg.digest.top, window_hours=cfg.digest.window_hours,
-                    due_after=due_after, update=args.update, dry_run=args.dry_run,
+                    due_after=due_after, learned=learned, pref_max=d.pref_max, site_max=d.site_pref_max,
+                    update=args.update, dry_run=args.dry_run,
                 )
                 for g in genre_list
             }

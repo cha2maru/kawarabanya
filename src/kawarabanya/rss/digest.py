@@ -25,7 +25,7 @@ from kawarabanya.core.discord_api import (
     with_mention,
 )
 from kawarabanya.core.llm import Summarizer, lead
-from kawarabanya.rss import archive, trends
+from kawarabanya.rss import archive, prefs, trends
 from kawarabanya.rss.genres import interest_of, top_genre
 
 MAX_CONTENT = 2000
@@ -40,6 +40,8 @@ class DigestItem:
     thread_id: str | None
     priority: float | None
     likes: int | None
+    # 学んだ好み（rss/prefs.py）を除いた点。まとめの 1 枠は、これだけで選ぶ（好みに寄りすぎないため）
+    base: float = 0.0
 
 
 # 好き（like）の記事は重要度にこれを足し、低め（down）の記事は引いて並べる
@@ -52,17 +54,21 @@ def collect(
     since: datetime,
     levels: dict[str, str] | None = None,
     words: dict[str, int] | None = None,
+    learned: prefs.Prefs | None = None,
+    pref_max: float = 0.2,
+    site_max: float = 0.1,
 ) -> list[DigestItem]:
     """since 以降に投稿したジャンルの記事を、重要度の高い順に返す（判定のないものは最後）。
 
     levels（genres.interest_levels）とサイトごとの interest（feeds option）で、うすい・ミュートの記事は除き、
     好きの記事は上に、低めの記事は下に寄せる。世間での話題になり方（rss/trends.py）でも上に寄せる:
     同じ出来事を報じたサイトの数と、words（Google トレンドの急上昇ワード → 検索数）に当たること。
+    learned（👍・👎 から学んだ好み）があれば、その点も足す（DigestItem.base には含めない）。
     """
     levels = levels or {}
     sources = trends.source_counts(conn, since - timedelta(days=1))
     rows = conn.execute(
-        "SELECT i.id, i.md_path, COALESCE(i.subgenre, f.category) AS category, COALESCE(i.title_ja, i.title) AS title,"
+        "SELECT i.id, i.feed_id, i.title AS original, i.md_path, COALESCE(i.subgenre, f.category) AS category, COALESCE(i.title_ja, i.title) AS title,"
         " i.discord_thread_id, i.priority, i.likes,"
         " json_extract(f.options, '$.interest') AS feed_interest FROM items i"
         " JOIN feeds f ON f.id = i.feed_id WHERE i.status = 'notified' AND i.notified_at >= ?",
@@ -75,11 +81,25 @@ def collect(
             continue
         bonus = {"like": LIKE_BONUS, "down": -LIKE_BONUS}.get(level, 0)
         score = (r["priority"] if r["priority"] is not None else -1) + bonus + trends.source_bonus(sources.get(r["id"], 1))
+        body = archive.read_body(r["md_path"]) if r["md_path"] and Path(r["md_path"]).exists() else ""
         if words:
-            body = archive.read_body(r["md_path"]) if r["md_path"] and Path(r["md_path"]).exists() else ""
             score += trends.trend_bonus(f"{r['title'] or ''}\n{lead(body or '')}", words)
-        scored.append((score, DigestItem(r["title"] or "(無題)", r["discord_thread_id"], r["priority"], r["likes"])))
+        liked = 0.0
+        if learned:
+            feats = prefs.features(r["category"], r["original"], body)
+            liked = prefs.bonus(learned, r["feed_id"], feats, pref_max, site_max)
+        item = DigestItem(r["title"] or "(無題)", r["discord_thread_id"], r["priority"], r["likes"], score)
+        scored.append((score + liked, item))
     return [it for _, it in sorted(scored, key=lambda x: -x[0])]
+
+
+def explore(items: list[DigestItem], top: int) -> list[DigestItem]:
+    """上位 top 件の最後の 1 枠を、好みを除いた点（base）が最も高い残りの記事にする（好みの外の記事も目に入るように）。"""
+    if top < 2 or len(items) <= top - 1:
+        return items
+    rest = items[top - 1:]
+    pick = max(rest, key=lambda i: i.base)
+    return [*items[: top - 1], pick, *(i for i in rest if i is not pick)]
 
 
 def _link_text(title: str) -> str:
@@ -115,6 +135,9 @@ async def post_digest(
     top: int,
     window_hours: int,
     due_after: datetime | None = None,
+    learned: prefs.Prefs | None = None,
+    pref_max: float = 0.2,
+    site_max: float = 0.1,
     update: bool = False,
     dry_run: bool = False,
     transport: httpx.BaseTransport | None = None,
@@ -136,7 +159,8 @@ async def post_digest(
     since = now - timedelta(hours=window_hours)
     if prev:
         since = max(since, datetime.fromisoformat(prev["created_at"]))
-    items = collect(conn, genre, since, levels, trends.load(conn, now.astimezone(UTC)))
+    words = trends.load(conn, now.astimezone(UTC))
+    items = explore(collect(conn, genre, since, levels, words, learned, pref_max, site_max), top)
     if not items:
         return None
     trend = []
