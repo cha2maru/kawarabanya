@@ -191,3 +191,12 @@ def test_db_migrations(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:1])
     with pytest.raises(ValueError, match="新しい"):
         db.connect(path)
+
+
+def test_expand_url_days_ago():
+    from datetime import date
+
+    from kawarabanya.rss.sources.check import expand_url
+    url = "http://rsshub/github/search/created:>{days_ago:7} stars:>300/stars/desc"
+    assert expand_url(url, date(2026, 11, 8)) == "http://rsshub/github/search/created:>2026-11-01 stars:>300/stars/desc"
+    assert expand_url("https://a.example/rss") == "https://a.example/rss"

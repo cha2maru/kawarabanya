@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import socket
 import sqlite3
 from calendar import timegm
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from urllib.parse import urlsplit
 
@@ -98,6 +99,15 @@ def _classify_http(code: int) -> Status:
     return Status.HTTP_ERROR
 
 
+DAYS_AGO_RE = re.compile(r"\{days_ago:(\d+)\}")
+
+
+def expand_url(url: str, today: date | None = None) -> str:
+    """URL の {days_ago:N} を N 日前の日付（YYYY-MM-DD）にする（GitHub 検索の created:> など、日付が動く条件用）。"""
+    today = today or date.today()
+    return DAYS_AGO_RE.sub(lambda m: (today - timedelta(days=int(m[1]))).isoformat(), url)
+
+
 async def check_feed(
     fetcher: Fetcher, feed: db.Feed, *, conditional: bool = False
 ) -> CheckResult:
@@ -123,7 +133,7 @@ async def check_feed(
         if feed.last_modified:
             headers["If-Modified-Since"] = feed.last_modified
     try:
-        resp = await fetcher.get(feed.url, headers=headers)
+        resp = await fetcher.get(url := expand_url(feed.url), headers=headers)
     except httpx.TooManyRedirects as e:
         result.error = f"リダイレクトが多すぎます: {e}"
     except httpx.TimeoutException:
@@ -142,7 +152,7 @@ async def check_feed(
             # 移転先が正常に応答した場合だけ URL を更新対象にする
             if resp.history and all(h.status_code in PERMANENT_REDIRECTS for h in resp.history):
                 final = str(resp.url)
-                if final != feed.url:
+                if final != url:
                     result.moved_to = final
             if ext:
                 try:
@@ -181,7 +191,7 @@ def _set_entries(result: CheckResult, entries: list, title: str | None) -> None:
 async def _check_with_fetch(fetcher: Fetcher, feed: db.Feed, ext: extensions.Extension, result: CheckResult) -> None:
     """自分で取得する拡張で記事を取る。HTTP の失敗は RSS と同じに分類し、0 件と拡張の例外は not_feed にする。"""
     try:
-        entries = await ext.fetch(fetcher, feed.url, feed.option(feed.source_type) or {})
+        entries = await ext.fetch(fetcher, expand_url(feed.url), feed.option(feed.source_type) or {})
     except httpx.HTTPStatusError as e:
         result.status, result.error = _classify_http(e.response.status_code), f"HTTP {e.response.status_code}"
     except httpx.HTTPError as e:

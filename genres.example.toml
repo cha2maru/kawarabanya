@@ -14,6 +14,7 @@
 # - keywords に語を書くと、見出しか本文の冒頭にその語がある記事をこのジャンルにする（全角・半角と大文字・小文字は区別しない）
 #   作品名・ブランド名・執筆者のような固有名詞に使う。`kawarabanya genres keyword 語 ジャンル` や Discord の「@Bot Cloudflareはtech」でも足せる
 # - RSS のないサイトは、feeds にテーブルで HTML 取り込み（CSS セレクタ）か拡張（extension = "名前"、extensions/名前.py）を書く（README）
+# - URL の {days_ago:N} は取得のたびに N 日前の日付になる（日付で絞る検索をフィードにするとき。README）
 # - ジャンルを足したら `kawarabanya discord setup --apply` でフォーラム・タグを作る
 
 [news]

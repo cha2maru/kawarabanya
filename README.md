@@ -221,6 +221,12 @@ uv run kawarabanya feeds add "http://127.0.0.1:1200/famitsu/category/news" --gen
 
 `--restart unless-stopped` を付けると、Docker が起動するたびに RSSHub も立ち上がる（WSL2 で Docker Desktop を使うなら、Docker Desktop の Settings → General の「Start Docker Desktop when you sign in to your computer」もオンにする）。`config.toml` の `[general] rsshub_url = "http://127.0.0.1:1200"` を書くと、`doctor` が RSSHub が動いているかを確かめる（止まっていると RSSHub 経由のフィードが取得に失敗し続け、5 回で自動的に無効になる）。
 
+フィードの URL の `{days_ago:N}` は、取得のたびに N 日前の日付（`YYYY-MM-DD`）に置き換わる。日付で絞る検索をフィードにするときに使う（例: 直近 7 日に作られたスター 300 超の GitHub リポジトリをスター順に）:
+
+```toml
+feeds = ["http://127.0.0.1:1200/github/search/created:>{days_ago:7} stars:>300/stars/desc"]
+```
+
 フィードを移すには URL の行を別のジャンルに移して `genres apply` → `discord setup --apply`。書かれていないフィードの記事は投稿されない（保存はする）。
 
 保存した Markdown の Front Matter には、投稿後に Discord の投稿へのリンク（`discord:`）が入る。
