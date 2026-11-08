@@ -1,6 +1,6 @@
 [project]
 name = "kawarabanya"
-version = "0.1.0"
+version = "0.2.0"
 description = "個人用 Discord サーバーの Bot: RSS の記事を全文保存し、ローカル LLM で振り分け・要約して投稿する"
 readme = "README.md"
 license = "MIT"
