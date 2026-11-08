@@ -31,12 +31,12 @@ def cmd_schedule_login(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
-def _post(conn, content: str) -> bool:
+def _post(conn, content: str, user_id: str = "") -> bool:
     row = conn.execute("SELECT webhook_url FROM discord_channels WHERE category = ?", (discord_api.SCHEDULE_KEY,)).fetchone()
     if row is None:
         return False
-    discord_api.send_webhook(row["webhook_url"], {"content": content[:2000], "username": "予定",
-                                                  "allowed_mentions": {"parse": []}})
+    payload = {"content": content[:2000], "username": "予定", "allowed_mentions": {"parse": []}}
+    discord_api.send_webhook(row["webhook_url"], discord_api.with_mention(payload, user_id))
     return True
 
 
@@ -66,7 +66,7 @@ def cmd_schedule_check(cfg: Config, args: argparse.Namespace) -> int:
         if not args.dry_run:
             db.set_state(conn, "schedule_agenda_at", now.isoformat(timespec="seconds"))
     for m in messages:
-        if args.dry_run or not _post(conn, m):
+        if args.dry_run or not _post(conn, m, cfg.discord.mention_user_id):
             print(m)
     print(f"予定 {len(fetched)} 件（{cfg.schedule.days} 日先まで）/ 知らせたもの {len(messages)} 件")
     return 0

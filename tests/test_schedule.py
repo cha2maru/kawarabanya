@@ -78,3 +78,25 @@ def test_private_channel_hides_from_everyone():
     everyone, bot = ch["permission_overwrites"]
     assert everyone["id"] == "g" and int(everyone["deny"]) & d.PERM_VIEW_CHANNEL
     assert bot["id"] == "bot" and int(bot["allow"]) & d.PERM_MANAGE_WEBHOOKS
+
+
+def test_mentions(monkeypatch):
+    from kawarabanya.cli import schedule as cli
+    from kawarabanya.core import discord_api as d
+    from kawarabanya.rss import digest
+
+    assert d.with_mention({"content": "x"}, "") == {"content": "x"}
+    m = d.with_mention({"content": "x", "allowed_mentions": {"parse": []}}, "42")
+    assert m["content"] == "<@42> x" and m["allowed_mentions"] == {"parse": [], "users": ["42"]}
+
+    sent = []
+    monkeypatch.setattr(d, "send_webhook", lambda url, payload, **kw: sent.append(payload))
+    monkeypatch.setattr(digest, "send_webhook", lambda url, payload, **kw: sent.append(payload))
+    conn = db.connect(":memory:")
+    for key in (d.SCHEDULE_KEY, d.DIGEST_KEY):
+        conn.execute("INSERT INTO discord_channels (category, guild_id, channel_id, channel_name, webhook_url, created_at)"
+                     " VALUES (?, 'g', 'c', 'n', 'https://hook', 'x')", (key,))
+    assert cli._post(conn, "⏰ まもなく: 会議", "42")
+    digest.announce(conn, ["ニュース", "テック"], "42")
+    digest.announce(conn, ["ニュース"], "")  # 設定がなければ送らない
+    assert [p["content"] for p in sent] == ["<@42> ⏰ まもなく: 会議", "<@42> 📰 まとめを投稿しました: ニュース、テック"]

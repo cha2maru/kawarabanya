@@ -189,6 +189,14 @@ def create_private_text_channel(client: DiscordClient, guild_id: str, name: str)
     ])
 
 
+def with_mention(payload: dict, user_id: str) -> dict:
+    """payload の本文の先頭に user_id へのメンションを付け、そのユーザーにだけ通知が届くようにする（空なら何もしない）。"""
+    if not user_id:
+        return payload
+    return {**payload, "content": f"<@{user_id}> {payload.get('content', '')}"[:2000],
+            "allowed_mentions": {"parse": [], "users": [user_id]}}
+
+
 def send_webhook(url: str, payload: dict, transport: httpx.BaseTransport | None = None) -> dict:
     """Webhook で投稿し、作成されたメッセージを返す（フォーラムなら channel_id がスレッド ID）。"""
     with httpx.Client(transport=transport, timeout=20) as c:

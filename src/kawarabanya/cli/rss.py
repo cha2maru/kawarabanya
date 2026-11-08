@@ -721,6 +721,8 @@ def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
     if args.dry_run:
         for g in done:
             print(f"===== {g} =====\n{results[g]}\n")
+    elif done and not args.update:
+        digest.announce(conn, [defs[g].label if defs and g in defs else g for g in done], cfg.discord.mention_user_id)
     if done or not args.due:
         verb = "表示" if args.dry_run else ("更新" if args.update else "投稿")
         print(f"まとめ: {verb} {len(done)} 件（{', '.join(done) or 'なし'}）")

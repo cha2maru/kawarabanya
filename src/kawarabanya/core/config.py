@@ -89,6 +89,8 @@ class DiscordConfig:
     max_posts_per_run: int = 30
     # 公開からこの日数を過ぎた記事は投稿しない（未読でも stale にする）
     max_age_days: int = 3
+    # まとめ・予定でメンションする自分のユーザー ID（Discord の開発者モードで「ユーザー ID をコピー」）。空ならしない
+    mention_user_id: str = ""
     token_env: str = "DISCORD_BOT_TOKEN"
 
     @property

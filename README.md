@@ -250,6 +250,9 @@ Bot は 5 分ごとに `schedule check` を実行し、予定の追加・変更�
 [summarize]
 priority_threshold = 0.8     # 重要度（A の確率）がこれ以上の記事だけ要約する。0 なら全件
 
+[discord]
+mention_user_id = "123…"     # まとめ・予定で自分にメンションして通知を鳴らす（開発者モードで「ユーザー ID をコピー」）
+
 [digest]
 times = ["06:30", "18:30"]   # まとめを投稿する時刻
 trends_geo = "JP"            # Google トレンドの急上昇ワードの地域（"" で使わない）

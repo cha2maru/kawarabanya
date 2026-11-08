@@ -22,6 +22,7 @@ from kawarabanya.core.discord_api import (
     edit_webhook_message,
     post_url,
     send_webhook,
+    with_mention,
 )
 from kawarabanya.core.llm import Summarizer, lead
 from kawarabanya.rss import archive, trends
@@ -157,6 +158,15 @@ async def post_digest(
             (genre, now.astimezone().strftime("%Y-%m-%d %H:%M:%S"), msg.get("id"), now.isoformat(timespec="seconds")),
         )
     return content
+
+
+def announce(conn: sqlite3.Connection, labels: list[str], user_id: str,
+             *, transport: httpx.BaseTransport | None = None) -> None:
+    """まとめを投稿し終えたことを、メンション付きで 1 通だけ知らせる（ジャンルごとに鳴らさない）。"""
+    channel = digest_channel(conn)
+    if channel and labels and user_id:
+        payload = with_mention({"content": f"📰 まとめを投稿しました: {'、'.join(labels)}"}, user_id)
+        send_webhook(channel["webhook_url"], {"username": "瓦版屋 まとめ", **payload}, transport=transport)
 
 
 def delete_digest(

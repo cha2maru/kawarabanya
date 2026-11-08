@@ -38,6 +38,7 @@ webhook_name = "kawarabanya"            # 投稿に使う Webhook の名前（�
 nsfw = true                             # フォーラムを年齢制限チャンネルにする
 max_posts_per_run = 30                  # 1 回の実行で投稿する上限（超えた分は次回に回す）
 max_age_days = 3                        # 公開からこの日数を過ぎた記事は投稿しない
+mention_user_id = ""                    # まとめ・予定でメンションする自分のユーザー ID（Discord の開発者モードで「ユーザー ID をコピー」）。空ならしない
 token_env = "DISCORD_BOT_TOKEN"         # Bot のトークンを読む環境変数の名前
 
 [digest]
