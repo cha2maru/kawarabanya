@@ -116,6 +116,12 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 - 行き先のジャンルは、依頼の文にキーか名前がそのまま書かれていれば LLM の答えより優先する（「これはculture」を culture/comic と読んだため）。
 - Discord では、記事の投稿のスレッドの中の依頼は、その記事についての依頼として扱う（`assistant.find_post`）。別のフォーラムへ移すと返事のあるスレッドも消えるので、結果は新しい投稿で確かめる。
 
+### 3.3.2 日本語以外の記事の翻訳
+- 見出しと冒頭にかなが 1 字もなければ日本語以外とみなす（漢字だけの中国語も含む。GitHub のトレンドの日本語の説明は日本語になる）。
+- 見出しを訳して `items.title_ja` に残し、スレッド名を「訳（原題）」にする。4B のモデルは固有名詞を訳し違えるので原題を残す（`Googlebook` を、固有名詞を残すよう念を押しても「Google Book」にした）。`owner/repo` のような 1 語の見出しは訳さない。見出し 1 件 約 2 秒。
+- 要約はもともと日本語で書かせているので、日本語以外の記事は重要度にかかわらず要約する（基準未満だと本文の冒頭が外国語のまま投稿されていた）。11/08 時点で投稿の 1% 未満なので、負荷は小さい。
+- 全文訳は自動ではしない（読まない記事にも数分ずつ CPU を使い、毎時の取り込みが遅れる）。投稿のスレッドで頼まれたら（`items translate`）、画像とリンク先を除いた本文を段落ごとに約 1,500 字ずつ訳し、`<記事>.ja.md` に保存してスレッドに返信する。6,300 字の英語の記事で約 2 分。上限 1 万 2 千字。
+
 ### 3.4 Discord
 - **ジャンル 1 つ = フォーラム 1 つ**（親カテゴリ「kawarabanya」の下。年齢制限オン）。**フォーラムのタグはサブジャンルだけ**（上限 20 個、名前は 20 字）。フィード名はタグにせず、投稿者名で示す（フィードが 20 を超えるとタグが足りなくなるため）。
 - 投稿のタグは記事のサブジャンル（`items.subgenre`、なければフィードを固定したサブジャンル）。
@@ -156,7 +162,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 | テーブル | 主な列 |
 |---|---|
 | `feeds` | url（移転で更新）/ original_url / title / category（= ジャンルのパス）/ enabled / disabled_reason / etag / last_modified / last_status / fail_count / latest_entry_at / initialized_at / options（JSON） |
-| `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ subgenre（LLM が判定したサブジャンル。当てはまらなければトップレベルのジャンル）/ content_hash（重複判定用の本文のハッシュ）/ notified_at / discord_thread_id / likes / likes_checked_at |
+| `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ subgenre（LLM が判定したサブジャンル。当てはまらなければトップレベルのジャンル）/ content_hash（重複判定用の本文のハッシュ）/ title_ja（日本語以外の記事の見出しの訳。版 2）/ notified_at / discord_thread_id / likes / likes_checked_at |
 | `discord_channels` | category（トップレベルのジャンル。まとめの投稿先は `#digest`）/ guild_id / channel_id / webhook_url / tags（JSON: `feed:<id>` と `sub:<パス>` → タグ ID） |
 | `digests` | genre / day（投稿したローカル日時。11/07 までは日付）/ thread_id（投稿したメッセージの ID）/ created_at — 投稿済みのまとめ |
 | `state` | key / value — 定期処理の最後の実行時刻（`run_at` / `suggest_at`）、知らせた不調（`alerted`） |

@@ -26,6 +26,7 @@ COMMANDS: dict[str, tuple[str, bool]] = {
     "genre_interest": ("ジャンル・サブジャンルの好き嫌いを変える（genre と level）", True),
     "feed_interest": ("特定のサイトの好き嫌いを変える（feed にサイト名、level）", True),
     "genre_assign": ("記事や単語のジャンルを指定する・直す（genre に行き先、word に単語。単語がなければ空）", True),
+    "translate": ("記事の全文を日本語に訳す（記事の投稿のスレッドで）", True),
     "genre_list": ("ジャンル・サブジャンルの一覧", False),
     "run_now": ("今すぐ記事を取り込む", True),
     "digest_now": ("今すぐまとめを投稿する（genre で絞れる）", True),
@@ -48,6 +49,7 @@ PROMPT = (
     "- 「○○は××」「○○の記事は××に」のように単語のジャンルを言われたら genre_assign（word に ○○、genre に ××）\n"
     "- 「これは××」「××に移して」は genre_assign（word は空）\n"
     "- word には依頼に書かれた固有名詞だけをそのまま書く\n"
+    "- 「翻訳して」「訳して」「日本語にして」は translate\n"
     "使わない引数は空文字にする。"
 )
 # 「これは映画」の「これ」は記事を指すので、振り分けの語にしない
@@ -219,6 +221,11 @@ def build(
             if not word:
                 return Intent(command, error="記事の投稿のスレッドで頼むか、「Cloudflareはtech」のように単語とジャンルを書いてください")
             return Intent(command, ["genres", "keyword", word, genre], f"「{word}」の記事を今後は「{label}」に振り分ける", confirm)
+        case "translate":
+            if not post:
+                return Intent(command, error="訳したい記事の投稿のスレッドで頼んでください")
+            return Intent(command, ["items", "translate", str(post["id"])],
+                          f"「{post['title']}」の全文を日本語に訳す（数分かかります）", confirm)
         case "genre_list":
             return Intent(command, ["genres", "list"], "ジャンルの一覧")
         case "run_now":
@@ -241,6 +248,7 @@ def help_text() -> str:
         "スポーツはまとめに出さなくていい",
         "Cloudflareはtech",
         "（記事の投稿のスレッドで）これは映画",
+        "（英語の記事の投稿のスレッドで）翻訳して",
         "（OPML を添付して）これ取り込んで",
         "OPML ちょうだい",
         "今すぐまとめを出して",

@@ -27,6 +27,7 @@ description: kawarabanya を CLI で操作する（サイトの追加・削除�
 | 好みの傾向（👍） | `interests --days 30`（`likes` で 👍 を取り直す） |
 | この語の記事は○○へ | `genres keyword 語 <ジャンル>`（見出しか冒頭にある固有名詞だけ。「AI」「映画」のように話題が広い語は入れない） |
 | この記事のジャンルが違う | `items move <記事の ID> <ジャンル> [--keyword 語]`（別のジャンルへはサブジャンルなしで投稿し直しで、元の投稿は消え 👍 は引き継げないので、先に利用者に確かめる） |
+| この記事を訳して | `items translate <記事の ID>`（日本語以外の記事だけ。数分かかるのでバックグラウンドで実行する） |
 | 投稿のタグを付け直す | `discord retag`（Bot のロールに「スレッドの管理」が要る） |
 | 重複した投稿を消す | `discord delete-duplicates`（一覧）→ 消すのは利用者（下の「決まり」） |
 | まとめを消す | `digest --delete [--genre G] [--day YYYY-MM-DD]` → 利用者に実行してもらう |

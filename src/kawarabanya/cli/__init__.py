@@ -27,6 +27,7 @@ from kawarabanya.cli.rss import (
     cmd_import_opml,
     cmd_interests,
     cmd_items_move,
+    cmd_items_translate,
     cmd_likes,
     cmd_notify,
     cmd_run,
@@ -168,6 +169,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("genre", help="tech、culture/movie など")
     s.add_argument("--keyword", help="この語も genres keyword で登録する")
     s.set_defaults(func=cmd_items_move)
+    s = its.add_parser("translate", help="日本語以外の記事の全文を訳し、<記事>.ja.md に保存して投稿のスレッドに返信する")
+    s.add_argument("id", type=int)
+    s.set_defaults(func=cmd_items_translate)
 
     gs = sub.add_parser("genres", help="ジャンル（genres.toml）の管理").add_subparsers(dest="genres_command", required=True)
     s = gs.add_parser("list", help="ジャンルの一覧とフィード数")

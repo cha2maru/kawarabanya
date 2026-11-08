@@ -21,6 +21,16 @@ SYSTEM_PROMPT = (
     "記事に書かれていないことは書かないでください。前置きは不要です。"
 )
 
+TRANSLATE_PROMPT = (
+    "次の文章を自然な日本語に翻訳してください。固有名詞・製品名・コード・URL は原文のまま残してください。"
+    "訳文だけを答えてください。"
+)
+# 見出しは製品名を一般名詞に訳しがち（Googlebook →「Google Books」）なので、固有名詞を残すよう念を押す
+TITLE_PROMPT = (
+    "記事の見出しを自然な日本語に翻訳してください。固有名詞・製品名・サービス名は訳さず原文のまま残してください。"
+    "訳文だけを 1 行で答えてください。"
+)
+
 # 重要度の判定。ラベルの割合は偏る（A が 7 割など）ので、A の確率で並べて上位を選ぶ使い方をする
 PRIORITY_PROMPT = (
     "あなたはニュースの編集者です。記事の見出しと冒頭を読み、読者にとっての重要度を判定します。"
@@ -75,10 +85,33 @@ def _headline(title: str | None, markdown: str | None) -> str:
     return f"見出し: {title or '(無題)'}\n冒頭: {lead(markdown or '')}"
 
 
+def plain(markdown: str) -> str:
+    """Markdown から画像とリンク先 URL を除く（リンクの文字は残す）。"""
+    return re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", markdown)
+
+
 def lead(markdown: str, chars: int = LEAD_CHARS) -> str:
     """本文の冒頭を、画像・リンク先 URL・改行を除いたプレーンテキストで返す。"""
-    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", markdown)
-    return re.sub(r"\s+", " ", text).strip()[:chars]
+    return re.sub(r"\s+", " ", plain(markdown)).strip()[:chars]
+
+
+def is_foreign(title: str | None, markdown: str | None) -> bool:
+    """見出しと冒頭にかなが 1 字もなければ、日本語以外の記事とみなす（漢字だけの中国語も含む）。"""
+    text = f"{title or ''} {lead(markdown or '')}"
+    return bool(text.strip()) and not re.search(r"[ぁ-んァ-ヶ]", text)
+
+
+def split_paragraphs(text: str, size: int) -> list[str]:
+    """段落の切れ目で、size 字ほどの塊に分ける（1 段落が size を超えればそのまま 1 塊）。"""
+    chunks: list[str] = []
+    for para in (p.strip() for p in text.split("\n\n")):
+        if not para:
+            continue
+        if chunks and len(chunks[-1]) + len(para) + 2 <= size:
+            chunks[-1] += "\n\n" + para
+        else:
+            chunks.append(para)
+    return chunks
 
 
 def clean_output(text: str) -> str:
@@ -151,6 +184,27 @@ class Summarizer:
             return clean_output(data["choices"][0]["message"]["content"]) or None
         except (KeyError, IndexError, TypeError):
             return None
+
+    async def translate(self, text: str, *, title: bool = False) -> str | None:
+        """日本語に訳す（title=True なら見出しとして 1 行で）。失敗したら None。"""
+        data = await self._chat(
+            {
+                "messages": [
+                    {"role": "system", "content": TITLE_PROMPT if title else TRANSLATE_PROMPT},
+                    {"role": "user", "content": text},
+                ],
+                "temperature": 0.2,
+                # 日本語の訳は原文の字数ほどのトークンになる
+                "max_tokens": 100 if title else min(4000, len(text) + 200),
+            },
+            f"翻訳（{text[:20]}）",
+            timeout=600,
+        )
+        try:
+            out = clean_output(data["choices"][0]["message"]["content"])
+        except (KeyError, IndexError, TypeError):
+            return None
+        return (out.splitlines()[0].strip() if title and out else out) or None
 
     async def ask_json(
         self, system: str, user: str, schema: dict, what: str, max_tokens: int = 2000, timeout: float = 900

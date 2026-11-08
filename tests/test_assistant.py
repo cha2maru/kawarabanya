@@ -117,3 +117,10 @@ def test_genre_written_in_request_wins(tmp_path):
     assert assistant.build(data, "これはtech", conn, genres, post=post_row(conn)).argv == ["items", "move", "5", "tech"]
     assert assistant.build(data, "これはホビー", conn, genres, post=post_row(conn)).argv[-1] == "hobby"
     assert assistant.build(data, "これは煙のやつ", conn, genres).error  # スレッドの外で語がない
+
+
+def test_translate_needs_post(tmp_path):
+    conn, genres = make(tmp_path)
+    assert ask(conn, genres, "翻訳して", command="translate").error
+    data = {"command": "translate"}
+    assert assistant.build(data, "翻訳して", conn, genres, post=post_row(conn)).argv == ["items", "translate", "5"]

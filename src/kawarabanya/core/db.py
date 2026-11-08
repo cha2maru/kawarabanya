@@ -109,8 +109,14 @@ def _v1(conn: sqlite3.Connection) -> None:
 
 
 # (説明, 関数)。i 番目（0 始まり）を適用すると版が i + 1 になる。末尾に足すだけで、並びも中身も変えない
+def _v2(conn: sqlite3.Connection) -> None:
+    """版 2: 日本語以外の記事の見出しの訳（items.title_ja）。"""
+    conn.execute("ALTER TABLE items ADD COLUMN title_ja TEXT")
+
+
 MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("テーブルの作成（0.1）", _v1),
+    ("見出しの訳の列（items.title_ja）", _v2),
 ]
 
 

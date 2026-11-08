@@ -22,7 +22,7 @@ from kawarabanya.core.discord_api import (
     post_url,
     send_webhook,
 )
-from kawarabanya.core.llm import Summarizer
+from kawarabanya.core.llm import Summarizer, is_foreign, plain, split_paragraphs
 from kawarabanya.rss import archive
 from kawarabanya.rss.genres import Genre, interest_of, top_genre
 from kawarabanya.rss.item import is_recent
@@ -60,6 +60,7 @@ class Pending:
     webhook_url: str
     guild_id: str | None
     tags: dict[str, str]
+    title_ja: str | None = None  # 日本語以外の記事の見出しの訳
 
 
 @dataclass
@@ -77,7 +78,7 @@ class NotifyStats:
 def pending_items(conn: sqlite3.Connection, category: str | None = None) -> tuple[list[Pending], int]:
     """通知待ちの記事と、送り先がないため送れない記事の数を返す。"""
     rows = conn.execute(
-        "SELECT i.id, i.feed_id, f.title AS feed_title, f.category, i.subgenre, i.title, i.url, i.published, i.fetched_at, i.summary,"
+        "SELECT i.id, i.feed_id, f.title AS feed_title, f.category, i.subgenre, i.title, i.title_ja, i.url, i.published, i.fetched_at, i.summary,"
         " i.md_path, d.webhook_url, d.guild_id, d.tags"
         " FROM items i JOIN feeds f ON f.id = i.feed_id"
         # フォーラムはトップレベルのジャンル（"news/world" なら "news"）ごと
@@ -102,6 +103,7 @@ def pending_items(conn: sqlite3.Connection, category: str | None = None) -> tupl
             webhook_url=r["webhook_url"],
             guild_id=r["guild_id"],
             tags=json.loads(r["tags"]) if r["tags"] else {},
+            title_ja=r["title_ja"],
         )
         for r in rows
         if r["webhook_url"]
@@ -143,7 +145,8 @@ def build_payload(p: Pending) -> dict:
         keep = MAX_CONTENT - len(p.url or "") - 4
         content = body[:keep] + "…\n\n" + (p.url or "")
     payload: dict = {
-        "thread_name": (p.title or "(無題)")[:MAX_THREAD_NAME],
+        # 訳した見出しには原題も添える（4B のモデルは固有名詞を訳し違えることがある）
+        "thread_name": (f"{p.title_ja}（{p.title}）" if p.title_ja else p.title or "(無題)")[:MAX_THREAD_NAME],
         "username": _username(p.feed_title),
         "content": content,
         # 記事中の @everyone などで通知が飛ばないようにする
@@ -323,6 +326,7 @@ def move_post(conn: sqlite3.Connection, client: DiscordClient, item_id: int, pat
         item_id=item_id, feed_id=r["feed_id"], feed_title=r["feed_title"], category=r["category"], subgenre=path,
         title=r["title"], url=r["url"], published=r["published"], fetched_at=r["fetched_at"], summary=r["summary"],
         md_path=r["md_path"], webhook_url=channel["webhook_url"], guild_id=channel["guild_id"], tags=tags,
+        title_ja=r["title_ja"],
     )
     new_thread = (send_webhook(p.webhook_url, build_payload(p)) or {}).get("channel_id")
     with conn:
@@ -335,6 +339,41 @@ def move_post(conn: sqlite3.Connection, client: DiscordClient, item_id: int, pat
         if "HTTP 404" not in str(e):  # 投稿が消えていれば、消す必要がない
             return f"{r['title']}: {path} に投稿しましたが、元の投稿を消せませんでした（{e}）"
     return f"{r['title']}: {path} に移しました"
+
+
+# 全文訳の上限（字）。CPU で 1 万字ほど訳すと 2〜3 分かかる
+MAX_TRANSLATE_CHARS = 12000
+# 訳を区切る大きさ（字）。1 回の出力が長すぎると途中で切れる
+TRANSLATE_CHUNK = 1500
+
+
+async def translate_post(conn: sqlite3.Connection, client: DiscordClient | None, summarizer: Summarizer, item_id: int) -> str:
+    """記事の全文を日本語に訳し、<Markdown>.ja.md に保存して、投稿のスレッドに返信する。結果の説明を返す。"""
+    r = conn.execute("SELECT title, title_ja, md_path, discord_thread_id FROM items WHERE id = ?", (item_id,)).fetchone()
+    if r is None or not r["md_path"] or not Path(r["md_path"]).exists():
+        raise ValueError(f"記事 {item_id} の本文がありません")
+    body = archive.read_body(r["md_path"])
+    if not is_foreign(r["title"], body):
+        raise ValueError(f"「{r['title']}」は日本語の記事です")
+    text = plain(body)
+    cut = len(text) > MAX_TRANSLATE_CHARS
+    parts = []
+    for chunk in split_paragraphs(text[:MAX_TRANSLATE_CHARS], TRANSLATE_CHUNK):
+        out = await summarizer.translate(chunk)
+        if out is None:
+            raise ValueError("翻訳に失敗しました（要約サーバーを確かめてください）")
+        parts.append(out)
+    translated = "\n\n".join(parts) + ("\n\n（長いので、ここまでを訳しました）" if cut else "")
+    saved = Path(r["md_path"]).with_suffix(".ja.md")
+    saved.write_text(f"# {r['title_ja'] or r['title']}\n\n{translated}\n", encoding="utf-8")
+    sent = 0
+    if client and r["discord_thread_id"]:
+        for msg in split_paragraphs(translated, MAX_CONTENT - 100):
+            for i in range(0, len(msg), MAX_CONTENT):  # 1 段落が上限を超えるときは字数で切る
+                client.request("POST", f"/channels/{r['discord_thread_id']}/messages",
+                               {"content": msg[i:i + MAX_CONTENT], "allowed_mentions": {"parse": []}})
+                sent += 1
+    return f"{r['title']}: {len(translated)} 字に訳しました（{saved}" + (f"、スレッドに {sent} 通" if sent else "") + "）"
 
 
 def delete_duplicate_posts(conn: sqlite3.Connection, client: DiscordClient, *, apply: bool = False) -> list[sqlite3.Row]:

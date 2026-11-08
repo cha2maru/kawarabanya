@@ -560,6 +560,19 @@ def cmd_items_move(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_items_translate(cfg: Config, args: argparse.Namespace) -> int:
+    """items translate: 日本語以外の記事の全文を訳し、保存して投稿のスレッドに返信する。"""
+    conn = _open_db(cfg, args)
+    client = _discord_client(cfg) if cfg.discord.token else None
+
+    async def go():
+        async with Summarizer(cfg.summarize) as summarizer:
+            return await notify.translate_post(conn, client, summarizer, args.id)
+
+    print(asyncio.run(go()))
+    return 0
+
+
 def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     """status: 最後の取り込み・次のまとめ・要約サーバー・フィードと記事の状態を表示する。"""
     import httpx

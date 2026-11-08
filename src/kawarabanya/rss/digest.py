@@ -61,7 +61,8 @@ def collect(
     levels = levels or {}
     sources = trends.source_counts(conn, since - timedelta(days=1))
     rows = conn.execute(
-        "SELECT i.id, i.md_path, COALESCE(i.subgenre, f.category) AS category, i.title, i.discord_thread_id, i.priority, i.likes,"
+        "SELECT i.id, i.md_path, COALESCE(i.subgenre, f.category) AS category, COALESCE(i.title_ja, i.title) AS title,"
+        " i.discord_thread_id, i.priority, i.likes,"
         " json_extract(f.options, '$.interest') AS feed_interest FROM items i"
         " JOIN feeds f ON f.id = i.feed_id WHERE i.status = 'notified' AND i.notified_at >= ?",
         (since.isoformat(timespec="seconds"),),

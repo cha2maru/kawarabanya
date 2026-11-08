@@ -17,7 +17,7 @@ import httpx
 
 from kawarabanya.core import db
 from kawarabanya.core.config import Config
-from kawarabanya.core.llm import CHOICE_LETTERS, Summarizer, lead
+from kawarabanya.core.llm import CHOICE_LETTERS, Summarizer, is_foreign, lead
 from kawarabanya.rss import archive
 from kawarabanya.rss.fulltext import fill_content
 from kawarabanya.rss.genres import Genre, keyword_tops, load_genres, priority_criteria
@@ -204,8 +204,18 @@ async def _summarize(
     md_path: str | Path,
     priority: float | None = None,
 ) -> str:
-    """サブジャンルと重要度を判定し、基準以上なら要約する。"summarized" / "low"（基準未満）/ "failed" を返す。"""
+    """サブジャンルと重要度を判定し、基準以上なら要約する。"summarized" / "low"（基準未満）/ "failed" を返す。
+
+    日本語以外の記事は、見出しを訳し、重要度にかかわらず（日本語で）要約する（本文の冒頭が外国語のまま投稿されないように）。
+    """
     category = await classify_item(conn, summarizer, genres, item_id, title, category, content_md)
+    foreign = is_foreign(title, content_md)
+    # 「owner/repo」のような 1 語の見出しは訳さない
+    if (foreign and title and (len(title.split()) >= 3 or re.search(r"[一-龯]", title))
+            and (title_ja := await summarizer.translate(title, title=True))):
+        archive.set_field(md_path, "title_ja", title_ja)
+        with conn:
+            db.update_item(conn, item_id, title_ja=title_ja)
     threshold = cfg.summarize.priority_threshold
     if threshold > 0:
         if priority is None:
@@ -214,7 +224,7 @@ async def _summarize(
                 with conn:
                     db.update_item(conn, item_id, priority=priority)
         # 判定に失敗したとき（None）は、取りこぼさないよう要約する
-        if priority is not None and priority < threshold:
+        if priority is not None and priority < threshold and not foreign:
             return "low"
     summary = await summarizer.summarize(title, content_md)
     if not summary:
