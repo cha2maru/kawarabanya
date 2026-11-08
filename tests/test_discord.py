@@ -462,3 +462,18 @@ def test_health_alerts_once_and_rearm():
 
     assert health.send_alerts(conn, {}, t) == []  # 直ったら忘れる
     assert health.send_alerts(conn, found, t) == [f"feed:{feed_id}"]  # 再発したらまた送る
+
+
+def test_count_reaction_on_event():
+    conn = db.connect(":memory:")
+    feed_id = db.insert_feed(conn, "https://a.example/rss", "A", None, "tech")
+    with conn:
+        iid = db.insert_item(conn, feed_id, "a", None, "a", ago(hours=1), "notified")
+        db.update_item(conn, iid, discord_thread_id="t-a", likes=None)
+    assert notify.count_reaction(conn, "t-a", "👍", 1)
+    assert notify.count_reaction(conn, "t-a", "👎", 1)
+    assert notify.count_reaction(conn, "t-a", "👎", -1)
+    assert notify.count_reaction(conn, "t-a", "👎", -1)  # 0 より下げない
+    assert not notify.count_reaction(conn, "t-a", "🎉", 1)
+    assert not notify.count_reaction(conn, "t-x", "👍", 1)  # 記事の投稿でない
+    assert tuple(conn.execute("SELECT likes, dislikes FROM items").fetchone()) == (1, 0)

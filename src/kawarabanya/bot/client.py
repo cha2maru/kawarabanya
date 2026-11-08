@@ -23,7 +23,7 @@ from kawarabanya.bot import assistant
 from kawarabanya.core import db
 from kawarabanya.core.config import Config
 from kawarabanya.core.llm import Summarizer
-from kawarabanya.rss import health
+from kawarabanya.rss import health, notify
 from kawarabanya.rss.pipeline import load_genres_if_any
 
 # Discord のメッセージの上限（2,000 字）に収めるため、コマンドの出力はこの字数で切る
@@ -139,6 +139,25 @@ class Bot(discord.Client):
         if proc.returncode:
             log.warning("%s が終了コード %s で終わりました", args[0], proc.returncode)
         return proc.returncode or 0, text
+
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
+        """記事の投稿に付いた 👍・👎 を、定期の取得を待たずに数える。"""
+        self._count_reaction(payload, 1)
+
+    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent) -> None:
+        """記事の投稿から外れた 👍・👎 を数から引く。"""
+        self._count_reaction(payload, -1)
+
+    def _count_reaction(self, payload: discord.RawReactionActionEvent, delta: int) -> None:
+        # フォーラム投稿の最初のメッセージの ID はスレッド ID と同じ（スレッド内の返信へのリアクションは数えない）
+        if payload.message_id != payload.channel_id or (self.user and payload.user_id == self.user.id):
+            return
+        conn = db.connect(self.db_path)
+        try:
+            if notify.count_reaction(conn, str(payload.channel_id), payload.emoji.name or "", delta):
+                log.info("リアクション %s %+d: 投稿 %s", payload.emoji.name, delta, payload.channel_id)
+        finally:
+            conn.close()
 
     async def on_message(self, message: discord.Message) -> None:
         """Bot へのメンションを日本語の依頼として受け、コマンドに直して返事をする（サーバーの持ち主だけ）。"""

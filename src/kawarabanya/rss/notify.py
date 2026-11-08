@@ -15,6 +15,8 @@ import httpx
 
 from kawarabanya.core import db
 from kawarabanya.core.discord_api import (
+    DISLIKE_EMOJI,
+    LIKE_EMOJI,
     UNCATEGORIZED,
     DiscordClient,
     DiscordError,
@@ -217,6 +219,21 @@ def notify_pending(
             archive.set_field(p.md_path, "discord", post_url(p.guild_id, thread_id))
         stats.sent += 1
     return stats
+
+
+def count_reaction(conn: sqlite3.Connection, thread_id: str, emoji: str, delta: int) -> bool:
+    """投稿に付いた・外れた 👍・👎 を、その場で数に足す（Bot がイベントで受ける）。記事の投稿で数えたら True。
+
+    Bot が止まっていた間の分は sync_likes が数え直して正す。
+    """
+    col = {LIKE_EMOJI: "likes", DISLIKE_EMOJI: "dislikes"}.get(emoji)
+    if col is None:
+        return False
+    with conn:
+        cur = conn.execute(
+            f"UPDATE items SET {col} = MAX(COALESCE({col}, 0) + ?, 0) WHERE discord_thread_id = ?", (delta, thread_id)
+        )
+    return cur.rowcount > 0
 
 
 def sync_likes(
