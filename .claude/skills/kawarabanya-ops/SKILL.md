@@ -32,6 +32,7 @@ description: kawarabanya を CLI で操作する（サイトの追加・削除�
 | 重複した投稿を消す | `discord delete-duplicates`（一覧）→ 消すのは利用者（下の「決まり」） |
 | まとめを消す | `digest --delete [--genre G] [--day YYYY-MM-DD]` → 利用者に実行してもらう |
 | Discord に不調の通知が来た | フィードなら `feeds list --disabled` で原因を見て、直ったら `feeds enable <ID>`。RSSHub なら `docker start rsshub`。定期処理ならログを見る |
+| 今日の予定は？ / 予定の通知が来ない | `schedule check --agenda --dry-run`（表示だけ）。「許可していません」「RefreshError」なら利用者のターミナルで `schedule login` をやり直してもらう |
 | ログ | `journalctl --user -u kawarabanya-bot -n 100 --no-pager` |
 | 更新 | `git pull && uv sync && systemctl --user restart kawarabanya-bot`（DB のマイグレーションは起動時に自動。前にバックアップを取る） |
 

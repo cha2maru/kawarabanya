@@ -113,6 +113,25 @@ class DigestConfig:
 
 
 @dataclass
+class ScheduleConfig:
+    """[schedule]: Google カレンダーの予定の通知（gcsa・読み取り専用の OAuth）。"""
+    enabled: bool = False
+    # Google Cloud の OAuth クライアント ID（デスクトップ アプリ）の JSON と、許可して得たトークンの置き場所
+    credentials: str = "data/google-credentials.json"
+    token: str = "data/google-token.json"
+    # 予定を投稿するテキストチャンネル（持ち主と Bot だけが見られるようにしておく）
+    channel: str = "予定"
+    # 読むカレンダーの ID。空ならすべて
+    calendars: list[str] = field(default_factory=list)
+    # 開始の何分前に知らせるか・何日先まで読むか・今日と明日の予定を投稿する時刻
+    remind_minutes: int = 30
+    days: int = 14
+    agenda_times: list[str] = field(default_factory=lambda: ["06:30"])
+    # 許可のときにブラウザから戻ってくるポート（既定の 8080 は要約サーバーと重なる）
+    login_port: int = 8765
+
+
+@dataclass
 class BotConfig:
     # 常駐中に `kawarabanya run` を実行する間隔（分）。0 なら実行しない
     """[bot]: 常駐 Bot の定期実行と、一緒に起動する要約サーバー。"""
@@ -132,6 +151,7 @@ class Config:
     discord: DiscordConfig = field(default_factory=DiscordConfig)
     bot: BotConfig = field(default_factory=BotConfig)
     digest: DigestConfig = field(default_factory=DigestConfig)
+    schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     path: Path | None = None
 
 
@@ -158,5 +178,6 @@ def load_config(path: Path | None = None) -> Config:
         discord=_section(DiscordConfig, raw.get("discord", {}), "discord", path),
         bot=_section(BotConfig, raw.get("bot", {}), "bot", path),
         digest=_section(DigestConfig, raw.get("digest", {}), "digest", path),
+        schedule=_section(ScheduleConfig, raw.get("schedule", {}), "schedule", path),
         path=path,
     )

@@ -34,6 +34,7 @@ from kawarabanya.cli.rss import (
     cmd_status,
     cmd_summarize,
 )
+from kawarabanya.cli.schedule import cmd_schedule_check, cmd_schedule_login
 from kawarabanya.cli.server import (
     cmd_bot,
     cmd_discord_channels,
@@ -172,6 +173,14 @@ def build_parser() -> argparse.ArgumentParser:
     s = its.add_parser("translate", help="日本語以外の記事の全文を訳し、<記事>.ja.md に保存して投稿のスレッドに返信する")
     s.add_argument("id", type=int)
     s.set_defaults(func=cmd_items_translate)
+
+    sc = sub.add_parser("schedule", help="予定（Google カレンダー）").add_subparsers(dest="schedule_command", required=True)
+    s = sc.add_parser("login", help="ブラウザで Google カレンダーの読み取りを許可する（初回と、許可が切れたとき）")
+    s.set_defaults(func=cmd_schedule_login)
+    s = sc.add_parser("check", help="予定を読み、変更・直前の予定・（agenda_times なら）今日と明日の予定を知らせる")
+    s.add_argument("--agenda", action="store_true", help="今日と明日の予定も今すぐ知らせる")
+    s.add_argument("--dry-run", action="store_true", help="Discord に送らず表示する（DB の記録は進む）")
+    s.set_defaults(func=cmd_schedule_check)
 
     gs = sub.add_parser("genres", help="ジャンル（genres.toml）の管理").add_subparsers(dest="genres_command", required=True)
     s = gs.add_parser("list", help="ジャンルの一覧とフィード数")

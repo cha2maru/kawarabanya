@@ -114,9 +114,18 @@ def _v2(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE items ADD COLUMN title_ja TEXT")
 
 
+def _v3(conn: sqlite3.Connection) -> None:
+    """版 3: Google カレンダーの予定（schedule/events.py。前回と比べて変更を知らせる・直前に知らせる）。"""
+    conn.execute(
+        "CREATE TABLE events (id TEXT PRIMARY KEY, calendar TEXT NOT NULL, summary TEXT NOT NULL, start TEXT NOT NULL,"
+        " end TEXT NOT NULL, all_day INTEGER NOT NULL, location TEXT, updated TEXT, reminded_at TEXT)"
+    )
+
+
 MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("テーブルの作成（0.1）", _v1),
     ("見出しの訳の列（items.title_ja）", _v2),
+    ("予定のテーブル（events）", _v3),
 ]
 
 

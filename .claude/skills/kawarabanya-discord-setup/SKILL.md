@@ -14,7 +14,8 @@ Developer Portal とサーバーの設定は、利用者にしかできない（
 3. **MESSAGE CONTENT INTENT**（利用者）: 同じ「Bot」の画面の「Privileged Gateway Intents」（日本語の表示では「特権ゲートウェイインテント」）の MESSAGE CONTENT INTENT をオン → Save Changes。下の「Bot の権限」の計算ツールは触らなくてよい。`doctor` の該当行が ✅ になる。
 4. **招待**: `uv run kawarabanya discord invite-url` の URL を開いてもらい、サーバーを選ぶ。サーバーの設定で「コミュニティ」を有効にしてもらう（フォーラムに必要）。まとめの投稿先のテキストチャンネル（既定 `#ニュース`、`config.toml` の `[digest] channel`）を作ってもらう。
 5. **フォーラムとタグ**: `uv run kawarabanya discord setup`（予定の表示だけ）を見せ、問題なければ `uv run kawarabanya discord setup --apply`。ジャンル（genres.toml のトップレベル）ごとにフォーラム、サブジャンルごとにタグ、Webhook ができる。
-6. **確かめる**: `uv run kawarabanya doctor` が ✅、`uv run kawarabanya run` で投稿されるか、Bot が動いていれば Discord で「@Bot いまどうなってる？」に返事が来るか。
+6. **予定の投稿先**（`[schedule] enabled = true` のときだけ）: `#予定`（`[schedule] channel`）を、自分と Bot だけが見られる非公開のテキストチャンネルとして作ってもらい、`discord setup --apply` で Webhook を登録する。
+7. **確かめる**: `uv run kawarabanya doctor` が ✅、`uv run kawarabanya run` で投稿されるか、Bot が動いていれば Discord で「@Bot いまどうなってる？」に返事が来るか。
 
 ## うまくいかないとき
 

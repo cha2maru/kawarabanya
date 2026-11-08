@@ -5,6 +5,7 @@
 - **全文を Markdown で保存**: 元記事のページから本文を取り出し、`archive/` に残す（文字コードは自動で判別し、UTF-8 で保存）。
 - **ローカル LLM で整理**: 記事をサブジャンルに振り分け（フォーラムのタグになる）、重要度を判定して、重要な記事だけ要約する。外部の API は使わない（Qwen3.5-4B を llama.cpp で動かす。1 件 1.5〜9 秒）。
 - **重複をまとめる**: 同じ URL・同じ本文の記事に加え、本文の違う「同じ出来事」の記事も LLM で見分けて 1 件にする。
+- **予定（Google カレンダー）**: 今日と明日の予定・開始 30 分前・予定の追加や変更を、持ち主だけが見られるチャンネルに知らせる（読み取りだけ。説明文は送らない）。
 - **外国語の記事**: 見出しを訳して原題と並べ、重要度にかかわらず日本語で要約する。全文訳は投稿のスレッドで頼む。
 - **まとめ**: 1 日 2 回（6:30・18:30）、ジャンルごとの話題（最大 3 つ）と重要な記事へのリンクを投稿する。複数のサイトが報じた記事や、Google トレンドの急上昇ワードに当たる記事は上に寄せる。
 - **好みを覚える**: 投稿に付いた 👍 を数える。ジャンルの好き嫌い（好き・うすい・ミュート）でまとめの並びや投稿を変えられる。
@@ -123,6 +124,7 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 | `genres keyword 語 G` | 見出しか本文の冒頭にこの語がある記事を、ジャンル `G` にする（サブジャンルは確信があるときだけ LLM が選ぶ。genres.toml の `keywords` に書く）。全角・半角と大文字・小文字は区別しない。作品名・ブランド名・執筆者のような固有名詞に使う |
 | `items move ID G [--keyword 語]` | 記事を別のジャンルに移す。同じジャンルの中ならタグを付け替え、別のジャンルならサブジャンルなしで新しいフォーラムに投稿して元の投稿を消す（URL は変わり、👍 は引き継げない。「スレッドの管理」が必要）。サブジャンルなしの記事は `genres suggest` が新しいサブジャンルの材料にする |
 | `items translate ID` | 日本語以外の記事の全文を日本語に訳し、`<記事>.ja.md` に保存して投稿のスレッドに返信する（1 万 2 千字まで。6 千字で約 2 分） |
+| `schedule login` / `schedule check [--agenda] [--dry-run]` | 予定（Google カレンダー）の許可 / 予定を読んで変更・直前の予定・今日と明日の予定を `#予定` に知らせる（「予定（Google カレンダー）」） |
 | `genres list` / `genres apply [--dry-run] [--disable-unassigned]` | ジャンルの一覧 / genres.toml の反映 |
 | `genres suggest [--apply] [--days 7] [--due]` | どのサブジャンルにも当てはまらなかった記事から、新しいサブジャンルを LLM に決めさせる（案は振り分け直して確かめる）。タグの上限（20）を超えるジャンルは似たサブジャンルを先にまとめる。`--apply` で genres.toml に反映し、Discord のタグを揃えて付け直す（Bot はまとめの時刻ごとに自動で実行する） |
 | `discord setup [--apply] [--prune]` / `channels` / `test GENRE` / `guilds` / `invite-url` | フォーラム・タグ・Webhook の管理 |
@@ -221,6 +223,25 @@ uv run kawarabanya feeds add "http://127.0.0.1:1200/famitsu/category/news" --gen
 フィードを移すには URL の行を別のジャンルに移して `genres apply` → `discord setup --apply`。書かれていないフィードの記事は投稿されない（保存はする）。
 
 保存した Markdown の Front Matter には、投稿後に Discord の投稿へのリンク（`discord:`）が入る。
+
+### 予定（Google カレンダー。使うときだけ）
+
+gcsa（Google Calendar Simple API）で、読み取りだけの許可（`calendar.readonly`）を得て読む。準備は初回だけ:
+
+1. https://console.cloud.google.com でプロジェクトを作り、「API とサービス」→「ライブラリ」で **Google Calendar API** を有効にする。
+2. 「OAuth 同意画面」を作る（対象は「外部」）。テストユーザーに自分の Google アカウントを足す。
+   公開ステータスが「テスト中」のままだと許可が 7 日で切れるので、切れたら `schedule login` をやり直すか、「本番」にする（自分用なので審査は受けず、許可の画面で「確認されていないアプリ」の警告が出たら「詳細」から進む）。
+3. 「認証情報」→「OAuth クライアント ID」→ 種類「デスクトップ アプリ」で作り、JSON をダウンロードして `data/google-credentials.json` に置く（git 管理外）。
+4. Discord に予定の投稿先 `#予定` を作る（チャンネルの設定 → 権限で非公開にし、自分と Bot だけを足す）。
+5. `config.toml` に `[schedule] enabled = true` を書き、次を実行する:
+
+```bash
+uv run kawarabanya schedule login            # ブラウザで許可する（data/google-token.json に保存。カレンダーの一覧が出る）
+uv run kawarabanya discord setup --apply     # #予定 の Webhook を登録する
+uv run kawarabanya schedule check --agenda --dry-run   # 今日と明日の予定を表示して確かめる
+```
+
+Bot は 5 分ごとに `schedule check` を実行し、予定の追加・変更・取り消し、開始の 30 分前（`remind_minutes`）、6:30 の今日と明日の予定（`agenda_times`）を `#予定` に投稿する。Discord に送るのは時刻・件名・場所だけ。許可をやめるには Google アカウントの「サードパーティ製のアプリとサービス」から外す。
 
 ### config.toml（git 管理外。すべて省略可）
 

@@ -74,6 +74,8 @@ class Bot(discord.Client):
             self.scheduled_run = tasks.loop(time=times)(self.cycle)
             self.scheduled_run.before_loop(self._wait_ready)
             self.scheduled_run.start()
+        if self.cfg.schedule.enabled:
+            self.schedule_run.start()
 
     async def on_ready(self) -> None:
         """ログインできたことをログに残す。"""
@@ -83,6 +85,11 @@ class Bot(discord.Client):
     async def periodic_run(self) -> None:
         """毎時の定期実行。"""
         await self.cycle()
+
+    @tasks.loop(minutes=5)
+    async def schedule_run(self) -> None:
+        """予定の確認（直前の通知が遅れないよう、取り込みの順番を待たない。要約サーバーも使わない）。"""
+        await self._job("schedule", "check")
 
     async def cycle(self) -> None:
         """定期実行の 1 回分。run で記事を取り込み、まとめの時刻を過ぎていれば、サブジャンルを作ってからまとめを投稿する。"""
@@ -206,6 +213,7 @@ class Bot(discord.Client):
         files = [discord.File(intent.attach)] if rc == 0 and intent.attach and Path(intent.attach).exists() else []
         return f"{'✅' if rc == 0 else '⚠️'} {intent.summary}\n```\n{out}\n```", files
 
+    @schedule_run.before_loop
     @periodic_run.before_loop
     async def _wait_ready(self) -> None:
         """Discord への接続と要約サーバーの準備が終わるまで、最初の定期実行を待たせる。"""

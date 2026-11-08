@@ -38,6 +38,8 @@ DEFAULT_REACTION = {"emoji_id": None, "emoji_name": LIKE_EMOJI}
 UNCATEGORIZED = "uncategorized"
 # discord_channels で、まとめの投稿先（テキストチャンネル）を表すキー
 DIGEST_KEY = "#digest"
+# 予定（schedule）の投稿先を discord_channels に登録するときの category
+SCHEDULE_KEY = "#schedule"
 
 
 class DiscordError(Exception):

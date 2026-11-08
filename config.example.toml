@@ -48,6 +48,17 @@ window_hours = 24                       # 前回のまとめがない・古い�
 top = 10                                # まとめに並べる投稿へのリンクの数
 trends_geo = "JP"                       # Google トレンドの急上昇ワードの地域（run のたびに取得し、当たる記事をまとめの上に寄せる）。"" で使わない
 
+[schedule]
+enabled = false                         # Google カレンダーの予定を知らせる（README の「予定」で準備してから true に）
+credentials = "data/google-credentials.json"   # Google Cloud の OAuth クライアント ID（デスクトップ アプリ）の JSON
+token = "data/google-token.json"        # kawarabanya schedule login で許可したトークン（git 管理外）
+channel = "予定"                        # 予定を投稿するテキストチャンネル（持ち主と Bot だけが見られるようにして作っておく）
+calendars = []                          # 読むカレンダーの ID（schedule login で表示される）。空ならすべて
+remind_minutes = 30                     # 開始の何分前に知らせるか（終日の予定は朝の一覧だけ）
+days = 14                               # 何日先まで読むか（この範囲の追加・変更・取り消しを知らせる）
+agenda_times = ["06:30"]                # 今日と明日の予定を投稿する時刻
+login_port = 8765                       # 許可のときにブラウザから戻ってくるポート（8080 は要約サーバーと重なる）
+
 [bot]
 run_interval_minutes = 60               # 定期実行の間隔（分）。0 なら定期実行しない（まとめの時刻の実行は別）
 run_args = []                           # run に追加で渡す引数（例: ["--no-summary"]）

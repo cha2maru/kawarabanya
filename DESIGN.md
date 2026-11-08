@@ -33,7 +33,7 @@ systemd --user: kawarabanya-bot.service
 
 ### 2.1 コードの構成（`src/kawarabanya/`）
 
-依存は一方通行（`cli`・`bot` → `rss` → `core`）。書き方の規約は [docs/CODING.md](docs/CODING.md)。
+依存は一方通行（`cli`・`bot` → `rss`・`schedule` → `core`）。書き方の規約は [docs/CODING.md](docs/CODING.md)。
 
 ```
 core/       # 共通の土台（上の層を import しない）
@@ -45,6 +45,8 @@ rss/        # RSS 機能
   sources/  # 記事の取り込み元
     fetcher.py check.py（取得と判定） discover.py（RSS の自動検出） htmlsource.py（HTML 取り込み・文字コードの判別）
     extensions.py（サイト別の拡張） sitemap.py rsshub.py（RSSHub の対応の確認） opml.py
+schedule/   # 予定の機能（Google カレンダー）
+  events.py（gcsa で読み、DB と比べて変更・直前・今日と明日の予定を作る）
 bot/        # 常駐 Bot
   client.py（定期実行・メンションへの返事） assistant.py（日本語の依頼をコマンドに直す）
 cli/        # コマンド
@@ -122,6 +124,14 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 - 要約はもともと日本語で書かせているので、日本語以外の記事は重要度にかかわらず要約する（基準未満だと本文の冒頭が外国語のまま投稿されていた）。11/08 時点で投稿の 1% 未満なので、負荷は小さい。
 - 全文訳は自動ではしない（読まない記事にも数分ずつ CPU を使い、毎時の取り込みが遅れる）。投稿のスレッドで頼まれたら（`items translate`）、画像とリンク先を除いた本文を段落ごとに約 1,500 字ずつ訳し、`<記事>.ja.md` に保存してスレッドに返信する。6,300 字の英語の記事で約 2 分。上限 1 万 2 千字。
 
+### 3.3.3 予定（Google カレンダー。`schedule/events.py`）
+- RSS の次の機能。Gmail は重要な情報が多いので、先に予定から始めた。
+- 読み方: gcsa（Google Calendar Simple API）＋ OAuth（`calendar.readonly`、読み取りだけ）。iCal の非公開 URL＋recurring-ical-events の方が準備も依存も軽い（`.venv` が 99 MB → 232 MB になったのは gcsa が引く Google の API クライアント）が、URL を知れば誰でも読めることと、後で予定の追加や Gmail に広げられることから、利用者が OAuth を選んだ。許可のときの戻り先のポートは 8765（gcsa の既定 8080 は要約サーバーと重なる）。
+- 繰り返しの予定は Google に 1 回ずつ展開させる（`single_events`）。予定の ID はカレンダー ID と組にして `events` テーブル（版 3）に残し、5 分ごとに今から `days`（14）日分と比べる: 新しい予定は「前回より後に更新されたもの」だけを追加と数える（範囲に入ってきただけのものを除く）。消えた予定は、まだ始まっていなければ取り消し。初回は記録だけ。
+- 直前の通知は開始の `remind_minutes`（30）分前に 1 回。時刻が変わったらやり直す。終日の予定は朝の一覧だけ。朝の一覧（`agenda_times`、6:30）は今から明日の終わりまで。
+- Discord には時刻・件名・場所だけを送り、説明文は送らない（Discord のメッセージは運営からは読める前提）。投稿先は持ち主と Bot だけが見られる `#予定`。
+- Bot は取り込みの順番待ちをせずに 5 分ごとに実行する（取り込みは数十分かかることがあり、直前の通知が遅れるため。LLM は使わない）。
+
 ### 3.4 Discord
 - **ジャンル 1 つ = フォーラム 1 つ**（親カテゴリ「kawarabanya」の下。年齢制限オン）。**フォーラムのタグはサブジャンルだけ**（上限 20 個、名前は 20 字）。フィード名はタグにせず、投稿者名で示す（フィードが 20 を超えるとタグが足りなくなるため）。
 - 投稿のタグは記事のサブジャンル（`items.subgenre`、なければフィードを固定したサブジャンル）。
@@ -163,6 +173,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 |---|---|
 | `feeds` | url（移転で更新）/ original_url / title / category（= ジャンルのパス）/ enabled / disabled_reason / etag / last_modified / last_status / fail_count / latest_entry_at / initialized_at / options（JSON） |
 | `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ subgenre（LLM が判定したサブジャンル。当てはまらなければトップレベルのジャンル）/ content_hash（重複判定用の本文のハッシュ）/ title_ja（日本語以外の記事の見出しの訳。版 2）/ notified_at / discord_thread_id / likes / likes_checked_at |
+| `events` | 予定（版 3）: id（カレンダー ID:予定 ID）/ calendar / summary / start / end（ISO。終日なら日付）/ all_day / location / updated / reminded_at（直前の通知を送った日時） |
 | `discord_channels` | category（トップレベルのジャンル。まとめの投稿先は `#digest`）/ guild_id / channel_id / webhook_url / tags（JSON: `feed:<id>` と `sub:<パス>` → タグ ID） |
 | `digests` | genre / day（投稿したローカル日時。11/07 までは日付）/ thread_id（投稿したメッセージの ID）/ created_at — 投稿済みのまとめ |
 | `state` | key / value — 定期処理の最後の実行時刻（`run_at` / `suggest_at`）、知らせた不調（`alerted`） |

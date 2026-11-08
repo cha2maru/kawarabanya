@@ -15,7 +15,8 @@ description: kawarabanya をこのマシンに入れる・動かない環境を�
    - 使わない: `scripts/install.sh`
    - `uv sync` で失敗したら、エラーの最後の数行を読む。ネットワーク（プロキシ・DNS）か、Python 3.12 が取れないことが多い（`uv python install 3.12` を試す）。
 3. 最後に出る `kawarabanya doctor` の結果を、❌ → ⚠️ の順に 1 つずつ直す（下の表）。直したら `uv run kawarabanya doctor` をもう一度実行し、❌ が 0 になるまで続ける。
-4. Discord の準備がまだなら kawarabanya-discord-setup に進む。常駐は Discord の準備のあと `scripts/install.sh --service`。
+4. 予定（Google カレンダー）を使うと言われたら、README の「予定（Google カレンダー）」の 1〜3 を利用者に進めてもらう（Google Cloud の画面の操作は利用者。JSON の中身は表示しない）。`schedule login` はブラウザが要るので、利用者のターミナルで実行してもらう（`! uv run kawarabanya schedule login`）。
+5. Discord の準備がまだなら kawarabanya-discord-setup に進む。常駐は Discord の準備のあと `scripts/install.sh --service`。
 
 ## doctor の結果ごとの直し方
 

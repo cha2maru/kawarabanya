@@ -15,7 +15,7 @@ import httpx
 
 from kawarabanya.core import db
 from kawarabanya.core.config import Config
-from kawarabanya.core.discord_api import DIGEST_KEY, DiscordClient, DiscordError
+from kawarabanya.core.discord_api import DIGEST_KEY, SCHEDULE_KEY, DiscordClient, DiscordError
 from kawarabanya.rss import genres, health
 from kawarabanya.rss.sources import extensions
 
@@ -121,7 +121,16 @@ def _check_discord(cfg: Config, r: Report, channels: list) -> None:
         r("ng", "Discord のサーバー", f"{len(guilds)} 個に参加しています（config.toml の [discord] guild_id で 1 つ選ぶ）")
     else:
         r("ok", "Discord のサーバー", "、".join(g["name"] for g in guilds))
-    forums = [c[0] for c in channels if c[0] != DIGEST_KEY]
+    forums = [c[0] for c in channels if c[0] not in (DIGEST_KEY, SCHEDULE_KEY)]
+    if cfg.schedule.enabled:
+        if not Path(cfg.schedule.credentials).exists():
+            r("ng", "予定（Google カレンダー）", f"{cfg.schedule.credentials} がありません（README の「予定」）")
+        elif not Path(cfg.schedule.token).exists():
+            r("ng", "予定（Google カレンダー）", "まだ許可していません（kawarabanya schedule login）")
+        elif SCHEDULE_KEY not in [c[0] for c in channels]:
+            r("warn", "予定（Google カレンダー）", f"#{cfg.schedule.channel} が未登録です（作ってから kawarabanya discord setup --apply）")
+        else:
+            r("ok", "予定（Google カレンダー）", f"許可済み・#{cfg.schedule.channel} に投稿")
     if forums:
         r("ok", "フォーラム", f"{len(forums)} 個（まとめの投稿先: {'あり' if len(forums) < len(channels) else 'なし'}）")
     else:

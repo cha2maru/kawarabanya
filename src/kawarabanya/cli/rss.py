@@ -698,7 +698,8 @@ def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
     genre_list = args.genre or (
         [g.path for g in defs.values() if not g.is_sub] if defs
         else [r[0] for r in conn.execute(
-            "SELECT category FROM discord_channels WHERE category != ? ORDER BY category", (discord_api.DIGEST_KEY,)
+            "SELECT category FROM discord_channels WHERE category NOT IN (?, ?) ORDER BY category",
+            (discord_api.DIGEST_KEY, discord_api.SCHEDULE_KEY),
         )]
     )
 
