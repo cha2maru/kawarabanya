@@ -23,7 +23,7 @@
 
 - Linux（Ubuntu・WSL2 で動作を確認）と [uv](https://docs.astral.sh/uv/)（Python 3.12 は uv が用意する）
 - Discord のサーバー（「コミュニティ」を有効にする。フォーラムを作るのに必要）と、Bot のアプリケーション
-- 要約に使う場合: CPU 8 スレッド程度・メモリ 6 GB 程度・ディスク 3 GB（llama.cpp と Qwen3.5-4B Q4_K_M）。なくても取り込み・保存・投稿はできる
+- 要約に使う場合: CPU 8 スレッド程度・メモリ 5 GB 程度・ディスク 3 GB（llama.cpp と Qwen3.5-4B Q4_K_M）。なくても取り込み・保存・投稿はできる
 
 ## クイックスタート
 

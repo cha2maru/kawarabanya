@@ -4,6 +4,7 @@
 
 ## 未リリース
 
+- 要約サーバーのメモリを 9 GB → 4.6 GB に減らす（`scripts/llama-server.sh` で llama-server のプロンプトのキャッシュ `--cache-ram` を切る。`LLAMA_CACHE_RAM` で戻せる）
 - 👍・👎 から好みを学び、まとめの並びに反映する（ジャンル・サブジャンル・見出しと冒頭の語・サイトごと。`[digest] pref_max`・`site_pref_max`・`pref_half_life_days`、`interests` で表示）。上位の最後の 1 枠は好みを除いた点で選ぶ。DB は版 4（`items.dislikes`）
 - フィードの URL の `{days_ago:N}` を取得のたびに N 日前の日付にする（RSSHub の GitHub 検索で「直近 7 日に作られた人気リポジトリ」など）
 - 好みの語の見直し（`prefs review`・`prefs ignore`）。「二回」のような漢数字＋助数詞と、数字の直後から始まる漢字は語として取らない
