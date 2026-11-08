@@ -30,6 +30,8 @@ from kawarabanya.cli.rss import (
     cmd_items_translate,
     cmd_likes,
     cmd_notify,
+    cmd_prefs_ignore,
+    cmd_prefs_review,
     cmd_run,
     cmd_status,
     cmd_summarize,
@@ -173,6 +175,17 @@ def build_parser() -> argparse.ArgumentParser:
     s = its.add_parser("translate", help="日本語以外の記事の全文を訳し、<記事>.ja.md に保存して投稿のスレッドに返信する")
     s.add_argument("id", type=int)
     s.set_defaults(func=cmd_items_translate)
+
+    ps = sub.add_parser("prefs", help="👍・👎 から学ぶ好みの語の見直し").add_subparsers(dest="prefs_command", required=True)
+    s = ps.add_parser("review", help="好みを動かしている語のうち、まだ確認していないもの（+ と - の上位）を出す")
+    s.add_argument("--top", type=int, default=10, help="+ と - それぞれの語数")
+    s.add_argument("--due", action="store_true", help="前回の見直しから 7 日たっていなければ何も出さない")
+    s.add_argument("--done", action="store_true", help="出した語を確認済みにし、見直しの日時を記録する")
+    s.set_defaults(func=cmd_prefs_review)
+    s = ps.add_parser("ignore", help="語を好みに使わない（語を省くと一覧を出す）")
+    s.add_argument("words", nargs="*")
+    s.add_argument("--remove", action="store_true", help="好みに使わない語から戻す")
+    s.set_defaults(func=cmd_prefs_ignore)
 
     sc = sub.add_parser("schedule", help="予定（Google カレンダー）").add_subparsers(dest="schedule_command", required=True)
     s = sc.add_parser("login", help="ブラウザで Google カレンダーの読み取りを許可する（初回と、許可が切れたとき）")

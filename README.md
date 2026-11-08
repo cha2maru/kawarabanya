@@ -112,6 +112,7 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 | `summarize` | 保存済み・未投稿で要約のない最近の記事を、重要度を判定してから要約する |
 | `notify [--category X] [--limit N] [--dry-run]` | 保存済み・未投稿の記事を投稿する |
 | `likes` / `interests [--days 30]` | 👍・👎 の数を取得する / ジャンル・フィード別の 👍 の割合、最近 👍 した記事（投稿へのリンク付き）、学んだ好み（語・サイトの上位と下位）を表示する |
+| `prefs review [--due] [--done]` / `prefs ignore [語...] [--remove]` | 好みを動かしている語のうち未確認のもの（+ と − の上位 10 語）を出す（`--due` は前回から 7 日たっていなければ何も出さない、`--done` で確認済みにする）/ 名詞でない・内容を表さない語を好みに使わない |
 | `import-opml FILE [--genre G\|auto]` / `export-opml FILE [--all]` | OPML の取り込み・書き出し。取り込んだフィードは genres.toml にも書き足す（ジャンルは `--genre`、なければ OPML のフォルダ名と同じジャンル、`auto` ならフォルダ名で決まらないものを LLM が最近の見出しから決める） |
 | `check [--disable-dead]` | 死活チェック（移転していれば URL を更新） |
 | `feeds add URL [--genre G\|auto] [--title T] [--no-discover]` | サイトかフィードの URL から登録する（`--genre auto` なら LLM がジャンルを決める）。ページ内の案内（`<link rel="alternate">`）やよくある場所（/feed など）から RSS を探し、genres.toml の `G` にも書き足す。初回は既存の記事を既読にするだけ |

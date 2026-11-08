@@ -11,6 +11,7 @@ K は、👍 が少ないうちは好みを 0 近くに留めるため。減衰�
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections import Counter, defaultdict
@@ -18,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from kawarabanya.core import db
 from kawarabanya.core.llm import lead
 from kawarabanya.rss import archive
 from kawarabanya.rss.genres import normalize_word, top_genre
@@ -33,6 +35,13 @@ COMMON_MIN = 10
 # 名詞の代わり: カタカナ 3 字以上・漢字 2 字以上・英数字の語（形態素解析はしない）。
 # 漢字は数字の直後から始まるもの（「第97回日本選手権」の「回日本選手権」、「2死満塁」の「死満塁」）を取らない
 WORD_RE = re.compile(r"[ァ-ヺー]{3,}|(?<![0-9一-鿿々])[一-鿿々]{2,}|[0-9a-z][0-9a-z+#.\-]*[0-9a-z+#]")
+
+
+# 語の見直し（prefs review）: 好みに使わない語・確認済みの語・前回の見直しの日時を state に置く
+IGNORE_KEY = "prefs_ignore"
+REVIEWED_KEY = "prefs_reviewed"
+REVIEWED_AT_KEY = "prefs_reviewed_at"
+REVIEW_DAYS = 7
 
 
 @dataclass
@@ -92,8 +101,9 @@ def learn(conn: sqlite3.Connection, now: datetime, half_life_days: float) -> Pre
             seen[f] += decay
             df[f] += 1
     common = max(COMMON_MIN, COMMON_DF * len(rows))
+    ignored = _load(conn, IGNORE_KEY)
     return Prefs(
-        {f: v / (seen[f] + K) for f, v in votes.items() if v and (f.startswith("#") or df[f] < common)},
+        {f: v / (seen[f] + K) for f, v in votes.items() if v and (f.startswith("#") or (df[f] < common and f not in ignored))},
         {s: v / (site_seen[s] + K) for s, v in site_votes.items() if v},
     )
 
@@ -108,3 +118,43 @@ def bonus(prefs: Prefs, feed_id: int, feats: set[str], pref_max: float, site_max
     ws = sorted((prefs.words.get(f, 0) for f in feats if not f.startswith("#")), key=abs, reverse=True)[:TOP_WORDS]
     learned = cats + (sum(ws) / len(ws) if ws else 0)
     return _clip(learned, pref_max) + _clip(prefs.sites.get(feed_id, 0), site_max)
+
+
+def _load(conn: sqlite3.Connection, key: str) -> set[str]:
+    return set(json.loads(db.get_state(conn, key) or "[]"))
+
+
+def _save(conn: sqlite3.Connection, key: str, values: set[str]) -> None:
+    db.set_state(conn, key, json.dumps(sorted(values), ensure_ascii=False))
+
+
+def ignored_words(conn: sqlite3.Connection) -> set[str]:
+    """好みに使わない語。"""
+    return _load(conn, IGNORE_KEY)
+
+
+def ignore(conn: sqlite3.Connection, ws: list[str], *, remove: bool = False) -> list[str]:
+    """語を好みに使わない語に足す（remove なら戻す）。NFKC・小文字にそろえた語を返す。"""
+    norm = [normalize_word(w).strip() for w in ws if w.strip()]
+    current = _load(conn, IGNORE_KEY)
+    _save(conn, IGNORE_KEY, current - set(norm) if remove else current | set(norm))
+    return norm
+
+
+def to_review(conn: sqlite3.Connection, learned: Prefs, n: int) -> list[tuple[str, float]]:
+    """まだ確認していない語のうち、好みが最も + の n 語と最も - の n 語（ジャンルは除く）。"""
+    reviewed = _load(conn, REVIEWED_KEY)
+    ws = sorted(((w, v) for w, v in learned.words.items() if not w.startswith("#") and w not in reviewed), key=lambda x: -x[1])
+    return [*(x for x in ws[:n] if x[1] > 0), *(x for x in ws[::-1][:n] if x[1] < 0)]
+
+
+def mark_reviewed(conn: sqlite3.Connection, ws: list[str], now: datetime) -> None:
+    """語を確認済みにし、見直しの日時を記録する。"""
+    _save(conn, REVIEWED_KEY, _load(conn, REVIEWED_KEY) | set(ws))
+    db.set_state(conn, REVIEWED_AT_KEY, now.isoformat(timespec="seconds"))
+
+
+def last_review(conn: sqlite3.Connection) -> datetime | None:
+    """前回の見直しの日時（まだなら None）。"""
+    at = db.get_state(conn, REVIEWED_AT_KEY)
+    return datetime.fromisoformat(at) if at else None

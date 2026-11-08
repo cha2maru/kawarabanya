@@ -25,6 +25,7 @@ description: kawarabanya を CLI で操作する（サイトの追加・削除�
 | つながらないサイトを止める | `check`（結果の表示）→ `check --disable-dead`（404 や DNS の失敗など、戻りそうにないものを無効にする） |
 | サイトを一時的に止める / 戻す | `feeds disable <ID>` / `feeds enable <ID>` |
 | 好みの傾向（👍・👎） | `interests --days 30`（学んだ好みも出る。`likes` で 👍・👎 を取り直す。まとめに効きすぎ・効かなさすぎなら `[digest] pref_max`・`site_pref_max`） |
+| 好みの語の見直し・この語は好みに使わないで | `prefs review`（語を見せて確かめてから `prefs ignore 語...`、最後に `prefs review --done`） |
 | この語の記事は○○へ | `genres keyword 語 <ジャンル>`（見出しか冒頭にある固有名詞だけ。「AI」「映画」のように話題が広い語は入れない） |
 | この記事のジャンルが違う | `items move <記事の ID> <ジャンル> [--keyword 語]`（別のジャンルへはサブジャンルなしで投稿し直しで、元の投稿は消え 👍 は引き継げないので、先に利用者に確かめる） |
 | この記事を訳して | `items translate <記事の ID>`（日本語以外の記事だけ。数分かかるのでバックグラウンドで実行する） |

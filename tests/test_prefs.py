@@ -53,3 +53,18 @@ def test_explore_keeps_one_slot_without_prefs():
     items = [digest.DigestItem(t, None, None, None, base) for t, base in [("好み1", 0.1), ("好み2", 0.2), ("好み3", 0.1), ("重要", 0.8)]]
     assert [i.title for i in digest.explore(items, 3)] == ["好み1", "好み2", "重要", "好み3"]
     assert digest.explore(items, 5) == items
+
+
+def test_review_and_ignore():
+    conn, a, _, now, add = setup()
+    add(1, a, "Cloudflareの加点", likes=1)
+    learned = prefs.learn(conn, now, 60)
+    assert {w for w, _ in prefs.to_review(conn, learned, 10)} == {"cloudflare", "加点"}
+    assert prefs.ignore(conn, ["加点"]) == ["加点"]
+    learned = prefs.learn(conn, now, 60)
+    assert "加点" not in learned.words
+    prefs.mark_reviewed(conn, ["cloudflare"], now)
+    assert prefs.to_review(conn, learned, 10) == []
+    assert prefs.last_review(conn) == now.replace(microsecond=0)
+    prefs.ignore(conn, ["加点"], remove=True)
+    assert prefs.ignored_words(conn) == set()

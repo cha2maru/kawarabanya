@@ -291,6 +291,37 @@ def cmd_interests(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_prefs_review(cfg: Config, args: argparse.Namespace) -> int:
+    """prefs review: 好みを動かしている語のうち未確認のものを出す（--done で確認済みにする）。"""
+    conn = _open_db(cfg, args)
+    now = datetime.now(UTC)
+    last = prefs.last_review(conn)
+    if args.due and last and now - last < timedelta(days=prefs.REVIEW_DAYS):
+        return 0
+    words = prefs.to_review(conn, prefs.learn(conn, now, cfg.digest.pref_half_life_days), args.top)
+    if args.done:
+        prefs.mark_reviewed(conn, [w for w, _ in words], now)
+        print(f"{len(words)} 語を確認済みにしました")
+        return 0
+    print(f"好みの語の見直し（前回: {f'{last.astimezone():%Y-%m-%d}' if last else 'まだ'}）")
+    if not words:
+        print("  確認していない語はありません")
+    for w, v in words:
+        print(f"  {_fit(w, 30)} {v:+.2f}")
+    print("名詞でない・好みと関係ない語は `prefs ignore 語...` で外し、最後に `prefs review --done` で確認済みにする")
+    return 0
+
+
+def cmd_prefs_ignore(cfg: Config, args: argparse.Namespace) -> int:
+    """prefs ignore: 語を好みに使わない（--remove で戻す）。"""
+    conn = _open_db(cfg, args)
+    if args.words:
+        done = prefs.ignore(conn, args.words, remove=args.remove)
+        print(f"{'戻しました' if args.remove else '好みに使わない語にしました'}: {'、'.join(done)}")
+    print(f"好みに使わない語: {'、'.join(sorted(prefs.ignored_words(conn))) or 'なし'}")
+    return 0
+
+
 def _print_prefs(conn: sqlite3.Connection, learned: prefs.Prefs, top: int) -> None:
     """👍・👎 から学んだ好み（まとめの並べ替えに使う w）の上位と下位を表示する。"""
     if not learned.words and not learned.sites:
