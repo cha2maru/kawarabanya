@@ -179,6 +179,16 @@ def find_text_channel(client: DiscordClient, guild_id: str, name: str) -> dict |
     return found[0] if found else None
 
 
+def create_private_text_channel(client: DiscordClient, guild_id: str, name: str) -> dict:
+    """持ち主と Bot だけが見られるテキストチャンネルを作る（@everyone から隠す。持ち主は常に見える）。"""
+    me = client.request("GET", "/users/@me")["id"]
+    allow = PERM_VIEW_CHANNEL | PERM_SEND_MESSAGES | PERM_MANAGE_WEBHOOKS | PERM_READ_MESSAGE_HISTORY
+    return client.create_channel(guild_id, name, GUILD_TEXT, permission_overwrites=[
+        {"id": guild_id, "type": 0, "allow": "0", "deny": str(PERM_VIEW_CHANNEL)},
+        {"id": me, "type": 1, "allow": str(allow), "deny": "0"},
+    ])
+
+
 def send_webhook(url: str, payload: dict, transport: httpx.BaseTransport | None = None) -> dict:
     """Webhook で投稿し、作成されたメッセージを返す（フォーラムなら channel_id がスレッド ID）。"""
     with httpx.Client(transport=transport, timeout=20) as c:

@@ -47,11 +47,14 @@ def login(cfg: ScheduleConfig, open_browser: bool | None = None):
     if not Path(cfg.credentials).exists():
         raise ValueError(f"{cfg.credentials} がありません（Google Cloud の OAuth クライアント ID の JSON。README の「予定」）")
     Path(cfg.token).parent.mkdir(parents=True, exist_ok=True)
-    return GoogleCalendar(
+    gc = GoogleCalendar(
         credentials_path=cfg.credentials, token_path=cfg.token, read_only=True,
         # 既定の 8080 は要約サーバーと重なる
         authentication_flow_port=cfg.login_port, open_browser=open_browser,
     )
+    # gcsa は許可を更新するたびにトークンを書き直す（誰でも読める権限になる）ので、毎回本人だけに戻す
+    Path(cfg.token).chmod(0o600)
+    return gc
 
 
 def fetch(gc, cfg: ScheduleConfig, now: datetime) -> list[Ev]:

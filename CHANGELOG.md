@@ -5,6 +5,7 @@
 ## 未リリース
 
 - 予定（Google カレンダー）の通知: 今日と明日の予定・開始 30 分前・予定の追加や変更を `#予定` に投稿する（`schedule login`・`schedule check`、`[schedule]`、gcsa で読み取りだけ）。DB は版 3（`events`）
+- `discord setup --apply` が予定の投稿先 `#予定` を、持ち主と Bot だけが見られる非公開のチャンネルとして作る
 - 日本語以外の記事は見出しを訳し（スレッド名は「訳（原題）」）、重要度にかかわらず日本語で要約する。全文訳は `items translate`（Discord では投稿のスレッドで「翻訳して」）。DB は版 2（`items.title_ja`）
 - まとめの並びに話題になり方を足す（同じ出来事を報じたサイトの数、Google トレンドの急上昇ワード。`[digest] trends_geo`）
 - 語とジャンルの紐づけ（`genres keyword`・genres.toml の `keywords`、「@Bot Cloudflareはtech」）。見出しか冒頭にある語で記事のジャンルを決める

@@ -62,3 +62,19 @@ def test_fetch_uses_gcsa_events():
 
     got = events.fetch(GC(), ScheduleConfig(), NOW)
     assert [(e.id, e.all_day) for e in got] == [("primary:x", False), ("primary:y", True)]
+
+
+def test_private_channel_hides_from_everyone():
+    from kawarabanya.core import discord_api as d
+
+    class Client:
+        def request(self, method, path, json=None):
+            return {"id": "bot"}
+
+        def create_channel(self, guild_id, name, type_, **extra):
+            return {"name": name, "type": type_, **extra}
+
+    ch = d.create_private_text_channel(Client(), "g", "予定")
+    everyone, bot = ch["permission_overwrites"]
+    assert everyone["id"] == "g" and int(everyone["deny"]) & d.PERM_VIEW_CHANNEL
+    assert bot["id"] == "bot" and int(bot["allow"]) & d.PERM_MANAGE_WEBHOOKS

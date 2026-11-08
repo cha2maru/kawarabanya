@@ -229,19 +229,18 @@ uv run kawarabanya feeds add "http://127.0.0.1:1200/famitsu/category/news" --gen
 gcsa（Google Calendar Simple API）で、読み取りだけの許可（`calendar.readonly`）を得て読む。準備は初回だけ:
 
 1. https://console.cloud.google.com でプロジェクトを作り、「API とサービス」→「ライブラリ」で **Google Calendar API** を有効にする。
-2. 「OAuth 同意画面」を作る（対象は「外部」）。テストユーザーに自分の Google アカウントを足す。
+2. 「Google Auth Platform」（古い画面では「OAuth 同意画面」）を作る（対象は「外部」）。「対象」の**テストユーザーに自分の Google アカウントを足す**（足さないと許可の画面で「アクセスをブロック: … Google の審査プロセスを完了していません（エラー 403: access_denied）」になる。足してから数分待つ）。
    公開ステータスが「テスト中」のままだと許可が 7 日で切れるので、切れたら `schedule login` をやり直すか、「本番」にする（自分用なので審査は受けず、許可の画面で「確認されていないアプリ」の警告が出たら「詳細」から進む）。
-3. 「認証情報」→「OAuth クライアント ID」→ 種類「デスクトップ アプリ」で作り、JSON をダウンロードして `data/google-credentials.json` に置く（git 管理外）。
-4. Discord に予定の投稿先 `#予定` を作る（チャンネルの設定 → 権限で非公開にし、自分と Bot だけを足す）。
-5. `config.toml` に `[schedule] enabled = true` を書き、次を実行する:
+3. 「クライアント」（古い画面では「認証情報」→「OAuth クライアント ID」）で種類「デスクトップ アプリ」を作り、JSON をダウンロードして `data/google-credentials.json` に置く（git 管理外）。
+4. `config.toml` に `[schedule] enabled = true` を書き、次を実行する（`schedule login` はブラウザを開くので、自分のターミナルで）:
 
 ```bash
 uv run kawarabanya schedule login            # ブラウザで許可する（data/google-token.json に保存。カレンダーの一覧が出る）
-uv run kawarabanya discord setup --apply     # #予定 の Webhook を登録する
+uv run kawarabanya discord setup --apply     # #予定 を（なければ持ち主と Bot だけが見られる非公開で）作り、Webhook を登録する
 uv run kawarabanya schedule check --agenda --dry-run   # 今日と明日の予定を表示して確かめる
 ```
 
-Bot は 5 分ごとに `schedule check` を実行し、予定の追加・変更・取り消し、開始の 30 分前（`remind_minutes`）、6:30 の今日と明日の予定（`agenda_times`）を `#予定` に投稿する。Discord に送るのは時刻・件名・場所だけ。許可をやめるには Google アカウントの「サードパーティ製のアプリとサービス」から外す。
+Bot は 5 分ごとに `schedule check` を実行し、予定の追加・変更・取り消し、開始の 30 分前（`remind_minutes`）、6:30 の今日と明日の予定（`agenda_times`）を `#予定` に投稿する。Discord に送るのは時刻・件名・場所だけ。トークン（`data/google-token.json`）は本人だけが読める権限にしておく（読むたびに戻す）。許可をやめるには Google アカウントの「サードパーティ製のアプリとサービス」から外す。
 
 ### config.toml（git 管理外。すべて省略可）
 
@@ -276,7 +275,7 @@ uv run --with pdoc pdoc kawarabanya -o docs/api   # API ドキュメント（doc
 
 [Claude Code](https://claude.com/claude-code) を使うなら、`.claude/skills/` のスキル（`kawarabanya-install`・`kawarabanya-discord-setup`・`kawarabanya-ops`）が、インストール・Discord の準備・日々の操作を案内する（「インストールして」「サイトを追加して」などと頼む）。
 
-コードの構成と依存の向き（`cli`・`bot` → `rss` → `core`）、書き方は [docs/CODING.md](docs/CODING.md)。Discord から頼めることを足すときは `src/kawarabanya/bot/assistant.py` の `COMMANDS` に、サイト別の取り込みは `extensions/` に足す。
+コードの構成と依存の向き（`cli`・`bot` → `rss`・`schedule` → `core`）、書き方は [docs/CODING.md](docs/CODING.md)。Discord から頼めることを足すときは `src/kawarabanya/bot/assistant.py` の `COMMANDS` に、サイト別の取り込みは `extensions/` に足す。
 
 ## 変更の記録
 

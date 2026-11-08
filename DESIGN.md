@@ -4,7 +4,7 @@
 
 ## 1. 目的と方針
 
-- 名前: kawarabanya（瓦版屋）。旧名 feedpipe は同名のプロジェクトがあったため 2026-11-07 に改名した。そのころ作った Discord のカテゴリと Webhook は、手元の config.toml の `[discord] parent_category` / `webhook_name` を `"feedpipe"` にして使い続けている（Webhook が変わると投稿済みのまとめを書き換えられない）。
+- 名前: kawarabanya（瓦版屋）。旧名 feedpipe は同名のプロジェクトがあったため 2026-11-07 に改名した。そのころ作った Discord のカテゴリと Webhook は、11/08 に Discord 上で名前だけ `kawarabanya` に変えた（Webhook を作り直すと投稿済みのまとめを書き換えられないので、同じ Webhook を改名した）。
 
 - **個人用 Discord サーバーを管理する総合 Bot**。今ある機能は RSS（全文 Markdown 保存 → 要約 → Discord フォーラムに投稿）で、機能は今後足していく。
 - 個人運用（利用者 1 人・サーバー 1 つ）なので、複数ユーザー・複数サーバーへの対応はしない。
@@ -50,7 +50,7 @@ schedule/   # 予定の機能（Google カレンダー）
 bot/        # 常駐 Bot
   client.py（定期実行・メンションへの返事） assistant.py（日本語の依頼をコマンドに直す）
 cli/        # コマンド
-  __init__.py（引数の定義と main） common.py（表示の補助・DB/Discord の用意） rss.py（RSS のコマンド） server.py（Discord 管理・bot）
+  __init__.py（引数の定義と main） common.py（表示の補助・DB/Discord の用意） rss.py（RSS のコマンド） schedule.py（予定のコマンド） server.py（Discord 管理・bot）
 ```
 
 機能を足すときは、`rss/` と同じように機能ごとのパッケージを作り、コマンドは `cli/` に、Discord 上の対話は `bot/` に足す（Bot に頼めることは `bot/assistant.py` の COMMANDS に足す）。
@@ -129,7 +129,8 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 - 読み方: gcsa（Google Calendar Simple API）＋ OAuth（`calendar.readonly`、読み取りだけ）。iCal の非公開 URL＋recurring-ical-events の方が準備も依存も軽い（`.venv` が 99 MB → 232 MB になったのは gcsa が引く Google の API クライアント）が、URL を知れば誰でも読めることと、後で予定の追加や Gmail に広げられることから、利用者が OAuth を選んだ。許可のときの戻り先のポートは 8765（gcsa の既定 8080 は要約サーバーと重なる）。
 - 繰り返しの予定は Google に 1 回ずつ展開させる（`single_events`）。予定の ID はカレンダー ID と組にして `events` テーブル（版 3）に残し、5 分ごとに今から `days`（14）日分と比べる: 新しい予定は「前回より後に更新されたもの」だけを追加と数える（範囲に入ってきただけのものを除く）。消えた予定は、まだ始まっていなければ取り消し。初回は記録だけ。
 - 直前の通知は開始の `remind_minutes`（30）分前に 1 回。時刻が変わったらやり直す。終日の予定は朝の一覧だけ。朝の一覧（`agenda_times`、6:30）は今から明日の終わりまで。
-- Discord には時刻・件名・場所だけを送り、説明文は送らない（Discord のメッセージは運営からは読める前提）。投稿先は持ち主と Bot だけが見られる `#予定`。
+- Discord には時刻・件名・場所だけを送り、説明文は送らない（Discord のメッセージは運営からは読める前提）。投稿先は持ち主と Bot だけが見られる `#予定`（`discord setup --apply` が、なければ @everyone から隠して作る）。
+- トークンは gcsa が許可の更新のたびに書き直し、誰でも読める権限になるので、読むたびに 600 に戻す。
 - Bot は取り込みの順番待ちをせずに 5 分ごとに実行する（取り込みは数十分かかることがあり、直前の通知が遅れるため。LLM は使わない）。
 
 ### 3.4 Discord
@@ -161,7 +162,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 
 ### 3.6 Discord からの依頼（`bot/assistant.py`）
 - スラッシュコマンドは作らない: コマンドの名前や引数を覚えなくてよいよう、メンションの日本語をローカル LLM でコマンドに直す（何をするかは確認のボタンで毎回見える）。
-- Bot へのメンション（Bot 本人か Bot のロール）を日本語の依頼として受ける。Discord で「@RSSBOT」と打つと同じ名前の Bot のロールが選ばれることがあり、ロールへのメンションは Message Content Intent がないと本文が空で届くので、この Intent を使う（Developer Portal でもオンにする）。使えるのはサーバーの持ち主だけ。
+- Bot へのメンション（Bot 本人か Bot のロール）を日本語の依頼として受ける。Discord で「@kawarabanya」と打つと同じ名前の Bot のロールが選ばれることがあり、ロールへのメンションは Message Content Intent がないと本文が空で届くので、この Intent を使う（Developer Portal でもオンにする）。使えるのはサーバーの持ち主だけ。
 - ローカル LLM に、コマンドの一覧（`assistant.COMMANDS`）・ジャンルの一覧を渡し、JSON Schema の文法制約で「コマンド 1 つと引数（genre / feed / level / word）」だけを答えさせる（1 件 2〜4 秒）。フィード名の一覧は渡さない（104 件分の読み込みが重い）。サイト名からフィードを探すのと、URL を依頼の文から取り出すのはコードで行う（LLM は長い URL を書き間違える）。
 - 変更するコマンド（サイトの追加・削除、好き嫌い、取り込み、まとめ）は、Bot が「実行 / やめる」のボタンで確認してから実行する。見るだけのもの（状態・一覧・興味の傾向）はすぐ返す。実行は定期処理と同じく別プロセスで、変更するコマンドはロックで定期処理と 1 つずつ行う（見るだけのものは、数十分かかる取り込みを待たずにすぐ実行する）。出力（1,800 字まで）を返事に書く。ボタンを押したあとの結果は Bot のメッセージとして書き換える（ボタン操作の応答は 15 分で切れるため）。
 - OPML: 依頼に添付された .opml / .xml（5 MB まで）は `data/uploads/` に保存して `import-opml --genre auto` に渡す。「OPML ちょうだい」は `export-opml` の結果を `data/exports/` に書いて返事に添付する。サイトの追加でジャンルを言われなければ `--genre auto`。

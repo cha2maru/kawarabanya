@@ -13,7 +13,7 @@ src/kawarabanya/
   cli/    コマンド（引数の定義と各コマンド）
 ```
 
-- **依存は一方通行**: `cli`・`bot` → `rss` → `core`。`core` は上の層を import しない。`rss/sources` は `rss` の上の部分（pipeline・notify など）を import しない。
+- **依存は一方通行**: `cli`・`bot` → 機能のパッケージ（`rss`・`schedule`）→ `core`。機能のパッケージどうしは import しない。`core` は上の層を import しない。`rss/sources` は `rss` の上の部分（pipeline・notify など）を import しない。
 - 新しい機能（RSS 以外）は、`rss` と並べて機能ごとのパッケージにする。共通にしたくなったものだけ `core` に下ろす。
 - 1 つのモジュールは 1 つの役割。300〜400 行を超えて役割が 2 つ見えてきたら分ける。
 

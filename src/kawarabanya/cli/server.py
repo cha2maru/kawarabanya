@@ -70,7 +70,7 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
     schedule_ch = None
     if cfg.schedule.enabled:
         schedule_ch = discord_api.find_text_channel(client, guild["id"], cfg.schedule.channel)
-        state = "既存" if schedule_ch else "見つかりません（持ち主と Bot だけが見られるチャンネルを Discord で作ってください）"
+        state = "既存" if schedule_ch else "新規作成（持ち主と Bot だけが見られる非公開のチャンネル）"
         print(f"  予定        #{cfg.schedule.channel}（{state}）")
     for c in plan.orphans:
         print(f"  {'削除' if args.prune else '未使用'}      💬{c['name']}（どのジャンルにも対応しません）")
@@ -86,6 +86,8 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
         discord_api.register_webhook(
             client, conn, discord_api.DIGEST_KEY, guild["id"], digest_ch["id"], digest_ch["name"], cfg.discord.webhook_name
         )
+    if cfg.schedule.enabled and schedule_ch is None:
+        schedule_ch = discord_api.create_private_text_channel(client, guild["id"], cfg.schedule.channel)
     if schedule_ch:
         discord_api.register_webhook(
             client, conn, discord_api.SCHEDULE_KEY, guild["id"], schedule_ch["id"], schedule_ch["name"],
