@@ -229,3 +229,21 @@ def test_slack_bridge(tmp_path):
     assert bot.ran == [["feeds", "remove", "1"]] and web.calls[-1][1]["text"].startswith("✅ A を消す")
     run(bridge.handle("interactive", click))  # 2 回目は実行しない
     assert bot.ran == [["feeds", "remove", "1"]] and "実行済み" in web.calls[-1][1]["text"]
+
+
+def test_digest_links_fall_back_to_article():
+    from datetime import UTC, datetime, timedelta
+
+    from kawarabanya.rss import digest
+
+    conn = db.connect(":memory:")
+    fid = db.insert_feed(conn, "https://a.example/rss", "A", None, "tech")
+    t = datetime.now(UTC).isoformat(timespec="seconds")
+    for i, ref in [(1, "C1/1.1"), (2, None)]:  # 2 は Slack に切り替える前に Discord にだけ投稿した記事
+        conn.execute("INSERT INTO items (id, feed_id, key, url, title, fetched_at, notified_at, status, priority)"
+                     " VALUES (?, ?, ?, ?, ?, ?, ?, 'notified', ?)", (i, fid, str(i), f"https://a/{i}", f"記事{i}", t, t, 1 - i / 10))
+        if ref:
+            conn.execute("INSERT INTO posts (item_id, platform, ref, url, created_at) VALUES (?, 'slack', ?, 'https://ws/p1', ?)",
+                         (i, ref, t))
+    items = digest.collect(conn, "slack", "tech", datetime.now(UTC) - timedelta(hours=1))
+    assert [i.url for i in items] == ["https://ws/p1", "https://a/2"]

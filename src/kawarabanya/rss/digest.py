@@ -30,7 +30,7 @@ MAX_TREND_TITLES = 20
 class DigestItem:
     """まとめに載せる 1 記事。"""
     title: str
-    url: str | None  # 投稿へのリンク
+    url: str | None  # 投稿へのリンク（そのサービスに投稿がなければ元記事）
     priority: float | None
     likes: int | None
     # 学んだ好み（rss/prefs.py）を除いた点。まとめの 1 枠は、これだけで選ぶ（好みに寄りすぎないため）
@@ -58,13 +58,13 @@ def collect(
     好きの記事は上に、低めの記事は下に寄せる。世間での話題になり方（rss/trends.py）でも上に寄せる:
     同じ出来事を報じたサイトの数と、words（Google トレンドの急上昇ワード → 検索数）に当たること。
     learned（👍・👎 から学んだ好み）があれば、その点も足す（DigestItem.base には含めない）。
-    リンクは platform（discord・slack）の投稿へ。
+    リンクは platform（discord・slack）の投稿へ。そのサービスに投稿がない記事（切り替える前の投稿・投稿の失敗）は元記事へ。
     """
     levels = levels or {}
     sources = trends.source_counts(conn, since - timedelta(days=1))
     rows = conn.execute(
         "SELECT i.id, i.feed_id, i.title AS original, i.md_path, COALESCE(i.subgenre, f.category) AS category, COALESCE(i.title_ja, i.title) AS title,"
-        " p.url AS post_url, i.priority, i.likes,"
+        " COALESCE(p.url, i.url) AS post_url, i.priority, i.likes,"
         " json_extract(f.options, '$.interest') AS feed_interest FROM items i"
         " JOIN feeds f ON f.id = i.feed_id LEFT JOIN posts p ON p.item_id = i.id AND p.platform = ?"
         " WHERE i.status = 'notified' AND i.notified_at >= ?",
