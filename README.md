@@ -81,9 +81,9 @@ Bot は 60 分ごとと 6:30・18:30 に、取り込み（`run`）→ サブジ�
 
 ## 使い方
 
-### Discord から頼む
+### Discord・Slack から頼む
 
-Bot にメンションして日本語で書くと、ローカル LLM がコマンドに直す（サーバーの持ち主だけ）。Developer Portal の Bot の設定で **MESSAGE CONTENT INTENT** をオンにしておく（「@Bot」は Bot のロールへのメンションになることがあり、そのときは本文を読む許可が要る）。サイトの追加・削除、好き嫌いの変更、取り込み・まとめの実行は、ボタンで確認してから実行する。状態や一覧はすぐ返す。
+Bot にメンションして日本語で書くと、ローカル LLM がコマンドに直す（Discord はサーバーの持ち主、Slack は `[slack] mention_user_id` の人だけ。Slack の準備は「Slack」）。Developer Portal の Bot の設定で **MESSAGE CONTENT INTENT** をオンにしておく（「@Bot」は Bot のロールへのメンションになることがあり、そのときは本文を読む許可が要る）。サイトの追加・削除、好き嫌いの変更、取り込み・まとめの実行は、ボタンで確認してから実行する。状態や一覧はすぐ返す。
 
 ```
 @Bot https://example.com/news をボードゲームに追加して   → feeds add … --genre hobby/boardgame（確認）
@@ -104,7 +104,7 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 
 | コマンド | 内容 |
 |---|---|
-| `bot` | 常駐 Bot。Bot にメンションして日本語で頼むと、コマンドに直して返事をする（「Discord から頼む」）。60 分ごとと、まとめの時刻（6:30・18:30）に `run`・`genres suggest --apply --due`・`digest --due` を順に別プロセスで実行する |
+| `bot` | 常駐 Bot。Bot にメンションして日本語で頼むと、コマンドに直して返事をする（「Discord・Slack から頼む」）。60 分ごとと、まとめの時刻（6:30・18:30）に `run`・`genres suggest --apply --due`・`digest --due` を順に別プロセスで実行する |
 | `digest [--genre X] [--due] [--dry-run]` | ジャンルごとのまとめ（前回のまとめ以降の記事の話題＋重要度順の投稿へのリンク）を今すぐ #ニュース に投稿する。Bot は 6:30・18:30 に投稿する |
 | `digest --update [--genre X]` | 最後に投稿したまとめを、最新の記事・重要度で作り直して書き換える |
 | `digest --delete [--genre X] [--day YYYY-MM-DD]` | ジャンルごとに最後のまとめ（`--day` ならその日のすべて）を削除する |

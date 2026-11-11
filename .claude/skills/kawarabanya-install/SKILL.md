@@ -1,6 +1,6 @@
 ---
 name: kawarabanya-install
-description: kawarabanya をこのマシンに入れる・動かない環境を直す。「インストールして」「セットアップして」「clone したけど何すればいい？」「要約のモデルも入れたい」「uv sync でこける」「doctor が ❌」「Bot が起動しない」「Google カレンダーをつなぎたい」「予定の通知を使いたい」と頼まれたとき、またはリポジトリを複製した直後に、はっきり言われなくても使う。Discord 側の準備は kawarabanya-discord-setup、日々の操作は kawarabanya-ops。
+description: kawarabanya をこのマシンに入れる・動かない環境を直す。「インストールして」「セットアップして」「clone したけど何すればいい？」「要約のモデルも入れたい」「uv sync でこける」「doctor が ❌」「Bot が起動しない」「Google カレンダーをつなぎたい」「予定の通知を使いたい」と頼まれたとき、またはリポジトリを複製した直後に、はっきり言われなくても使う。Discord 側の準備は kawarabanya-discord-setup、Slack 側は kawarabanya-slack-setup、日々の操作は kawarabanya-ops。
 ---
 
 # kawarabanya のインストール
@@ -16,7 +16,7 @@ description: kawarabanya をこのマシンに入れる・動かない環境を�
    - `uv sync` で失敗したら、エラーの最後の数行を読む。ネットワーク（プロキシ・DNS）か、Python 3.12 が取れないことが多い（`uv python install 3.12` を試す）。
 3. 最後に出る `kawarabanya doctor` の結果を、❌ → ⚠️ の順に 1 つずつ直す（下の表）。直したら `uv run kawarabanya doctor` をもう一度実行し、❌ が 0 になるまで続ける。
 4. 予定（Google カレンダー）を使うと言われたら、README の「予定（Google カレンダー）」の 1〜3 を利用者に進めてもらう（Google Cloud の画面の操作は利用者。テストユーザーに自分のアカウントを足すのを忘れやすい）。JSON とトークンの中身は表示しない。`config.toml` に `[schedule] enabled = true` を書き、`schedule login` はブラウザが要るので利用者のターミナルで実行してもらう（`! uv run kawarabanya schedule login`）。そのあと `discord setup --apply`（`#予定` を非公開で作る）→ `schedule check --agenda --dry-run` で予定が出るか → Bot を再起動。
-5. Discord の準備がまだなら kawarabanya-discord-setup に進む。常駐は Discord の準備のあと `scripts/install.sh --service`。
+5. Discord の準備がまだなら kawarabanya-discord-setup に進む（Slack を使うなら kawarabanya-slack-setup）。常駐は Discord の準備のあと `scripts/install.sh --service`。
 
 ## doctor の結果ごとの直し方
 
