@@ -131,6 +131,7 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 | `discord setup [--apply] [--prune]` / `channels` / `test GENRE` / `guilds` / `invite-url` | フォーラム・タグ・Webhook の管理 |
 | `discord retag` | 投稿済みの記事のタグをサブジャンルに付け直す（未判定なら LLM で判定。Bot に「スレッドの管理」が必要） |
 | `discord archive [--hours 24]` | 最後の動きから 24 時間たった開いている投稿を閉じる。Discord はサーバー全体で開いているスレッド（フォーラムの投稿）が 1,000 件までで、超えると投稿できない。`discord setup --apply` でフォーラムの投稿が 1 日で閉じるようにしたあと、それより前の投稿を一度に閉じるのに使う。閉じた投稿にはリアクションを付けられない |
+| `slack setup [--apply]` | Slack にジャンルごとのチャンネル（`kawarabanya-tech` など）と、まとめ（`kawarabanya-digest`）・予定（`kawarabanya-schedule`、非公開）のチャンネルを作って登録する（「Slack」） |
 | `discord delete-duplicates [--apply]` | 重複（同じ URL・同じ本文）と判定した記事のフォーラムの投稿を消す（なしは一覧だけ。「スレッドの管理」が必要） |
 
 全体のオプション: `-c config.toml`、`--db PATH`、`-v`（詳しいログ）。
@@ -249,6 +250,31 @@ uv run kawarabanya schedule check --agenda --dry-run   # 今日と明日の予�
 ```
 
 Bot は 5 分ごとに `schedule check` を実行し、予定の追加・変更・取り消し、開始の 30 分前（`remind_minutes`）、6:30 の今日と明日の予定（`agenda_times`）を `#予定` に投稿する。Discord に送るのは時刻・件名・場所だけ。トークン（`data/google-token.json`）は本人だけが読める権限にしておく（読むたびに戻す）。許可をやめるには Google アカウントの「サードパーティ製のアプリとサービス」から外す。
+
+### Slack（使うときだけ）
+
+Discord と同じ記事・まとめ・予定を Slack にも投稿できる（`[chat] targets`。Slack だけにもできる）。Slack にはフォーラムもタグもないので、ジャンルごとにチャンネルを作り、1 記事 = 1 メッセージ、サブジャンルは本文の先頭の `[ラベル]` にする。既定のリアクションがないので、投稿のたびに Bot が 👍・👎 を付けておく（押せば数が増える。Bot の分は数えない）。無料プランは直近 90 日のメッセージしか見えないが、記事は手元に Markdown で残る。
+
+1. https://api.slack.com/apps で「Create New App」→「From scratch」で、使うワークスペースにアプリを作る。
+2. 「OAuth & Permissions」の **Bot Token Scopes** に次を足し、「Install to Workspace」する: `chat:write`, `chat:write.customize`, `channels:read`, `channels:manage`, `channels:join`, `groups:read`, `groups:write`, `reactions:read`, `reactions:write`, `app_mentions:read`, `channels:history`, `groups:history`
+3. 表示される **Bot User OAuth Token**（`xoxb-`）を `.env` の `SLACK_BOT_TOKEN` に書く（見本: `.env.example`）。
+4. `config.toml` に書く:
+
+```toml
+[chat]
+targets = ["discord", "slack"]   # Slack だけなら ["slack"]
+
+[slack]
+mention_user_id = "U0123…"       # まとめ・予定でメンションする自分（プロフィール →「メンバー ID をコピー」）
+```
+
+5. チャンネルを作る（Bot が作るので Bot はメンバーになる。非公開の予定のチャンネルには `mention_user_id` の人を招待する）:
+
+```bash
+uv run kawarabanya slack setup           # 作るチャンネルの予定を表示
+uv run kawarabanya slack setup --apply   # 作って登録する
+uv run kawarabanya discord test tech "テスト"   # targets のすべてにテスト投稿（コマンド名は discord のまま）
+```
 
 ### config.toml（git 管理外。すべて省略可）
 

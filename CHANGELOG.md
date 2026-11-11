@@ -4,6 +4,7 @@
 
 ## 未リリース
 
+- Slack にも投稿できる（`[chat] targets = ["discord", "slack"]`・`[slack]`・`slack setup`）。ジャンルごとのチャンネルに 1 記事 = 1 メッセージ、サブジャンルは本文の先頭の [ラベル]、Bot が 👍・👎 を先に付けておく。まとめ・予定・不調のお知らせも Slack に送る
 - 投稿先を差し替えられる形にした（Discord と Slack の両対応の準備。`[chat] targets`）。DB は版 5（`discord_channels` → `channels`、`items.discord_thread_id` → `posts`、`digests` にサービス）。起動時に自動で上がる（前に `data/kawarabanya.db.bak-v4` にバックアップを取る）
 - フォーラムの投稿が 1 日（これまで 3 日）で閉じるようにし（`discord setup --apply` で揃える）、それより前の投稿を閉じる `discord archive` を足す。サーバー全体で開いているスレッドの上限 1,000 件に達して投稿できなくなっていた
 - 要約サーバーのメモリを 9 GB → 4.6 GB に減らす（`scripts/llama-server.sh` で llama-server のプロンプトのキャッシュ `--cache-ram` を切る。`LLAMA_CACHE_RAM` で戻せる）

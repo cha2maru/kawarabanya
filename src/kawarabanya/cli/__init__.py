@@ -48,6 +48,7 @@ from kawarabanya.cli.server import (
     cmd_discord_setup,
     cmd_discord_test,
 )
+from kawarabanya.cli.slack import cmd_slack_setup
 from kawarabanya.core import discord_api
 from kawarabanya.core.config import load_config, load_dotenv
 from kawarabanya.rss.sources import extensions
@@ -217,6 +218,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--days", type=int, default=7, help="直近この日数の記事から考える（既定 7）")
     s.add_argument("--due", action="store_true", help="まとめの時刻を過ぎていて、今日まだ実行していなければ実行する（Bot 用）")
     s.set_defaults(func=cmd_genres_suggest)
+
+    sl = sub.add_parser("slack", help="Slack の準備（Bot のトークンを使う）").add_subparsers(dest="slack_command", required=True)
+    s = sl.add_parser("setup", help="ジャンルごとのチャンネルと、まとめ・予定のチャンネルを作る（既定は確認だけ）")
+    s.add_argument("--apply", action="store_true", help="作成して登録する")
+    s.set_defaults(func=cmd_slack_setup)
 
     dc = sub.add_parser("discord", help="Discord の準備（Bot を使う）").add_subparsers(dest="discord_command", required=True)
     s = dc.add_parser("invite-url", help="Bot をサーバーに招待する URL を表示")
