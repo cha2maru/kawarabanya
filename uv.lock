@@ -935,6 +935,7 @@ dependencies = [
     { name = "feedparser" },
     { name = "gcsa" },
     { name = "httpx" },
+    { name = "slack-sdk" },
     { name = "trafilatura" },
 ]
 
@@ -951,6 +952,7 @@ requires-dist = [
     { name = "feedparser", specifier = ">=6.0.14" },
     { name = "gcsa", specifier = ">=2.7.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "slack-sdk", specifier = ">=3.46.0" },
     { name = "trafilatura", specifier = ">=2.3.1" },
 ]
 
@@ -1614,6 +1616,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/42/f2/05f29bc3913aea15eb670be136045bf5c5bbf4b99ecb839da9b422bb2c85/requests-oauthlib-2.0.0.tar.gz", hash = "sha256:b3dffaebd884d8cd778494369603a9e7b58d29111bf6b41bdc2dcd87203af4e9", size = 55650, upload-time = "2024-03-22T20:32:29.939Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3b/5d/63d4ae3b9daea098d5d6f5da83984853c1bbacd5dc826764b249fe119d24/requests_oauthlib-2.0.0-py2.py3-none-any.whl", hash = "sha256:7dd8a5c40426b779b0868c404bdef9768deccf22749cde15852df527e6269b36", size = 24179, upload-time = "2024-03-22T20:32:28.055Z" },
+]
+
+[[package]]
+name = "slack-sdk"
+version = "3.46.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/43/9eb4f5172ec64d8c25f9fa397d3ca283782d356a60809e4b68ade81fde1a/slack_sdk-3.46.0.tar.gz", hash = "sha256:25215ca293d2954ed759b87573b4c833cb3f82ebff371355936515c688411dbb", size = 266040, upload-time = "2026-10-30T05:08:27.384Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/5c/0be529c9a48ccd7b452c6ca47ad1ab5e5e2f7f2cf53d8f34970aebffd0e8/slack_sdk-3.46.0-py2.py3-none-any.whl", hash = "sha256:6286d89da97ea193c853609131515e6f1b3edf86866d6e5aad0dba9dcf1cb72d", size = 325190, upload-time = "2026-10-30T05:08:25.985Z" },
 ]
 
 [[package]]

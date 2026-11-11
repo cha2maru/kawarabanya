@@ -142,3 +142,76 @@ def test_slack_setup_and_notify(tmp_path, monkeypatch):
     assert notify.sync_likes(conn, [sc], interval_hours=0) == 1
     assert chat.count_reaction(conn, "slack", ref, chat.LIKE, 1)
     assert conn.execute("SELECT likes FROM items").fetchone()[0] == 1
+
+
+class FakeWeb:
+    """slack_sdk の AsyncWebClient の代わり。"""
+
+    def __init__(self):
+        self.calls = []
+
+    async def chat_postMessage(self, **kw):  # noqa: N802 slack_sdk の名前に合わせる
+        self.calls.append(("post", kw))
+        return {"channel": kw["channel"], "ts": "9.9"}
+
+    async def chat_update(self, **kw):
+        self.calls.append(("update", kw))
+        return {}
+
+
+class FakeBot:
+    def __init__(self, db_path, intent):
+        self.db_path, self.intent, self.ran, self.asked = db_path, intent, [], []
+
+    async def make_intent(self, text, platform, ref):
+        self.asked.append((text, platform, ref))
+        return self.intent
+
+    async def run_command(self, intent):
+        self.ran.append(intent.argv)
+        return f"✅ {intent.summary}\n```\nok\n```"
+
+
+def test_slack_bridge(tmp_path):
+    import asyncio
+
+    from kawarabanya.bot import assistant
+    from kawarabanya.bot.slack_bot import SlackBridge
+
+    path = tmp_path / "k.db"
+    conn = db.connect(path)
+    fid = db.insert_feed(conn, "https://a.example/rss", "A", None, "tech")
+    with conn:
+        iid = db.insert_item(conn, fid, "k", None, "記事", None, "notified")
+        conn.execute("INSERT INTO posts (item_id, platform, ref, created_at) VALUES (?, 'slack', 'C1/1.1', 'x')", (iid,))
+    intent = assistant.Intent("feed_remove", ["feeds", "remove", "1"], "A を消す", confirm=True)
+    bot, web = FakeBot(path, intent), FakeWeb()
+    bridge = SlackBridge(bot, web, "UBOT", "U42")
+    run = asyncio.run
+
+    # リアクション: Bot が先に付けた分は数えない。肌の色の違いも 👍
+    for user, reaction in [("UBOT", "+1"), ("U42", "+1::skin-tone-2"), ("U42", "-1"), ("U42", "tada")]:
+        run(bridge.handle("events_api", {"event": {"type": "reaction_added", "user": user, "reaction": reaction,
+                                                   "item": {"type": "message", "channel": "C1", "ts": "1.1"}}}))
+    assert tuple(conn.execute("SELECT likes, dislikes FROM items").fetchone()) == (1, 1)
+
+    # 持ち主でなければ断る
+    mention = {"type": "app_mention", "user": "U9", "text": "<@UBOT> A を消して", "channel": "C1", "ts": "2.2",
+               "thread_ts": "1.1"}
+    run(bridge.handle("events_api", {"event": mention}))
+    assert "持ち主" in web.calls[-1][1]["text"] and not bot.asked
+
+    # スレッドの中の依頼は、元の投稿（記事）についての依頼。変更するものはボタンで確かめる
+    run(bridge.handle("events_api", {"event": {**mention, "user": "U42"}}))
+    assert bot.asked == [("A を消して", "slack", "C1/1.1")]
+    kind, kw = web.calls[-1]
+    assert kind == "post" and kw["thread_ts"] == "1.1" and kw["blocks"][1]["elements"][0]["action_id"] == "run"
+    key = kw["blocks"][1]["elements"][0]["value"]
+    click = {"type": "block_actions", "user": {"id": "U42"}, "channel": {"id": "C1"}, "message": {"ts": "9.9"},
+             "actions": [{"action_id": "run", "value": key}]}
+    run(bridge.handle("interactive", {**click, "user": {"id": "U9"}}))  # 持ち主でなければ何もしない
+    assert bot.ran == []
+    run(bridge.handle("interactive", click))
+    assert bot.ran == [["feeds", "remove", "1"]] and web.calls[-1][1]["text"].startswith("✅ A を消す")
+    run(bridge.handle("interactive", click))  # 2 回目は実行しない
+    assert bot.ran == [["feeds", "remove", "1"]] and "実行済み" in web.calls[-1][1]["text"]

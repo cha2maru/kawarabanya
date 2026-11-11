@@ -1,7 +1,8 @@
-"""常駐 Bot。Discord に接続したまま、定期的に `kawarabanya run` などを別プロセスで実行する。
+"""常駐 Bot。Discord・Slack に接続したまま、定期的に `kawarabanya run` などを別プロセスで実行する。
 
 Bot へのメンション（日本語の依頼）は assistant でコマンドに直し、変更するものはボタンで確認してから実行する。
-使えるのはサーバーの持ち主だけ。
+使えるのは持ち主だけ（Discord はサーバーの持ち主、Slack は [slack] mention_user_id）。Slack の受け口は bot/slack_bot.py。
+[chat] targets に discord がなければ Discord にはつながず、定期実行と Slack だけで動く。
 """
 
 from __future__ import annotations
@@ -58,6 +59,8 @@ class Bot(discord.Client):
         self.job_failures: Counter[str] = Counter()
         args = list(config_args)
         self.db_path = args[args.index("--db") + 1] if "--db" in args else cfg.general.db
+        self.use_discord = "discord" in cfg.chat.targets
+        self.slack: object | None = None  # Socket Mode のクライアント
 
     async def setup_hook(self) -> None:
         """接続前の準備。要約サーバーの起動と、定期実行の開始を行う。"""
@@ -79,6 +82,17 @@ class Bot(discord.Client):
             self.scheduled_run.start()
         if self.cfg.schedule.enabled:
             self.schedule_run.start()
+        if "slack" in self.cfg.chat.targets:
+            if not (self.cfg.slack.token and self.cfg.slack.app_token):
+                log.warning("Slack のトークン（%s・%s）がないので、Slack からの依頼とリアクションは受けません",
+                            self.cfg.slack.token_env, self.cfg.slack.app_token_env)
+            else:
+                from kawarabanya.bot import slack_bot
+
+                try:
+                    self.slack = await slack_bot.connect(self)
+                except Exception:  # Slack につながらなくても、定期実行と Discord は止めない
+                    log.exception("Slack に Socket Mode でつなげませんでした")
 
     async def on_ready(self) -> None:
         """ログインできたことをログに残す。"""
@@ -192,21 +206,10 @@ class Bot(discord.Client):
             saved = Path(self.db_path).parent / "uploads" / f"{message.id}_{Path(attachment.filename).name}"
             saved.parent.mkdir(parents=True, exist_ok=True)
             await attachment.save(saved)
-        export = Path(self.db_path).parent / "exports" / f"kawarabanya-{datetime.datetime.now():%Y%m%d-%H%M}.opml"
-        conn = db.connect(self.db_path)
-        try:
-            genres = load_genres_if_any(self.cfg) or {}
-            post = assistant.find_post(conn, "discord", str(message.channel.id))  # フォーラムの投稿への返信は、スレッドの中に届く
-            async with message.channel.typing():
-                data = (await assistant.interpret(
-                    self.summarizer, text, genres, attachment and attachment.filename, post and post["title"]
-                ) if self.summarizer else None)
-            intent = assistant.build(data, text, conn, genres, str(saved) if saved else None, str(export), post)
-        finally:
-            conn.close()
-        if intent.attach:
-            Path(intent.attach).parent.mkdir(parents=True, exist_ok=True)
-        log.info("依頼: %s → %s %s", text, intent.command, intent.argv)
+        async with message.channel.typing():
+            # フォーラムの投稿への返信は、スレッドの中に届く
+            intent = await self.make_intent(text, "discord", str(message.channel.id), saved,
+                                            attachment and attachment.filename)
         if intent.error:
             await message.reply(intent.error, mention_author=False)
         elif not intent.argv:
@@ -222,8 +225,27 @@ class Bot(discord.Client):
             content, files = await self.run_requested(intent)
             await reply.edit(content=content, attachments=files)
 
-    async def run_requested(self, intent: assistant.Intent) -> tuple[str, list[discord.File]]:
-        """依頼されたコマンドを（定期実行と重ならないよう順番に）実行し、返事の本文と添付ファイルを返す。"""
+    async def make_intent(self, text: str, platform: str, ref: str, saved: Path | None = None,
+                          attachment_name: str | None = None) -> assistant.Intent:
+        """依頼の文を LLM でコマンドに直す。ref の投稿（記事のスレッドの中での依頼）があれば、その記事についての依頼。"""
+        export = Path(self.db_path).parent / "exports" / f"kawarabanya-{datetime.datetime.now():%Y%m%d-%H%M}.opml"
+        conn = db.connect(self.db_path)
+        try:
+            genres = load_genres_if_any(self.cfg) or {}
+            post = assistant.find_post(conn, platform, ref)
+            data = (await assistant.interpret(
+                self.summarizer, text, genres, attachment_name, post and post["title"]
+            ) if self.summarizer else None)
+            intent = assistant.build(data, text, conn, genres, str(saved) if saved else None, str(export), post)
+        finally:
+            conn.close()
+        if intent.attach:
+            Path(intent.attach).parent.mkdir(parents=True, exist_ok=True)
+        log.info("依頼: %s → %s %s", text, intent.command, intent.argv)
+        return intent
+
+    async def run_command(self, intent: assistant.Intent) -> str:
+        """依頼されたコマンドを（定期実行と重ならないよう順番に）実行し、返事の本文を返す。"""
         # 変更するコマンドだけ定期処理と順番にする（状態・一覧は、数十分かかる取り込みを待たずに返す）
         if intent.confirm:
             async with self._lock:
@@ -233,14 +255,21 @@ class Bot(discord.Client):
         out = out.strip() or "（出力なし）"
         if len(out) > MAX_OUTPUT:
             out = out[:MAX_OUTPUT] + "\n…（以下略）"
-        files = [discord.File(intent.attach)] if rc == 0 and intent.attach and Path(intent.attach).exists() else []
-        return f"{'✅' if rc == 0 else '⚠️'} {intent.summary}\n```\n{out}\n```", files
+        return f"{'✅' if rc == 0 else '⚠️'} {intent.summary}\n```\n{out}\n```"
+
+    async def run_requested(self, intent: assistant.Intent) -> tuple[str, list[discord.File]]:
+        """依頼されたコマンドを（定期実行と重ならないよう順番に）実行し、返事の本文と添付ファイルを返す。"""
+        content = await self.run_command(intent)
+        ok = content.startswith("✅")
+        files = [discord.File(intent.attach)] if ok and intent.attach and Path(intent.attach).exists() else []
+        return content, files
 
     @schedule_run.before_loop
     @periodic_run.before_loop
     async def _wait_ready(self) -> None:
         """Discord への接続と要約サーバーの準備が終わるまで、最初の定期実行を待たせる。"""
-        await self.wait_until_ready()
+        if self.use_discord:
+            await self.wait_until_ready()
         if self.llm:
             await self._wait_llm()
 
@@ -263,10 +292,18 @@ class Bot(discord.Client):
         """Bot を止める。一緒に起動した要約サーバーも止める。"""
         if self.summarizer:
             await self.summarizer.__aexit__()
+        if self.slack:
+            await self.slack.close()
         if self.llm and self.llm.returncode is None:
             self.llm.terminate()
             await self.llm.wait()
         await super().close()
+
+    async def run_without_discord(self) -> None:
+        """Discord につながずに動かす（Slack だけのとき）。止められるまで戻らない。"""
+        async with self:  # 抜けるとき（Ctrl+C・停止）に close する
+            await self.setup_hook()
+            await asyncio.Event().wait()
 
 
 class ConfirmView(discord.ui.View):
@@ -313,8 +350,12 @@ class ConfirmView(discord.ui.View):
 
 def run_bot(cfg: Config, config_args: list[str]) -> None:
     """常駐 Bot を起動し、止められるまで戻らない。トークンがなければ ValueError。"""
+    bot = Bot(cfg, config_args)
+    if not bot.use_discord:
+        asyncio.run(bot.run_without_discord())
+        return
     token = cfg.discord.token
     if not token:
         raise ValueError(f"{cfg.discord.token_env} が設定されていません（.env に書いてください）")
     # discord.py のログ設定は使わず、kawarabanya の logging 設定に任せる
-    Bot(cfg, config_args).run(token, log_handler=None)
+    bot.run(token, log_handler=None)

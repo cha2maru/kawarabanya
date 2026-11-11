@@ -15,7 +15,7 @@
 
 ```
 systemd --user: kawarabanya-bot.service
-└─ kawarabanya bot（常駐。discord.py で Gateway に接続）
+└─ kawarabanya bot（常駐。discord.py で Gateway に、slack_sdk の Socket Mode で Slack に接続）
    ├─ 子プロセス: scripts/llama-server.sh（llama.cpp + Qwen3.5-4B、OpenAI 互換 API :8080）
    └─ 60 分ごと・まとめの時刻（6:30・18:30）に子プロセスを順に: kawarabanya run → kawarabanya genres suggest --apply --due → kawarabanya digest --due（後の 2 つはまとめの時刻ごとに 1 回）
         取得 ─▶ 既読判定 ─▶ 全文抽出 ─▶ Markdown 保存 ─▶ サブジャンル・重要度判定 ─▶ 要約 ─▶ 投稿 ─▶ 👍 集計
@@ -146,6 +146,16 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 - 投稿へのリンク（`https://discord.com/channels/{サーバー}/{スレッド}`）は、Markdown の Front Matter（`discord`）、まとめ、`interests` に載せる。
 - **👍 は「興味あり」、👎 は「興味なし」の印**として集計し、まとめの並べ替えにだけ使う（投稿するかどうかには使わない。押されていない投稿は「見ていない」可能性があるので、興味なしとは扱わない）。Bot がリアクションの追加・削除のイベントを受けてその場で数を増減する（記事の投稿の最初のメッセージへのものだけ。投稿の古さは問わない）。Bot が止まっていた間の分は、`run` が投稿から 7 日以内の記事を 6 時間ごとに数え直して正す（同じ API 呼び出しで両方読む）。フォーラムの既定リアクションは 👍 だけで、👎 は自分で選んで付ける。
 
+### 3.4.1 Slack（`core/slack_api.py`・`bot/slack_bot.py`）
+- 投稿先はサービスごとに差し替える（`core/chat.py` の `Chat`。`[chat] targets` のすべてに同じ記事・まとめ・予定・不調のお知らせを送る）。RSS と予定の機能は `Chat` だけを使う。記事は 1 つのサービスにでも投稿できれば `notified`（一部のサービスだけの失敗は送り直さない。失敗が続くようなら送り直しを作る）。
+- Slack にはフォーラムもタグもないので、**ジャンル 1 つ = チャンネル 1 つ**（`kawarabanya-tech` など。`[slack] channel_prefix`）、**1 記事 = 1 メッセージ**、サブジャンルは本文の先頭の `[ラベル]`（`channels.tags` に `sub:<パス>` → ラベル）。付け替えは `chat.update`、別のジャンルへは投稿し直して元を消す（Discord と同じ順番）。まとめは `kawarabanya-digest`、予定は非公開の `kawarabanya-schedule`（`mention_user_id` の人を招待）。
+- 表示名はフィード名（`chat:write.customize`）。リンクの展開はしない。まとめ・予定の本文は Discord の Markdown で作り、Slack 版が `*太字*`・`<URL|文字>` に書き換える。投稿へのリンクはワークスペースの URL（`auth.test`）から組み立てる（`chat.getPermalink` を呼ばない）。
+- **既定のリアクションがない**ので、投稿のたびに Bot が 👍（`+1`）・👎（`-1`）を付けておき、数えるときに Bot の分を引く（Discord で 👎 が押しにくかったことも解ける）。
+- Bot は Socket Mode で `app_mention`・`reaction_added`・`reaction_removed`・ボタン（`block_actions`）を受ける。依頼をコマンドに直す・実行するのは Discord と同じ（`Bot.make_intent`・`run_command`）。頼めるのは `[slack] mention_user_id` の人だけ。スレッドの中の依頼はスレッドの元の投稿（記事）についての依頼。確認ボタンは 10 分まで、1 回だけ。ファイルの添付（OPML の書き出し）は Slack には送らず、保存先を書く。
+- `targets = ["slack"]` なら Discord にはつながず、定期実行と Slack だけで動く。
+- 無料プランは直近 90 日のメッセージしか見えない（記事は手元の Markdown に残る）。開いているスレッドの上限のようなものはない。
+- 実際のワークスペースにはまだつないでいない（11/11。トークンがないため。テストは偽物の API）。
+
 ### 3.5 まとめ（digest）
 - まとめ用のテキストチャンネル（`[digest] channel`、既定 **#ニュース**。サーバー内を名前で探し、kawarabanya 配下でなくてよい。なければ作らずに知らせる）に、**ジャンルごとに 1 メッセージ**「## 📰 テック MM/DD HH:MM のまとめ（N 件）」（見出しは genres.toml の label）を投稿する。リンク先は各ジャンルのフォーラムの投稿。
 - 投稿するのは **`[digest] times` の時刻（既定 6:30 と 18:30）** と、**`kawarabanya digest` を実行したとき**。どちらも**前回のまとめ以降の記事**（最大 `window_hours` = 24 時間）をまとめるので、記事は重ならない。定時は「その時刻より後にそのジャンルのまとめを投稿済みなら飛ばす」（Bot が止まっていた分は次の実行で投稿する）。
@@ -172,7 +182,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 - 知らせたものは `state` の `alerted` に覚え、同じ不調は送らない。直ると忘れるので、再発すればまた送る。送れなかったものは覚えず、次の回に送り直す。
 - 記事単位の失敗は `run` の失敗にしない（1 日に数件は起きるので、数えると誤報になる。11/07 の 6 回はすべて記事単位だった）。
 
-### 3.6 Discord からの依頼（`bot/assistant.py`）
+### 3.6 Discord・Slack からの依頼（`bot/assistant.py`）
 - スラッシュコマンドは作らない: コマンドの名前や引数を覚えなくてよいよう、メンションの日本語をローカル LLM でコマンドに直す（何をするかは確認のボタンで毎回見える）。
 - Bot へのメンション（Bot 本人か Bot のロール）を日本語の依頼として受ける。Discord で「@kawarabanya」と打つと同じ名前の Bot のロールが選ばれることがあり、ロールへのメンションは Message Content Intent がないと本文が空で届くので、この Intent を使う（Developer Portal でもオンにする）。使えるのはサーバーの持ち主だけ。
 - ローカル LLM に、コマンドの一覧（`assistant.COMMANDS`）・ジャンルの一覧を渡し、JSON Schema の文法制約で「コマンド 1 つと引数（genre / feed / level / word）」だけを答えさせる（1 件 2〜4 秒）。フィード名の一覧は渡さない（104 件分の読み込みが重い）。サイト名からフィードを探すのと、URL を依頼の文から取り出すのはコードで行う（LLM は長い URL を書き間違える）。
@@ -211,6 +221,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 | HTTP | httpx（asyncio） | 並列取得・同時接続制限・条件付き GET |
 | 本文抽出 | trafilatura | 日本語の精度が高く、Markdown を直接出せる |
 | Discord | discord.py（常駐）＋ httpx（REST・Webhook） | |
+| Slack | slack_sdk の Socket Mode（常駐。aiohttp は discord.py が入れている）＋ httpx（Web API） | Socket Mode は Bot から Slack につなぐので、外から届く URL を公開しなくてよい。投稿は Discord と同じ httpx で書き、テストは MockTransport で偽物の API に向ける |
 | LLM | llama.cpp `llama-server` + **Qwen3.5-4B** Q4_K_M | 下の比較による。OpenAI 互換なので他の API にも替えられる |
 | 設定・DB | TOML（tomllib）・SQLite（sqlite3） | 標準ライブラリ |
 

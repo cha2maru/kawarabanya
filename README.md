@@ -268,7 +268,12 @@ targets = ["discord", "slack"]   # Slack だけなら ["slack"]
 mention_user_id = "U0123…"       # まとめ・予定でメンションする自分（プロフィール →「メンバー ID をコピー」）
 ```
 
-5. チャンネルを作る（Bot が作るので Bot はメンバーになる。非公開の予定のチャンネルには `mention_user_id` の人を招待する）:
+5. Slack から頼めるようにする（Bot が Slack につなぎに行く Socket Mode。外から届く URL は要らない）:
+   - 「Socket Mode」をオンにし、App-Level Token（スコープ `connections:write`、`xapp-`）を作って `.env` の `SLACK_APP_TOKEN` に書く。
+   - 「Event Subscriptions」をオンにし、Subscribe to bot events に `app_mention`・`reaction_added`・`reaction_removed` を足す。
+   - 「Interactivity & Shortcuts」をオンにする（確認ボタン用。Socket Mode なら URL は空でよい）。
+   - 権限やイベントを変えたら「Install to Workspace」をやり直す。Bot（`kawarabanya bot`）を起動し直すと、`@kawarabanya` への依頼（記事のスレッドの中なら、その記事について）・ボタン・👍・👎 を受ける。頼めるのは `mention_user_id` の人だけ。`targets = ["slack"]` なら Discord にはつながない。
+6. チャンネルを作る（Bot が作るので Bot はメンバーになる。非公開の予定のチャンネルには `mention_user_id` の人を招待する）:
 
 ```bash
 uv run kawarabanya slack setup           # 作るチャンネルの予定を表示
