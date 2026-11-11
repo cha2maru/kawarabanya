@@ -14,7 +14,7 @@ Slack のアプリの設定（https://api.slack.com/apps）は利用者にしか
 3. **トークン**（利用者）: Bot User OAuth Token（`xoxb-`）を `.env` の `SLACK_BOT_TOKEN=` に貼ってもらう。トークンはチャットに貼らせない・こちらで表示しない（貼られたら「OAuth & Permissions」で Revoke してもらい、作り直す）。`uv run kawarabanya doctor` の「Slack の Bot」が ✅ か確かめる。
 4. **Slack から頼む**（利用者。要らなければ飛ばす）: 「Socket Mode」をオン → App-Level Token（`connections:write`、`xapp-`）を `.env` の `SLACK_APP_TOKEN=` に。「Event Subscriptions」をオンにして bot events に `app_mention`・`reaction_added`・`reaction_removed`。「Interactivity & Shortcuts」をオン（URL は空でよい）。変えたら「Install to Workspace」をやり直す。
 5. **設定**: `config.toml` に `[chat] targets = ["discord", "slack"]`（Slack だけなら `["slack"]`）と `[slack] mention_user_id`（利用者のメンバー ID。プロフィール →「メンバー ID をコピー」、U で始まる）を書く。頼めるのはこの人だけ。
-6. **チャンネル**: `uv run kawarabanya slack setup`（予定の表示だけ）を見せ、問題なければ `uv run kawarabanya slack setup --apply`。ジャンルごと（`kawarabanya-tech` など）・まとめ（`kawarabanya-digest`）・予定（`kawarabanya-schedule`、非公開で `mention_user_id` を招待）ができる。
+6. **チャンネル**: `uv run kawarabanya slack setup`（予定の表示だけ）を見せ、問題なければ `uv run kawarabanya slack setup --apply`。ジャンルごと（`kawarabanya-tech` など）・まとめ（`kawarabanya-digest`）・予定（`kawarabanya-schedule`、非公開）ができ、どれにも `mention_user_id` の人を招待する。
 7. **確かめる**: `uv run kawarabanya discord test tech "テスト"`（targets のすべてに送る）→ Bot を再起動（`systemctl --user restart kawarabanya-bot`）→ Slack で「@kawarabanya いまどうなってる？」に返事が来るか。
 
 ## うまくいかないとき

@@ -40,7 +40,7 @@ def plan_channels(cfg: Config, conn: sqlite3.Connection, defs: dict[str, Genre] 
 
 
 def setup_channels(cfg: Config, conn: sqlite3.Connection, defs: dict[str, Genre] | None, *, apply: bool) -> list[str]:
-    """ジャンル・まとめ・予定の Slack のチャンネルを（なければ作って）登録する。予定の説明の行を返す。"""
+    """ジャンル・まとめ・予定の Slack のチャンネルを（なければ作って）登録し、mention_user_id の人を招待する。予定の説明の行を返す。"""
     client = _client(cfg)
     team = client.me()["team_id"]
     existing = {c["name"]: c for c in client.channels()}
@@ -52,10 +52,15 @@ def setup_channels(cfg: Config, conn: sqlite3.Connection, defs: dict[str, Genre]
             continue
         if found is None:
             found = client.call("conversations.create", name=name, is_private=private)["channel"]
-            if private and cfg.slack.mention_user_id:
-                client.call("conversations.invite", channel=found["id"], users=cfg.slack.mention_user_id)
         elif not found.get("is_member"):
             client.call("conversations.join", channel=found["id"])  # 公開チャンネルだけ。非公開は Bot を招待してもらう
+        if cfg.slack.mention_user_id:
+            # Bot が作ったチャンネルのメンバーは Bot だけなので、持ち主を招待する（入っていないと投稿が見えない）
+            try:
+                client.call("conversations.invite", channel=found["id"], users=cfg.slack.mention_user_id)
+            except slack_api.SlackError as e:
+                if e.error != "already_in_channel":
+                    raise
         chatdb.save_channel(conn, Channel("slack", key, found["id"], name, None, team, tags))
     return lines
 

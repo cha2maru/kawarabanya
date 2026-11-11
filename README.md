@@ -273,7 +273,7 @@ mention_user_id = "U0123…"       # まとめ・予定でメンションする�
    - 「Event Subscriptions」をオンにし、Subscribe to bot events に `app_mention`・`reaction_added`・`reaction_removed` を足す。
    - 「Interactivity & Shortcuts」をオンにする（確認ボタン用。Socket Mode なら URL は空でよい）。
    - 権限やイベントを変えたら「Install to Workspace」をやり直す。Bot（`kawarabanya bot`）を起動し直すと、`@kawarabanya` への依頼（記事のスレッドの中なら、その記事について）・ボタン・👍・👎 を受ける。頼めるのは `mention_user_id` の人だけ。`targets = ["slack"]` なら Discord にはつながない。
-6. チャンネルを作る（Bot が作るので Bot はメンバーになる。非公開の予定のチャンネルには `mention_user_id` の人を招待する）:
+6. チャンネルを作る（Bot が作るので Bot はメンバーになる。どのチャンネルにも `mention_user_id` の人を招待する（入っていないと投稿が見えない））:
 
 ```bash
 uv run kawarabanya slack setup           # 作るチャンネルの予定を表示

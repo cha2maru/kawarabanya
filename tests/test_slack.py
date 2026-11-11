@@ -37,6 +37,8 @@ class FakeSlack:
                   "is_private": p["is_private"] == "true"}
             self.channels.append(ch)
             return ok(channel=ch)
+        if method == "conversations.invite" and getattr(self, "invited_already", False):
+            return httpx.Response(200, json={"ok": False, "error": "already_in_channel"})
         if method in ("conversations.join", "conversations.invite", "reactions.add"):
             return ok()
         if method == "chat.postMessage":
@@ -127,7 +129,11 @@ def test_slack_setup_and_notify(tmp_path, monkeypatch):
     assert [ln.split()[0] for ln in lines] == ["既存", "作成", "作成"]
     assert ("conversations.join", {"channel": "C1"}) in fake.calls  # 既存の公開チャンネルに入る
     sched = next(c for c in fake.channels if c["name"] == "kawarabanya-schedule")
-    assert sched["is_private"] and ("conversations.invite", {"channel": sched["id"], "users": "U42"}) in fake.calls
+    assert sched["is_private"]
+    invited = {p["channel"] for m, p in fake.calls if m == "conversations.invite" and p["users"] == "U42"}
+    assert invited == {"C1", sched["id"], next(c["id"] for c in fake.channels if c["name"] == "kawarabanya-digest")}
+    fake.invited_already = True
+    cli_slack.setup_channels(cfg, conn, load_genres(g), apply=True)  # 入っていれば already_in_channel でも続ける
     assert chat.channel(conn, "slack", "tech").tags == {"sub:tech/ai": "AI"}
     assert chat.channel(conn, "slack", SCHEDULE_KEY).channel_id == sched["id"]
 
