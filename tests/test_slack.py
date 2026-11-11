@@ -247,3 +247,11 @@ def test_digest_links_fall_back_to_article():
                          (i, ref, t))
     items = digest.collect(conn, "slack", "tech", datetime.now(UTC) - timedelta(hours=1))
     assert [i.url for i in items] == ["https://ws/p1", "https://a/2"]
+
+
+def test_manifest_matches_code():
+    from pathlib import Path
+
+    m = json.loads((Path(__file__).parent.parent / "slack-manifest.json").read_text(encoding="utf-8"))
+    assert m["oauth_config"]["scopes"]["bot"] == list(slack_api.SCOPES)  # 権限を足したら manifest も直す
+    assert m["settings"]["socket_mode_enabled"] and m["settings"]["interactivity"]["is_enabled"]

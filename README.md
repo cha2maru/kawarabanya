@@ -1,28 +1,28 @@
 # kawarabanya（瓦版屋）
 
-個人用 Discord サーバーを管理する Bot。今ある機能は RSS リーダー: 登録したサイトの新着記事を全文 Markdown で保存し、**CPU で動くローカル LLM** で振り分け・要約して、ジャンルごとの Discord フォーラムに投稿する。
+個人用の Discord サーバー・Slack のワークスペースを管理する Bot。今ある機能は RSS リーダーと予定の通知: 登録したサイトの新着記事を全文 Markdown で保存し、**CPU で動くローカル LLM** で振り分け・要約して、ジャンルごとの Discord のフォーラム（Slack ならチャンネル）に投稿する。
 
 - **全文を Markdown で保存**: 元記事のページから本文を取り出し、`archive/` に残す（文字コードは自動で判別し、UTF-8 で保存）。
-- **ローカル LLM で整理**: 記事をサブジャンルに振り分け（フォーラムのタグになる）、重要度を判定して、重要な記事だけ要約する。外部の API は使わない（Qwen3.5-4B を llama.cpp で動かす。1 件 1.5〜9 秒）。
+- **ローカル LLM で整理**: 記事をサブジャンルに振り分け（Discord はフォーラムのタグ、Slack はカードのラベルになる）、重要度を判定して、重要な記事だけ要約する。外部の API は使わない（Qwen3.5-4B を llama.cpp で動かす。1 件 1.5〜9 秒）。
 - **重複をまとめる**: 同じ URL・同じ本文の記事に加え、本文の違う「同じ出来事」の記事も LLM で見分けて 1 件にする。
 - **予定（Google カレンダー）**: 今日と明日の予定・開始 30 分前・予定の追加や変更を、持ち主だけが見られるチャンネルに知らせる（読み取りだけ。説明文は送らない）。
 - **外国語の記事**: 見出しを訳して原題と並べ、重要度にかかわらず日本語で要約する。全文訳は投稿のスレッドで頼む。
 - **まとめ**: 1 日 2 回（6:30・18:30）、ジャンルごとの話題（最大 3 つ）と重要な記事へのリンクを投稿する。複数のサイトが報じた記事や、Google トレンドの急上昇ワードに当たる記事は上に寄せる。
 - **好みを覚える**: 投稿に付いた 👍・👎 を数え、ジャンル・語・サイトごとの好みを学んでまとめの並びに少しだけ反映する。ジャンルの好き嫌い（好き・うすい・ミュート）でまとめの並びや投稿を変えられる。
 - **ジャンルが育つ**: どのサブジャンルにも当てはまらない記事がたまると、LLM が新しいサブジャンルを作る（多すぎれば似たものをまとめる）。
-- **Discord から日本語で頼める**: 「@Bot このサイトを追加して」「スポーツはまとめに出さなくていい」などをコマンドに直し、ボタンで確認して実行する。
+- **Discord・Slack から日本語で頼める**: 「@Bot このサイトを追加して」「スポーツはまとめに出さなくていい」などをコマンドに直し、ボタンで確認して実行する。
 - **RSS のないサイト**: CSS セレクタでの HTML 取り込み、サイトマップ、サイト別の拡張（Python）。RSSHub で取れるかも調べられる。
 
 設計と実測値は [DESIGN.md](DESIGN.md)、コードの書き方は [docs/CODING.md](docs/CODING.md)。
 
 > [!WARNING]
-> **開発途中のツールです。** 手順・設定・DB の形は予告なく変わります。また、作者の環境（Ubuntu / WSL2・個人の Discord サーバー 1 つ）でしか試していません。
-> **インストールから設定まで、[Claude Code](https://claude.com/claude-code) などの AI コーディングエージェントの手助けを受けながら進めてください。** このリポジトリには、手順と注意点をまとめた Claude Code のスキル（`.claude/skills/`）があります。リポジトリを複製したフォルダで Claude Code を起動し、「インストールして」「Discord の準備をして」と頼むと、それに沿って進めます。下の手順は、その中身を人が読める形にしたものです。
+> **開発途中のツールです。** 手順・設定・DB の形は予告なく変わります。また、作者の環境（Ubuntu / WSL2・個人の Discord サーバー 1 つと Slack のワークスペース 1 つ）でしか試していません。
+> **インストールから設定まで、[Claude Code](https://claude.com/claude-code) などの AI コーディングエージェントの手助けを受けながら進めてください。** このリポジトリには、手順と注意点をまとめた Claude Code のスキル（`.claude/skills/`）があります。リポジトリを複製したフォルダで Claude Code を起動し、「インストールして」「Discord の準備をして」（Slack なら「Slack の準備をして」）と頼むと、それに沿って進めます。下の手順は、その中身を人が読める形にしたものです。
 
 ## 必要なもの
 
 - Linux（Ubuntu・WSL2 で動作を確認）と [uv](https://docs.astral.sh/uv/)（Python 3.12 は uv が用意する）
-- Discord のサーバー（「コミュニティ」を有効にする。フォーラムを作るのに必要）と、Bot のアプリケーション
+- 投稿先: Discord のサーバー（「コミュニティ」を有効にする。フォーラムを作るのに必要）と Bot のアプリケーション、または Slack のワークスペース（無料プランでよい）とアプリ（「設定」の「Slack」）
 - 要約に使う場合: CPU 8 スレッド程度・メモリ 5 GB 程度・ディスク 3 GB（llama.cpp と Qwen3.5-4B Q4_K_M）。なくても取り込み・保存・投稿はできる
 
 ## クイックスタート
@@ -38,7 +38,7 @@ scripts/install.sh --llm      # 依存・設定の見本・llama.cpp と要約�
 
 `config.toml`・`genres.toml`・`.env` は見本（`*.example*`）からコピーされる（あれば上書きしない）。最後に `kawarabanya doctor` が足りないものを表示する。
 
-### 2. Discord の Bot を作る
+### 2. Discord の Bot を作る（Slack に投稿するなら、代わりに「設定」の「Slack」の 1〜5）
 
 1. [Discord Developer Portal](https://discord.com/developers/applications) で **New Application** を作る。
 2. 左の **Bot** → **Reset Token** でトークンを出し、`.env` の `DISCORD_BOT_TOKEN=` に書く。
@@ -59,7 +59,7 @@ $EDITOR genres.toml                                 # ジャンル・サブジ�
 uv run kawarabanya genres apply --disable-unassigned
 ```
 
-### 4. Discord のフォーラムを作って、試す
+### 4. Discord のフォーラムを作って、試す（Slack なら `slack setup --apply` のあと `run` 以降）
 
 ```sh
 uv run kawarabanya discord setup            # 作るフォーラム・タグの予定を表示
@@ -83,7 +83,7 @@ Bot は 60 分ごとと 6:30・18:30 に、取り込み（`run`）→ サブジ�
 
 ### Discord・Slack から頼む
 
-Bot にメンションして日本語で書くと、ローカル LLM がコマンドに直す（Discord はサーバーの持ち主、Slack は `[slack] mention_user_id` の人だけ。Slack の準備は「Slack」）。Developer Portal の Bot の設定で **MESSAGE CONTENT INTENT** をオンにしておく（「@Bot」は Bot のロールへのメンションになることがあり、そのときは本文を読む許可が要る）。サイトの追加・削除、好き嫌いの変更、取り込み・まとめの実行は、ボタンで確認してから実行する。状態や一覧はすぐ返す。
+Bot にメンションして日本語で書くと、ローカル LLM がコマンドに直す（Discord はサーバーの持ち主、Slack は `[slack] mention_user_id` の人だけ。Slack の準備は「Slack」）。Discord では Developer Portal の Bot の設定で **MESSAGE CONTENT INTENT** をオンにしておく（「@Bot」は Bot のロールへのメンションになることがあり、そのときは本文を読む許可が要る）。記事の投稿のスレッド（Discord はフォーラムの投稿、Slack はカードのスレッド）の中で頼むと、その記事についての依頼になる。サイトの追加・削除、好き嫌いの変更、取り込み・まとめの実行は、ボタンで確認してから実行する。状態や一覧はすぐ返す。
 
 ```
 @Bot https://example.com/news をボードゲームに追加して   → feeds add … --genre hobby/boardgame（確認）
@@ -105,12 +105,12 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 | コマンド | 内容 |
 |---|---|
 | `bot` | 常駐 Bot。Bot にメンションして日本語で頼むと、コマンドに直して返事をする（「Discord・Slack から頼む」）。60 分ごとと、まとめの時刻（6:30・18:30）に `run`・`genres suggest --apply --due`・`digest --due` を順に別プロセスで実行する |
-| `digest [--genre X] [--due] [--dry-run]` | ジャンルごとのまとめ（前回のまとめ以降の記事の話題＋重要度順の投稿へのリンク）を今すぐ #ニュース に投稿する。Bot は 6:30・18:30 に投稿する |
+| `digest [--genre X] [--due] [--dry-run]` | ジャンルごとのまとめ（前回のまとめ以降の記事の話題＋重要度順の投稿へのリンク）を今すぐ投稿する（Discord は `#ニュース`、Slack は `kawarabanya-digest`。Slack に投稿のない記事は元記事へリンクする）。Bot は 6:30・18:30 に投稿する |
 | `digest --update [--genre X]` | 最後に投稿したまとめを、最新の記事・重要度で作り直して書き換える |
 | `digest --delete [--genre X] [--day YYYY-MM-DD]` | ジャンルごとに最後のまとめ（`--day` ならその日のすべて）を削除する |
 | `run [--category X] [--backfill N] [--no-fulltext] [--no-summary] [--no-notify]` | 取得 → 保存 → 重要度の判定 → 要約 → 投稿 → 👍 集計 → Google トレンドの急上昇ワードの取得（`[digest] trends_geo`）。初回のフィードは既存記事を既読にするだけ |
 | `summarize` | 保存済み・未投稿で要約のない最近の記事を、重要度を判定してから要約する |
-| `notify [--category X] [--limit N] [--dry-run]` | 保存済み・未投稿の記事を投稿する |
+| `notify [--category X] [--limit N] [--dry-run]` | 保存済み・未投稿の記事を `[chat] targets` のすべてに投稿する |
 | `likes` / `interests [--days 30]` | 👍・👎 の数を取得する / ジャンル・フィード別の 👍 の割合、最近 👍 した記事（投稿へのリンク付き）、学んだ好み（語・サイトの上位と下位）を表示する |
 | `prefs review [--due] [--done]` / `prefs ignore [語...] [--remove]` | 好みを動かしている語のうち未確認のもの（+ と − の上位 10 語）を出す（`--due` は前回から 7 日たっていなければ何も出さない、`--done` で確認済みにする）/ 名詞でない・内容を表さない語を好みに使わない |
 | `import-opml FILE [--genre G\|auto]` / `export-opml FILE [--all]` | OPML の取り込み・書き出し。取り込んだフィードは genres.toml にも書き足す（ジャンルは `--genre`、なければ OPML のフォルダ名と同じジャンル、`auto` ならフォルダ名で決まらないものを LLM が最近の見出しから決める） |
@@ -120,19 +120,19 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 | `feeds remove ID\|URL` | 無効にして genres.toml から外す（保存済みの記事と投稿は残す。`feeds add` で同じ URL を足すと有効に戻る） |
 | `feeds list\|enable\|disable\|option` | フィードの管理（例: `feeds option ID no_fulltext true`） |
 | `genres interest G like\|normal\|down\|low\|mute` | ジャンル・サブジャンルの好き嫌いを genres.toml に書く。サイトごとには `feeds option ID interest down`（値を省くと戻る。サイトの設定がジャンルより優先） |
-| `doctor` | 動かすのに必要なもの（設定・DB・Discord・MESSAGE CONTENT INTENT・要約サーバー・常駐サービス）がそろっているかを調べる。❌ があれば終了コード 1 |
+| `doctor` | 動かすのに必要なもの（設定・DB・Discord か Slack・MESSAGE CONTENT INTENT・要約サーバー・常駐サービス）がそろっているかを調べる。❌ があれば終了コード 1 |
 | `status` | 最後の取り込み・次のまとめ・要約サーバー・失敗中のフィード・記事の件数 |
 | `genres keyword 語 G` | 見出しか本文の冒頭にこの語がある記事を、ジャンル `G` にする（サブジャンルは確信があるときだけ LLM が選ぶ。genres.toml の `keywords` に書く）。全角・半角と大文字・小文字は区別しない。作品名・ブランド名・執筆者のような固有名詞に使う |
-| `items move ID G [--keyword 語]` | 記事を別のジャンルに移す。同じジャンルの中ならタグを付け替え、別のジャンルならサブジャンルなしで新しいフォーラムに投稿して元の投稿を消す（URL は変わり、👍 は引き継げない。「スレッドの管理」が必要）。サブジャンルなしの記事は `genres suggest` が新しいサブジャンルの材料にする |
+| `items move ID G [--keyword 語]` | 記事を別のジャンルに移す。同じジャンルの中ならタグ（Slack はラベル）を付け替え、別のジャンルならサブジャンルなしで新しいフォーラム・チャンネルに投稿して元の投稿を消す（URL は変わり、👍 は引き継げない。Discord は「スレッドの管理」が必要）。サブジャンルなしの記事は `genres suggest` が新しいサブジャンルの材料にする |
 | `items translate ID` | 日本語以外の記事の全文を日本語に訳し、`<記事>.ja.md` に保存して投稿のスレッドに返信する（1 万 2 千字まで。6 千字で約 2 分） |
 | `schedule login` / `schedule check [--agenda] [--dry-run]` | 予定（Google カレンダー）の許可 / 予定を読んで変更・直前の予定・今日と明日の予定を `#予定` に知らせる（「予定（Google カレンダー）」） |
 | `genres list` / `genres apply [--dry-run] [--disable-unassigned]` | ジャンルの一覧 / genres.toml の反映 |
-| `genres suggest [--apply] [--days 7] [--due]` | どのサブジャンルにも当てはまらなかった記事から、新しいサブジャンルを LLM に決めさせる（案は振り分け直して確かめる）。タグの上限（20）を超えるジャンルは似たサブジャンルを先にまとめる。`--apply` で genres.toml に反映し、Discord のタグを揃えて付け直す（Bot はまとめの時刻ごとに自動で実行する） |
-| `discord setup [--apply] [--prune]` / `channels` / `test GENRE` / `guilds` / `invite-url` | フォーラム・タグ・Webhook の管理 |
-| `discord retag` | 投稿済みの記事のタグをサブジャンルに付け直す（未判定なら LLM で判定。Bot に「スレッドの管理」が必要） |
+| `genres suggest [--apply] [--days 7] [--due]` | どのサブジャンルにも当てはまらなかった記事から、新しいサブジャンルを LLM に決めさせる（案は振り分け直して確かめる）。タグの上限（20）を超えるジャンルは似たサブジャンルを先にまとめる。`--apply` で genres.toml に反映し、タグ（Slack はラベル）を揃えて付け直す（Bot はまとめの時刻ごとに自動で実行する） |
+| `discord setup [--apply] [--prune]` / `channels` / `test GENRE [文]` / `guilds` / `invite-url` | フォーラム・タグ・Webhook の管理。`channels` は Slack も含めた登録済みの送り先、`test` は `[chat] targets` のすべてへのテスト投稿 |
+| `discord retag` | 投稿済みの記事のタグ（Slack はラベル）をサブジャンルに付け直す（未判定なら LLM で判定。Discord は Bot に「スレッドの管理」が必要） |
 | `discord archive [--hours 24]` | 最後の動きから 24 時間たった開いている投稿を閉じる。Discord はサーバー全体で開いているスレッド（フォーラムの投稿）が 1,000 件までで、超えると投稿できない。`discord setup --apply` でフォーラムの投稿が 1 日で閉じるようにしたあと、それより前の投稿を一度に閉じるのに使う。閉じた投稿にはリアクションを付けられない |
 | `slack setup [--apply]` | Slack にジャンルごとのチャンネル（`kawarabanya-tech` など）と、まとめ（`kawarabanya-digest`）・予定（`kawarabanya-schedule`、非公開）のチャンネルを作って登録する（「Slack」） |
-| `discord delete-duplicates [--apply]` | 重複（同じ URL・同じ本文）と判定した記事のフォーラムの投稿を消す（なしは一覧だけ。「スレッドの管理」が必要） |
+| `discord delete-duplicates [--apply]` | 重複（同じ URL・同じ本文）と判定した記事の投稿を、`[chat] targets` のすべてから消す（なしは一覧だけ。Discord は「スレッドの管理」が必要） |
 
 全体のオプション: `-c config.toml`、`--db PATH`、`-v`（詳しいログ）。
 
@@ -253,33 +253,35 @@ Bot は 5 分ごとに `schedule check` を実行し、予定の追加・変更�
 
 ### Slack（使うときだけ）
 
-Discord と同じ記事・まとめ・予定を Slack にも投稿できる（`[chat] targets`。Slack だけにもできる）。Slack にはフォーラムもタグもないので、ジャンルごとにチャンネルを作り、1 記事 = 1 メッセージ（見出し・要約・サブジャンル・公開日時・「元記事を開く」ボタンのカード）にする。サブジャンルで絞るときは Slack の検索で `[AI] in:#kawarabanya-tech`。既定のリアクションがないので、投稿のたびに Bot が 👍・👎 を付けておく（押せば数が増える。Bot の分は数えない）。無料プランは直近 90 日のメッセージしか見えないが、記事は手元に Markdown で残る。
+記事・まとめ・予定を Slack に投稿する（`[chat] targets`。Discord と両方にも、Slack だけにもできる）。Slack にはフォーラムもタグもないので、ジャンルごとにチャンネルを作り、1 記事 = 1 枚のカード（見出し・要約・サブジャンル・公開日時・「元記事を開く」ボタン）にする。サブジャンルで絞るときは Slack の検索で `[AI] in:#kawarabanya-tech`。既定のリアクションがないので、投稿のたびに Bot が 👍・👎 を付けておく（押せば数が増える。Bot の分は数えない）。
 
-1. https://api.slack.com/apps で「Create New App」→「From scratch」で、使うワークスペースにアプリを作る。
-2. 「OAuth & Permissions」の **Bot Token Scopes** に次を足し、「Install to Workspace」する: `chat:write`, `chat:write.customize`, `channels:read`, `channels:manage`, `channels:join`, `groups:read`, `groups:write`, `reactions:read`, `reactions:write`, `app_mentions:read`, `channels:history`, `groups:history`
-3. 表示される **Bot User OAuth Token**（`xoxb-`）を `.env` の `SLACK_BOT_TOKEN` に書く（見本: `.env.example`）。
+無料プランの制限: 見えるのは直近 90 日のメッセージだけで、1 年より古いものは消える。記事は手元の DB と Markdown に残るので、kawarabanya の動き（好みの学習・まとめ）には影響しない。アプリは 10 個まで、サイドバーのカスタムセクション（チャンネルを枠にまとめる機能）は有料。
+
+1. https://api.slack.com/apps で「Create New App」→「**From a manifest**」→ ワークスペースを選び、リポジトリの [slack-manifest.json](slack-manifest.json) の中身を貼る（権限・Socket Mode・イベント・ボタンの設定が入っている）。
+2. 「Install to Workspace」をして、**Bot User OAuth Token**（`xoxb-`）を `.env` の `SLACK_BOT_TOKEN` に書く（見本: `.env.example`）。
+3. 「Basic Information」→「App-Level Tokens」で、スコープ `connections:write` のトークン（`xapp-`）を作り、`.env` の `SLACK_APP_TOKEN` に書く（Slack から @ で頼むのに使う。manifest では作れない）。
 4. `config.toml` に書く:
 
 ```toml
 [chat]
-targets = ["discord", "slack"]   # Slack だけなら ["slack"]
+targets = ["slack"]              # Discord と両方なら ["discord", "slack"]
 
 [slack]
-mention_user_id = "U0123…"       # まとめ・予定でメンションする自分（プロフィール →「メンバー ID をコピー」）
+mention_user_id = "U0123…"       # 自分のメンバー ID（プロフィール →「︙」→「メンバー ID をコピー」）。Slack で頼めるのはこの人だけ。まとめ・予定でメンションする
 ```
 
-5. Slack から頼めるようにする（Bot が Slack につなぎに行く Socket Mode。外から届く URL は要らない）:
-   - 「Socket Mode」をオンにし、App-Level Token（スコープ `connections:write`、`xapp-`）を作って `.env` の `SLACK_APP_TOKEN` に書く。
-   - 「Event Subscriptions」をオンにし、Subscribe to bot events に `app_mention`・`reaction_added`・`reaction_removed` を足す。
-   - 「Interactivity & Shortcuts」をオンにする（確認ボタン用。Socket Mode なら URL は空でよい）。
-   - 権限やイベントを変えたら「Install to Workspace」をやり直す。Bot（`kawarabanya bot`）を起動し直すと、`@kawarabanya` への依頼（記事のスレッドの中なら、その記事について）・ボタン・👍・👎 を受ける。頼めるのは `mention_user_id` の人だけ。`targets = ["slack"]` なら Discord にはつながない。
-6. チャンネルを作る（Bot が作るので Bot はメンバーになる。どのチャンネルにも `mention_user_id` の人を招待する（入っていないと投稿が見えない））:
+5. チャンネルを作る（Bot が作り、どのチャンネルにも `mention_user_id` の人を招待する。入っていないと投稿が見えない）:
 
 ```bash
 uv run kawarabanya slack setup           # 作るチャンネルの予定を表示
-uv run kawarabanya slack setup --apply   # 作って登録する
+uv run kawarabanya slack setup --apply   # 作って登録する（DB の版が上がる前にバックアップを取る）
 uv run kawarabanya discord test tech "テスト"   # targets のすべてにテスト投稿（コマンド名は discord のまま）
+uv run kawarabanya doctor                # 「Slack の Bot」「Slack のチャンネル」が ✅ か
 ```
+
+6. Bot（`kawarabanya bot`・常駐サービス）を起動し直すと、`@kawarabanya` への依頼（記事のスレッドの中なら、その記事について）・確認ボタン・👍・👎 を受ける。`targets = ["slack"]` なら Discord にはつながない。
+
+manifest を使わずに作るときは、Bot Token Scopes に `chat:write`, `chat:write.customize`, `channels:read`, `channels:manage`, `channels:join`, `groups:read`, `groups:write`, `reactions:read`, `reactions:write`, `app_mentions:read`, `channels:history`, `groups:history`、Socket Mode をオン、Event Subscriptions の bot events に `app_mention`・`reaction_added`・`reaction_removed`、Interactivity をオンにする。
 
 ### config.toml（git 管理外。すべて省略可）
 
@@ -293,7 +295,10 @@ priority_threshold = 0.8     # 重要度（A の確率）がこれ以上の記�
 mention_user_id = "123…"     # まとめ・予定で自分にメンションして通知を鳴らす（開発者モードで「ユーザー ID をコピー」）
 
 [chat]
-targets = ["discord"]        # 投稿するサービス。"slack" を足すと Slack にも同じものを投稿する（下の「Slack」）
+targets = ["discord"]        # 投稿するサービス。"slack" を足すと Slack にも同じものを投稿する（上の「Slack」）
+
+[slack]
+mention_user_id = "U0123…"   # Slack で頼める人・まとめと予定でメンションする人
 
 [digest]
 times = ["06:30", "18:30"]   # まとめを投稿する時刻
@@ -307,7 +312,7 @@ llm_server_command = "scripts/llama-server.sh"   # Bot と一緒に要約サー�
 ## 運用
 
 - **更新**: `git pull && uv sync` のあと `systemctl --user restart kawarabanya-bot`。DB の形が変わる版では、起動時に自動でマイグレーションする（その前に `data/kawarabanya.db.bak-v<旧版>` にバックアップを取る）。新しい版で作った DB を古い版で開こうとすると止まる。
-- **バックアップ**: `data/`（DB）と `archive/`（記事の Markdown）、`config.toml`・`genres.toml`・`.env`。`genres.toml` は Bot も書き換える（サブジャンルの自動作成・Discord からの依頼）。
+- **バックアップ**: `data/`（DB）と `archive/`（記事の Markdown）、`config.toml`・`genres.toml`・`.env`。`genres.toml` は Bot も書き換える（サブジャンルの自動作成・Discord・Slack からの依頼）。
 - **不調の通知**: Bot は、失敗が続いて自動で止めたフィード、RSSHub の無応答（`rsshub_url` を書いたとき）、定期処理の 3 回連続の失敗を、まとめの投稿先のチャンネルに知らせる（新しく起きたときに 1 回だけ。直ったあと再発すればまた知らせる）。
 - **調子が悪いとき**: `uv run kawarabanya doctor` と `uv run kawarabanya status`、ログ（`journalctl --user -u kawarabanya-bot`）。
 
@@ -319,9 +324,9 @@ uvx ruff check src tests                           # 規則は pyproject.toml �
 uv run --with pdoc pdoc kawarabanya -o docs/api   # API ドキュメント（docstring から HTML）
 ```
 
-[Claude Code](https://claude.com/claude-code) を使うなら、`.claude/skills/` のスキル（`kawarabanya-install`・`kawarabanya-discord-setup`・`kawarabanya-ops`）が、インストール・Discord の準備・日々の操作を案内する（「インストールして」「サイトを追加して」などと頼む）。
+[Claude Code](https://claude.com/claude-code) を使うなら、`.claude/skills/` のスキル（`kawarabanya-install`・`kawarabanya-discord-setup`・`kawarabanya-slack-setup`・`kawarabanya-ops`）が、インストール・Discord と Slack の準備・日々の操作を案内する（「インストールして」「サイトを追加して」などと頼む）。
 
-コードの構成と依存の向き（`cli`・`bot` → `rss`・`schedule` → `core`）、書き方は [docs/CODING.md](docs/CODING.md)。Discord から頼めることを足すときは `src/kawarabanya/bot/assistant.py` の `COMMANDS` に、サイト別の取り込みは `extensions/` に足す。
+コードの構成と依存の向き（`cli`・`bot` → `rss`・`schedule` → `core`）、書き方は [docs/CODING.md](docs/CODING.md)。Discord・Slack から頼めることを足すときは `src/kawarabanya/bot/assistant.py` の `COMMANDS` に、サイト別の取り込みは `extensions/` に足す。
 
 ## 変更の記録
 
