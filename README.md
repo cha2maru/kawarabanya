@@ -253,7 +253,7 @@ Bot は 5 分ごとに `schedule check` を実行し、予定の追加・変更�
 
 ### Slack（使うときだけ）
 
-Discord と同じ記事・まとめ・予定を Slack にも投稿できる（`[chat] targets`。Slack だけにもできる）。Slack にはフォーラムもタグもないので、ジャンルごとにチャンネルを作り、1 記事 = 1 メッセージ、サブジャンルは本文の先頭の `[ラベル]` にする。既定のリアクションがないので、投稿のたびに Bot が 👍・👎 を付けておく（押せば数が増える。Bot の分は数えない）。無料プランは直近 90 日のメッセージしか見えないが、記事は手元に Markdown で残る。
+Discord と同じ記事・まとめ・予定を Slack にも投稿できる（`[chat] targets`。Slack だけにもできる）。Slack にはフォーラムもタグもないので、ジャンルごとにチャンネルを作り、1 記事 = 1 メッセージ（見出し・要約・サブジャンル・公開日時・「元記事を開く」ボタンのカード）にする。サブジャンルで絞るときは Slack の検索で `[AI] in:#kawarabanya-tech`。既定のリアクションがないので、投稿のたびに Bot が 👍・👎 を付けておく（押せば数が増える。Bot の分は数えない）。無料プランは直近 90 日のメッセージしか見えないが、記事は手元に Markdown で残る。
 
 1. https://api.slack.com/apps で「Create New App」→「From scratch」で、使うワークスペースにアプリを作る。
 2. 「OAuth & Permissions」の **Bot Token Scopes** に次を足し、「Install to Workspace」する: `chat:write`, `chat:write.customize`, `channels:read`, `channels:manage`, `channels:join`, `groups:read`, `groups:write`, `reactions:read`, `reactions:write`, `app_mentions:read`, `channels:history`, `groups:history`

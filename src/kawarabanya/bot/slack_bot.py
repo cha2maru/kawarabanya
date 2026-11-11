@@ -105,7 +105,8 @@ class SlackBridge:
         """確認ボタン（実行・やめる）。押せるのは持ち主だけ、10 分まで。"""
         action = payload["actions"][0]
         channel, ts = payload["channel"]["id"], payload["message"]["ts"]
-        if payload["user"]["id"] != self.owner:
+        # 記事のカードの「元記事を開く」（URL のボタン）も届くので、確認ボタンだけを扱う
+        if payload["user"]["id"] != self.owner or action.get("action_id") not in ("run", "cancel"):
             return
         found = self.pending.pop(action.get("value", ""), None)
         if found is None or time.monotonic() - found[1] > CONFIRM_SECONDS:

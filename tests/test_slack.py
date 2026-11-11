@@ -1,3 +1,4 @@
+import json
 from urllib.parse import parse_qs
 
 import httpx
@@ -51,7 +52,7 @@ class FakeSlack:
         if ref not in self.messages:
             return httpx.Response(200, json={"ok": False, "error": "message_not_found"})
         if method == "chat.update":
-            self.messages[ref]["text"] = p["text"]
+            self.messages[ref].update(p)
             return ok()
         if method == "chat.delete":
             del self.messages[ref]
@@ -82,7 +83,12 @@ def test_post_article_and_reactions():
     assert posted.ref == "C1/1700000001.000100"
     assert posted.url == "https://ws.slack.com/archives/C1/p1700000001000100"
     msg = fake.messages[posted.ref]
-    assert msg["text"].startswith("[AI] *&lt;新&gt;モデル*\n要約です") and msg["text"].endswith("https://a")
+    assert msg["text"] == "[AI] <新>モデル"  # 通知・検索用
+    blocks = json.loads(msg["blocks"])
+    assert blocks[0]["text"]["text"] == "*<https://a|&lt;新&gt;モデル>*"
+    assert blocks[1]["text"]["text"] == "要約です"
+    assert blocks[2]["elements"][0]["text"].startswith("`AI` ・ 🕒 2026-11-11")
+    assert blocks[3]["elements"][0]["url"] == "https://a"
     assert msg["username"] == "ITmedia" and msg["unfurl_links"] == "false"
     assert [c[1]["name"] for c in fake.calls if c[0] == "reactions.add"] == ["+1", "-1"]  # 押しやすいように先に付ける
     assert sc.reactions(posted.ref) == (0, 0)  # Bot が付けた分は数えない
@@ -90,7 +96,8 @@ def test_post_article_and_reactions():
     assert sc.reactions(posted.ref) == (2, 0)
 
     sc.retag(ch, posted.ref, Article("<新>モデル", "ITmedia", "要約です", "https://a", None, "tech"))
-    assert fake.messages[posted.ref]["text"].startswith("*&lt;新&gt;モデル*")  # ラベルなし
+    assert fake.messages[posted.ref]["text"] == "<新>モデル"  # ラベルなし
+    assert "`AI`" not in fake.messages[posted.ref]["blocks"]
     assert sc.reply(posted.ref, "訳") == 1
     assert fake.calls[-1][1]["thread_ts"] == "1700000001.000100"
     sc.delete_post(posted.ref)
@@ -143,7 +150,7 @@ def test_slack_setup_and_notify(tmp_path, monkeypatch):
     stats = notify.notify_pending(conn, [sc], limit=5, max_age_days=3, interval=0)
     assert stats.sent == 1
     ref, url = conn.execute("SELECT ref, url FROM posts WHERE platform = 'slack'").fetchone()
-    assert fake.messages[ref]["text"].startswith("[AI] *記事*")
+    assert fake.messages[ref]["text"] == "[AI] 記事"
     assert url.startswith("https://ws.slack.com/archives/C1/p")
     assert notify.sync_likes(conn, [sc], interval_hours=0) == 1
     assert chat.count_reaction(conn, "slack", ref, chat.LIKE, 1)
@@ -216,6 +223,7 @@ def test_slack_bridge(tmp_path):
     click = {"type": "block_actions", "user": {"id": "U42"}, "channel": {"id": "C1"}, "message": {"ts": "9.9"},
              "actions": [{"action_id": "run", "value": key}]}
     run(bridge.handle("interactive", {**click, "user": {"id": "U9"}}))  # 持ち主でなければ何もしない
+    run(bridge.handle("interactive", {**click, "actions": [{"action_id": "open", "url": "https://a"}]}))  # 記事のボタン
     assert bot.ran == []
     run(bridge.handle("interactive", click))
     assert bot.ran == [["feeds", "remove", "1"]] and web.calls[-1][1]["text"].startswith("✅ A を消す")

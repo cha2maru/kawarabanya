@@ -12,15 +12,17 @@ import json
 import logging
 import re
 import time
+from datetime import datetime
 
 import httpx
 
-from kawarabanya.core.chat import Article, Channel, ChatError, Posted, PostGoneError, article_text
+from kawarabanya.core.chat import Article, Channel, ChatError, Posted, PostGoneError
 
 log = logging.getLogger(__name__)
 
 API = "https://slack.com/api/"
 MAX_TEXT = 3000
+MAX_SECTION = 3000  # Block Kit の section の本文の上限
 LIKE_NAME = "+1"
 DISLIKE_NAME = "-1"
 # 投稿が消えていることを表すエラー
@@ -118,10 +120,27 @@ class SlackChat:
         self.mention_user_id = mention_user_id
 
     def text(self, ch: Channel, a: Article) -> str:
-        """記事の本文（[ラベル] *見出し* と、要約・公開日時・URL）。"""
+        """通知や検索に使う本文（[ラベル] 見出し）。表示は blocks。"""
         label = ch.tags.get(f"sub:{a.subgenre}")
-        head = (f"[{escape(label)}] " if label else "") + f"*{escape(a.title)}*"
-        return f"{head}\n{escape(article_text(a, MAX_TEXT - len(head) - 1))}"
+        return (f"[{label}] " if label else "") + a.title
+
+    def blocks(self, ch: Channel, a: Article) -> list[dict]:
+        """記事のカード（Block Kit）: 見出し（元記事へのリンク）・要約・[ラベル]・公開日時・元記事のボタン。"""
+        label = ch.tags.get(f"sub:{a.subgenre}")
+        title = escape(a.title)
+        out = [{"type": "section", "text": {"type": "mrkdwn", "text": f"*<{escape(a.url)}|{title}>*" if a.url else f"*{title}*"}}]
+        if a.body:
+            out.append({"type": "section", "text": {"type": "mrkdwn", "text": escape(a.body)[:MAX_SECTION]}})
+        meta = [f"`{escape(label)}`"] if label else []
+        if a.published:
+            meta.append(f"🕒 {datetime.fromisoformat(a.published).astimezone():%Y-%m-%d %H:%M}")
+        if meta:
+            out.append({"type": "context", "elements": [{"type": "mrkdwn", "text": " ・ ".join(meta)}]})
+        if a.url:
+            out.append({"type": "actions", "elements": [
+                {"type": "button", "text": {"type": "plain_text", "text": "元記事を開く"}, "url": a.url, "action_id": "open"},
+            ]})
+        return out
 
     def link(self, channel: str, ts: str) -> str:
         """メッセージへのリンク（ワークスペースの URL から組み立てる。getPermalink を呼ばずに済む）。"""
@@ -129,7 +148,7 @@ class SlackChat:
 
     def post_article(self, ch: Channel, a: Article) -> Posted:
         """記事を投稿し、押しやすいように 👍・👎 を付けておく。"""
-        r = self.client.call("chat.postMessage", channel=ch.channel_id, text=self.text(ch, a),
+        r = self.client.call("chat.postMessage", channel=ch.channel_id, text=self.text(ch, a), blocks=self.blocks(ch, a),
                              username=(a.feed_title or "kawarabanya")[:80], unfurl_links=False, unfurl_media=False)
         for name in (LIKE_NAME, DISLIKE_NAME):
             self.client.call("reactions.add", channel=r["channel"], timestamp=r["ts"], name=name)
@@ -144,9 +163,9 @@ class SlackChat:
             raise
 
     def retag(self, ch: Channel, ref: str, a: Article) -> None:
-        """本文の [ラベル] を書き換える。"""
+        """カードの [ラベル] を書き換える。"""
         channel, ts = split_ref(ref)
-        self._gone(self.client.call, "chat.update", channel=channel, ts=ts, text=self.text(ch, a))
+        self._gone(self.client.call, "chat.update", channel=channel, ts=ts, text=self.text(ch, a), blocks=self.blocks(ch, a))
 
     def delete_post(self, ref: str) -> None:
         """投稿を消す（すでに消えていれば何もしない）。"""

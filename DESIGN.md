@@ -148,7 +148,7 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 
 ### 3.4.1 Slack（`core/slack_api.py`・`bot/slack_bot.py`）
 - 投稿先はサービスごとに差し替える（`core/chat.py` の `Chat`。`[chat] targets` のすべてに同じ記事・まとめ・予定・不調のお知らせを送る）。RSS と予定の機能は `Chat` だけを使う。記事は 1 つのサービスにでも投稿できれば `notified`（一部のサービスだけの失敗は送り直さない。失敗が続くようなら送り直しを作る）。
-- Slack にはフォーラムもタグもないので、**ジャンル 1 つ = チャンネル 1 つ**（`kawarabanya-tech` など。`[slack] channel_prefix`）、**1 記事 = 1 メッセージ**、サブジャンルは本文の先頭の `[ラベル]`（`channels.tags` に `sub:<パス>` → ラベル）。付け替えは `chat.update`、別のジャンルへは投稿し直して元を消す（Discord と同じ順番）。まとめは `kawarabanya-digest`、予定は非公開の `kawarabanya-schedule`（`mention_user_id` の人を招待）。
+- Slack にはフォーラムもタグもないので、**ジャンル 1 つ = チャンネル 1 つ**（`kawarabanya-tech` など。`[slack] channel_prefix`）、**1 記事 = 1 メッセージ**（Block Kit のカード: 元記事へのリンクの見出し・要約・`ラベル` と公開日時・「元記事を開く」ボタン。通知と検索に使う `text` は `[ラベル] 見出し`）、サブジャンルは `channels.tags` の `sub:<パス>` → ラベル。サイドバーのカスタムセクションは有料なので、サブジャンルごとのチャンネルにはしない（検索なら `[AI] in:#kawarabanya-tech`）。付け替えは `chat.update`、別のジャンルへは投稿し直して元を消す（Discord と同じ順番）。まとめは `kawarabanya-digest`、予定は非公開の `kawarabanya-schedule`（`mention_user_id` の人を招待）。
 - 表示名はフィード名（`chat:write.customize`）。リンクの展開はしない。まとめ・予定の本文は Discord の Markdown で作り、Slack 版が `*太字*`・`<URL|文字>` に書き換える。投稿へのリンクはワークスペースの URL（`auth.test`）から組み立てる（`chat.getPermalink` を呼ばない）。
 - **既定のリアクションがない**ので、投稿のたびに Bot が 👍（`+1`）・👎（`-1`）を付けておき、数えるときに Bot の分を引く（Discord で 👎 が押しにくかったことも解ける）。
 - Bot は Socket Mode で `app_mention`・`reaction_added`・`reaction_removed`・ボタン（`block_actions`）を受ける。依頼をコマンドに直す・実行するのは Discord と同じ（`Bot.make_intent`・`run_command`）。頼めるのは `[slack] mention_user_id` の人だけ。スレッドの中の依頼はスレッドの元の投稿（記事）についての依頼。確認ボタンは 10 分まで、1 回だけ。ファイルの添付（OPML の書き出し）は Slack には送らず、保存先を書く。
