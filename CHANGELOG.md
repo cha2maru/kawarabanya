@@ -2,21 +2,31 @@
 
 版の付け方: `0.x` の間は開発途中で、設定・コマンド・DB の形が予告なく変わります（DB は起動時に自動でマイグレーションし、前にバックアップを取ります）。
 
-## 未リリース
+## v0.3.0（2026-11-12）
+
+Slack に対応した版（プレリリース）。Discord と Slack の両方、またはどちらかに投稿できる（`[chat] targets`）。DB は起動時に版 3 → 5 へ自動で上がる（前に `data/kawarabanya.db.bak-v3`・`bak-v4` にバックアップを取る。版 5 の DB は v0.2 では開けない）。
+
+### 新しい機能
+
+- Slack に投稿できる（`[chat] targets = ["slack"]` か `["discord", "slack"]`・`[slack]`・`slack setup`・`slack-manifest.json`）。ジャンルごとのチャンネルに 1 記事 = 1 枚のカード（Block Kit。見出し・要約・サブジャンル・公開日時・元記事のボタン）、Bot が 👍・👎 を先に付けておく。まとめ・予定・不調のお知らせも Slack に送る
+- Slack から頼める（Socket Mode。`@kawarabanya` への依頼・確認ボタン・👍・👎 をその場で数える。`SLACK_APP_TOKEN`）。`targets = ["slack"]` なら Discord にはつながずに動く
+- 👍・👎 から好みを学び、まとめの並びに反映する（ジャンル・サブジャンル・見出しと冒頭の語・サイトごと。`[digest] pref_max`・`site_pref_max`・`pref_half_life_days`、`interests` で表示）。上位の最後の 1 枠は好みを除いた点で選ぶ
+- 好みの語の見直し（`prefs review`・`prefs ignore`）
+- 👍・👎 を Bot が付いたその場で数える（これまでは run で 6 時間ごと、投稿から 7 日以内だけ）
+- フィードの URL の `{days_ago:N}` を取得のたびに N 日前の日付にする（RSSHub の GitHub 検索で「直近 7 日に作られた人気リポジトリ」など）
+- `discord archive`: 開いている古い投稿を閉じる
+
+### 変更
 
 - Discord・Slack に共通のコマンドを `discord` から `chat` に移した: `chat channels`・`chat test`・`chat retag`・`chat delete-duplicates`（`discord` には Discord だけの `setup`・`archive`・`guilds`・`invite-url` が残る）
-- Slack: 👍・👎 を付けられなくても投稿は成功にする（同じ記事を投稿し直さない）。障害中の HTML の応答も Slack のエラーとして扱う。DB の版 5 への移行は、途中で失敗したら全部戻す
-- Slack のアプリを manifest（`slack-manifest.json`）から作れる。README とスキルを Slack だけで使う場合にも合わせた
-- まとめのリンク: そのサービスに投稿がない記事（Slack に切り替える前に Discord にだけ投稿した記事など）は、元記事へリンクする（これまではリンクなし）
-- Slack から頼める（Socket Mode。`@kawarabanya` への依頼・確認ボタン・👍・👎 をその場で数える。`SLACK_APP_TOKEN`）。`targets = ["slack"]` なら Discord にはつながずに動く
-- Slack にも投稿できる（`[chat] targets = ["discord", "slack"]`・`[slack]`・`slack setup`）。ジャンルごとのチャンネルに 1 記事 = 1 枚のカード（Block Kit。見出し・要約・サブジャンル・公開日時・元記事のボタン）、Bot が 👍・👎 を先に付けておく。まとめ・予定・不調のお知らせも Slack に送る
-- 投稿先を差し替えられる形にした（Discord と Slack の両対応の準備。`[chat] targets`）。DB は版 5（`discord_channels` → `channels`、`items.discord_thread_id` → `posts`、`digests` にサービス）。起動時に自動で上がる（前に `data/kawarabanya.db.bak-v4` にバックアップを取る）
-- フォーラムの投稿が 1 日（これまで 3 日）で閉じるようにし（`discord setup --apply` で揃える）、それより前の投稿を閉じる `discord archive` を足す。サーバー全体で開いているスレッドの上限 1,000 件に達して投稿できなくなっていた
-- 要約サーバーのメモリを 9 GB → 4.6 GB に減らす（`scripts/llama-server.sh` で llama-server のプロンプトのキャッシュ `--cache-ram` を切る。`LLAMA_CACHE_RAM` で戻せる）
-- 👍・👎 から好みを学び、まとめの並びに反映する（ジャンル・サブジャンル・見出しと冒頭の語・サイトごと。`[digest] pref_max`・`site_pref_max`・`pref_half_life_days`、`interests` で表示）。上位の最後の 1 枠は好みを除いた点で選ぶ。DB は版 4（`items.dislikes`）
-- フィードの URL の `{days_ago:N}` を取得のたびに N 日前の日付にする（RSSHub の GitHub 検索で「直近 7 日に作られた人気リポジトリ」など）
-- 好みの語の見直し（`prefs review`・`prefs ignore`）。「二回」のような漢数字＋助数詞と、数字の直後から始まる漢字は語として取らない
-- 👍・👎 を Bot が付いたその場で数える（これまでは run で 6 時間ごと、投稿から 7 日以内だけ）
+- DB の版 4（`items.dislikes`）・版 5（`discord_channels` → `channels`、`items.discord_thread_id` → `posts`、`digests` にサービス）
+- まとめのリンク: そのサービスに投稿がない記事（Slack に切り替える前に Discord にだけ投稿した記事など）は元記事へ
+- 好みの語に「二回」のような漢数字＋助数詞と、数字の直後から始まる漢字を取らない
+
+### 直した不具合
+
+- Discord のフォーラムの投稿が 3 日開いたままで、サーバー全体の開いているスレッドの上限 1,000 件に達して投稿できなくなっていた。1 日で閉じるようにした（`discord setup --apply` で揃える）
+- 要約サーバーが 9 GB 使っていた（llama-server のプロンプトのキャッシュ）。`scripts/llama-server.sh` で `--cache-ram` を切り、4.6 GB に（`LLAMA_CACHE_RAM` で戻せる）
 
 ## v0.2.1（2026-11-08）
 
