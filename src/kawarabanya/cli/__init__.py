@@ -39,6 +39,7 @@ from kawarabanya.cli.rss import (
 from kawarabanya.cli.schedule import cmd_schedule_check, cmd_schedule_login
 from kawarabanya.cli.server import (
     cmd_bot,
+    cmd_discord_archive,
     cmd_discord_channels,
     cmd_discord_delete_duplicates,
     cmd_discord_guilds,
@@ -227,6 +228,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--apply", action="store_true", help="実際に作成する")
     s.add_argument("--prune", action="store_true", help="--apply と一緒に使い、ジャンルに対応しないフォーラムを削除する（投稿も消える）")
     s.set_defaults(func=cmd_discord_setup)
+    s = dc.add_parser("archive", help="最後の動きから一定時間たった開いている投稿を閉じる（開いているスレッドは 1,000 件まで）")
+    s.add_argument("--hours", type=float, default=24, help="この時間より前に動きが止まった投稿を閉じる")
+    s.set_defaults(func=cmd_discord_archive)
     s = dc.add_parser("channels", help="登録済みのチャンネル")
     s.set_defaults(func=cmd_discord_channels)
     s = dc.add_parser("retag", help="投稿済みの記事のタグを、サブジャンルに付け直す（未判定なら LLM で判定）")

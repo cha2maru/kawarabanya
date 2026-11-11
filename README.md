@@ -130,6 +130,7 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 | `genres suggest [--apply] [--days 7] [--due]` | どのサブジャンルにも当てはまらなかった記事から、新しいサブジャンルを LLM に決めさせる（案は振り分け直して確かめる）。タグの上限（20）を超えるジャンルは似たサブジャンルを先にまとめる。`--apply` で genres.toml に反映し、Discord のタグを揃えて付け直す（Bot はまとめの時刻ごとに自動で実行する） |
 | `discord setup [--apply] [--prune]` / `channels` / `test GENRE` / `guilds` / `invite-url` | フォーラム・タグ・Webhook の管理 |
 | `discord retag` | 投稿済みの記事のタグをサブジャンルに付け直す（未判定なら LLM で判定。Bot に「スレッドの管理」が必要） |
+| `discord archive [--hours 24]` | 最後の動きから 24 時間たった開いている投稿を閉じる。Discord はサーバー全体で開いているスレッド（フォーラムの投稿）が 1,000 件までで、超えると投稿できない。`discord setup --apply` でフォーラムの投稿が 1 日で閉じるようにしたあと、それより前の投稿を一度に閉じるのに使う。閉じた投稿にはリアクションを付けられない |
 | `discord delete-duplicates [--apply]` | 重複（同じ URL・同じ本文）と判定した記事のフォーラムの投稿を消す（なしは一覧だけ。「スレッドの管理」が必要） |
 
 全体のオプション: `-c config.toml`、`--db PATH`、`-v`（詳しいログ）。

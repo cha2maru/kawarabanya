@@ -54,6 +54,8 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
                 todo.append("年齢制限" + ("オン" if cfg.discord.nsfw else "オフ"))
             if pc.default_reaction != discord_api.LIKE_EMOJI:
                 todo.append(f"既定リアクション {discord_api.LIKE_EMOJI}")
+            if pc.archive_minutes != forums.ARCHIVE_MINUTES:
+                todo.append(f"投稿が閉じるまで {forums.ARCHIVE_MINUTES // 60} 時間")
             state = f"既存（{'、'.join(todo)}）" if todo else "既存"
         else:
             state = "作成"
@@ -101,6 +103,14 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
                 f"DELETE FROM discord_channels WHERE category NOT IN ({','.join('?' * len(names))})", names
             )
     print(f"\nフォーラムを {len(created)} 件作成し、{len(plan.channels)} 件の Webhook を登録しました")
+    return 0
+
+def cmd_discord_archive(cfg: Config, args: argparse.Namespace) -> int:
+    """discord archive: 最後の動きから --hours 時間たった開いている投稿を閉じる（開いているスレッドの上限 1,000 対策）。"""
+    conn = _open_db(cfg, args)
+    client = _discord_client(cfg)
+    guild = discord_api.resolve_guild(client, cfg.discord.guild_id)
+    print(f"{forums.archive_old_posts(client, conn, guild['id'], args.hours)} 件の投稿を閉じました")
     return 0
 
 def cmd_discord_channels(cfg: Config, args: argparse.Namespace) -> int:

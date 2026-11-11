@@ -26,6 +26,8 @@ class FakeDiscord:
         self.thread_tags: dict[str, list] = {}
         self.deleted: list[str] = []
         self.next_id = 100
+        self.active_threads: list[dict] = []
+        self.archived: list[str] = []
         self.rate_limited_once = False
 
     def _id(self) -> str:
@@ -53,6 +55,8 @@ class FakeDiscord:
             self.messages[mid] = body
             return httpx.Response(200, json={"id": mid, "channel_id": f"thread{len(self.posts)}"})
         assert req.headers["authorization"] == "Bot TOKEN"
+        if path == "/guilds/1/threads/active":
+            return httpx.Response(200, json={"threads": self.active_threads})
         if path == "/users/@me/guilds":
             return httpx.Response(200, json=[{"id": "1", "name": "srv"}])
         if path == "/guilds/1/channels" and req.method == "GET":
@@ -69,6 +73,9 @@ class FakeDiscord:
             return httpx.Response(200, json={})
         if req.method == "PATCH" and path.startswith("/channels/"):
             cid = path.split("/")[2]
+            if body.get("archived"):
+                self.archived.append(cid)
+                return httpx.Response(200, json={"id": cid})
             if cid.startswith("thread"):  # フォーラムの投稿（スレッド）のタグの書き換え
                 self.thread_tags[cid] = body["applied_tags"]
                 return httpx.Response(200, json={"id": cid, **body})
@@ -79,6 +86,8 @@ class FakeDiscord:
                 ch["nsfw"] = body["nsfw"]
             if "default_reaction_emoji" in body:
                 ch["default_reaction_emoji"] = body["default_reaction_emoji"]
+            if "default_auto_archive_duration" in body:
+                ch["default_auto_archive_duration"] = body["default_auto_archive_duration"]
             return httpx.Response(200, json=ch)
         if "/messages/" in path:  # フォーラム投稿の最初のメッセージ
             tid = path.split("/")[2]
@@ -477,3 +486,26 @@ def test_count_reaction_on_event():
     assert not notify.count_reaction(conn, "t-a", "🎉", 1)
     assert not notify.count_reaction(conn, "t-x", "👍", 1)  # 記事の投稿でない
     assert tuple(conn.execute("SELECT likes, dislikes FROM items").fetchone()) == (1, 0)
+
+
+def test_forums_close_posts_after_a_day():
+    from kawarabanya.rss import forums
+
+    fake, client, conn = setup()
+    plan = make_plan(client, {"id": "1", "name": "srv"}, feeds_by_category(conn), "kawarabanya")
+    apply_plan(client, conn, plan, "kawarabanya")
+    forum_ids = {c["id"] for c in fake.channels if c["type"] == GUILD_FORUM and c.get("parent_id") == "10"}
+    assert all(c["default_auto_archive_duration"] == 1440 for c in fake.channels if c["id"] in forum_ids)  # 新規も既存も
+
+    def snowflake(hours_ago):
+        ms = (datetime.now(UTC) - timedelta(hours=hours_ago)).timestamp() * 1000 - forums.DISCORD_EPOCH
+        return str(int(ms) << 22)
+
+    fake.active_threads = [
+        {"id": snowflake(48), "parent_id": "11"},  # 古い投稿
+        {"id": snowflake(48), "parent_id": "11", "last_message_id": snowflake(1)},  # 最近返信があった
+        {"id": snowflake(2), "parent_id": "11"},  # 新しい投稿
+        {"id": snowflake(48), "parent_id": "999"},  # kawarabanya のフォーラムでない
+    ]
+    assert forums.archive_old_posts(client, conn, "1", 24) == 1
+    assert fake.archived == [fake.active_threads[0]["id"]]

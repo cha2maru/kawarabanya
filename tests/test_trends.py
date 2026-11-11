@@ -30,7 +30,8 @@ def test_record_keeps_24_hours():
     trends.record(conn, {"熊本県": 100, "新しい": 500}, now)
     assert trends.load(conn, now) == {"熊本県": 2000, "新しい": 500}
     client = httpx.MockTransport(lambda req: httpx.Response(200, content=RSS))
-    assert trends.fetch(conn, "JP", "ua", transport=client) >= 3
+    # 取った 2 語が、テストの固定日時（now）でためた語に加わる（固定日時の語は実際の今からは古ければ消える）
+    assert trends.fetch(conn, "JP", "ua", transport=client) >= 2
 
 
 def test_digest_puts_buzz_first(tmp_path):

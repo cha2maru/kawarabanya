@@ -30,6 +30,7 @@ description: kawarabanya を CLI で操作する（サイトの追加・削除�
 | この記事のジャンルが違う | `items move <記事の ID> <ジャンル> [--keyword 語]`（別のジャンルへはサブジャンルなしで投稿し直しで、元の投稿は消え 👍 は引き継げないので、先に利用者に確かめる） |
 | この記事を訳して | `items translate <記事の ID>`（日本語以外の記事だけ。数分かかるのでバックグラウンドで実行する） |
 | 投稿のタグを付け直す | `discord retag`（Bot のロールに「スレッドの管理」が要る） |
+| 投稿できない・Boost を求められる（開いているスレッドが 1,000 件に近い） | `discord setup --apply`（投稿が 1 日で閉じる設定に揃える）→ `discord archive`（1 日より前の投稿を閉じる） |
 | 重複した投稿を消す | `discord delete-duplicates`（一覧）→ 消すのは利用者（下の「決まり」） |
 | まとめを消す | `digest --delete [--genre G] [--day YYYY-MM-DD]` → 利用者に実行してもらう |
 | Discord に不調の通知が来た | フィードなら `feeds list --disabled` で原因を見て、直ったら `feeds enable <ID>`。RSSHub なら `docker start rsshub`。定期処理ならログを見る |

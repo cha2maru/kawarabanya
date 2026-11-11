@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 from kawarabanya.core import db
 from kawarabanya.core.discord_api import (
@@ -21,8 +22,12 @@ from kawarabanya.core.discord_api import (
 )
 from kawarabanya.rss.genres import Genre, top_genre
 
+DISCORD_EPOCH = 1420070400000  # スノーフレーク ID の時刻の起点（ミリ秒）
 MAX_TAGS = 20  # フォーラムに付けられるタグの上限
 MAX_TAG_CHARS = 20
+# 投稿（スレッド）が動きのないまま閉じるまでの分。サーバー全体で開いているスレッドは 1,000 件までなので、
+# 1 日 750 件ほど投稿すると 3 日（4320）では上限を超える。閉じた投稿にはリアクションを付けられない
+ARCHIVE_MINUTES = 1440
 
 
 @dataclass
@@ -35,6 +40,7 @@ class PlannedChannel:
     existing_tags: list[dict] = field(default_factory=list)
     nsfw: bool = False  # 既存のフォーラムが年齢制限か
     default_reaction: str | None = None  # 既存のフォーラムの既定のリアクション
+    archive_minutes: int | None = None  # 既存のフォーラムの投稿が閉じるまでの分
     subgenres: dict[str, str] = field(default_factory=dict)  # サブジャンルのパス → 表示名
     description: str = ""
 
@@ -109,6 +115,7 @@ def make_plan(
                 existing_tags=forum.get("available_tags", []) if forum else [],
                 nsfw=bool(forum.get("nsfw")) if forum else False,
                 default_reaction=(forum.get("default_reaction_emoji") or {}).get("emoji_name") if forum else None,
+                archive_minutes=forum.get("default_auto_archive_duration") if forum else None,
                 subgenres={g.path: g.label for g in (genres or {}).values() if g.is_sub and g.top == cat},
                 description=genres[cat].description if genres and cat in genres else "",
             )
@@ -147,6 +154,7 @@ def apply_plan(
                 available_tags=[{"name": n} for n in pc.wanted_tags()],
                 nsfw=nsfw,
                 default_reaction_emoji=DEFAULT_REACTION,
+                default_auto_archive_duration=ARCHIVE_MINUTES,
             )
             pc.channel_id, pc.existing_tags, pc.nsfw = ch["id"], ch.get("available_tags", []), nsfw
             created.append(pc)
@@ -161,6 +169,8 @@ def apply_plan(
             if pc.default_reaction != LIKE_EMOJI:
                 # 一覧から 1 クリックで 👍 できるようにする
                 changes["default_reaction_emoji"] = DEFAULT_REACTION
+            if pc.archive_minutes != ARCHIVE_MINUTES:
+                changes["default_auto_archive_duration"] = ARCHIVE_MINUTES
             if changes:
                 ch = client.request("PATCH", f"/channels/{pc.channel_id}", changes)
                 pc.existing_tags, pc.nsfw = ch.get("available_tags", []), bool(ch.get("nsfw"))
@@ -175,6 +185,23 @@ def apply_plan(
 
         register_webhook(client, conn, pc.category, guild_id, pc.channel_id, pc.name, webhook_name, feed_tags)
     return created
+
+
+def archive_old_posts(client: DiscordClient, conn: sqlite3.Connection, guild_id: str, hours: float) -> int:
+    """ジャンルのフォーラムの開いている投稿のうち、最後の動きから hours 時間たったものを閉じる。閉じた数を返す。
+
+    フォーラムの設定を変えても、すでにある投稿は作ったときの閉じるまでの時間のままなので、これで一度に閉じる。
+    """
+    forum_ids = {r[0] for r in conn.execute("SELECT channel_id FROM discord_channels WHERE category NOT LIKE '#%'")}
+    cutoff = (datetime.now(UTC) - timedelta(hours=hours)).timestamp() * 1000 - DISCORD_EPOCH
+    done = 0
+    for t in client.request("GET", f"/guilds/{guild_id}/threads/active")["threads"]:
+        # スノーフレーク ID の上位ビットは作成時刻。最後のメッセージがなければ投稿の作成時刻
+        last = int(t.get("last_message_id") or t["id"]) >> 22
+        if t.get("parent_id") in forum_ids and last < cutoff:
+            client.request("PATCH", f"/channels/{t['id']}", {"archived": True})
+            done += 1
+    return done
 
 
 def feeds_by_category(conn: sqlite3.Connection, only: list[str] | None = None) -> dict[str, list[db.Feed]]:

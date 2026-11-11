@@ -4,6 +4,7 @@
 
 ## 未リリース
 
+- フォーラムの投稿が 1 日（これまで 3 日）で閉じるようにし（`discord setup --apply` で揃える）、それより前の投稿を閉じる `discord archive` を足す。サーバー全体で開いているスレッドの上限 1,000 件に達して投稿できなくなっていた
 - 要約サーバーのメモリを 9 GB → 4.6 GB に減らす（`scripts/llama-server.sh` で llama-server のプロンプトのキャッシュ `--cache-ram` を切る。`LLAMA_CACHE_RAM` で戻せる）
 - 👍・👎 から好みを学び、まとめの並びに反映する（ジャンル・サブジャンル・見出しと冒頭の語・サイトごと。`[digest] pref_max`・`site_pref_max`・`pref_half_life_days`、`interests` で表示）。上位の最後の 1 枠は好みを除いた点で選ぶ。DB は版 4（`items.dislikes`）
 - フィードの URL の `{days_ago:N}` を取得のたびに N 日前の日付にする（RSSHub の GitHub 検索で「直近 7 日に作られた人気リポジトリ」など）
