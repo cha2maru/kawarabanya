@@ -20,10 +20,13 @@ import httpx
 from discord.ext import tasks
 
 from kawarabanya.bot import assistant
+from kawarabanya.core import chat as chatdb
 from kawarabanya.core import db
 from kawarabanya.core.config import Config
+from kawarabanya.core.discord_api import DISLIKE_EMOJI, LIKE_EMOJI
 from kawarabanya.core.llm import Summarizer
-from kawarabanya.rss import health, notify
+from kawarabanya.core.targets import build_chats
+from kawarabanya.rss import health
 from kawarabanya.rss.pipeline import load_genres_if_any
 
 # Discord のメッセージの上限（2,000 字）に収めるため、コマンドの出力はこの字数で切る
@@ -110,14 +113,14 @@ class Bot(discord.Client):
         self.job_failures[args[0]] = self.job_failures[args[0]] + 1 if rc else 0
 
     def _check_health(self) -> None:
-        """新しく起きた不調を Discord に知らせる（別スレッドで動くので DB はここで開く）。"""
+        """新しく起きた不調をチャットに知らせる（別スレッドで動くので DB はここで開く）。"""
         conn = db.connect(self.db_path)
         try:
             found = health.find_problems(conn, self.cfg.general.rsshub_url)
             for job, count in self.job_failures.items():
                 if count >= JOB_FAILURES:
                     found[f"job:{job}"] = f"定期処理 {job} が {JOB_FAILURES} 回続けて失敗しました。ログを見てください"
-            health.send_alerts(conn, found)
+            health.send_alerts(conn, build_chats(self.cfg), found)
         finally:
             conn.close()
 
@@ -154,7 +157,8 @@ class Bot(discord.Client):
             return
         conn = db.connect(self.db_path)
         try:
-            if notify.count_reaction(conn, str(payload.channel_id), payload.emoji.name or "", delta):
+            kind = {LIKE_EMOJI: chatdb.LIKE, DISLIKE_EMOJI: chatdb.DISLIKE}.get(payload.emoji.name or "", "")
+            if chatdb.count_reaction(conn, "discord", str(payload.channel_id), kind, delta):
                 log.info("リアクション %s %+d: 投稿 %s", payload.emoji.name, delta, payload.channel_id)
         finally:
             conn.close()
@@ -192,7 +196,7 @@ class Bot(discord.Client):
         conn = db.connect(self.db_path)
         try:
             genres = load_genres_if_any(self.cfg) or {}
-            post = assistant.find_post(conn, message.channel.id)  # フォーラムの投稿への返信は、スレッドの中に届く
+            post = assistant.find_post(conn, "discord", str(message.channel.id))  # フォーラムの投稿への返信は、スレッドの中に届く
             async with message.channel.typing():
                 data = (await assistant.interpret(
                     self.summarizer, text, genres, attachment and attachment.filename, post and post["title"]

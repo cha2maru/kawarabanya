@@ -200,3 +200,29 @@ def test_expand_url_days_ago():
     url = "http://rsshub/github/search/created:>{days_ago:7} stars:>300/stars/desc"
     assert expand_url(url, date(2026, 11, 8)) == "http://rsshub/github/search/created:>2026-11-01 stars:>300/stars/desc"
     assert expand_url("https://a.example/rss") == "https://a.example/rss"
+
+
+def test_migration_v5_moves_discord_posts(tmp_path, monkeypatch):
+    from kawarabanya.core import db
+
+    path = tmp_path / "v4.db"
+    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:4])
+    conn = db.connect(path)
+    fid = db.insert_feed(conn, "https://a.example/rss", "A", None, "tech")
+    with conn:
+        conn.execute("INSERT INTO discord_channels (category, guild_id, channel_id, channel_name, webhook_url, tags, created_at)"
+                     " VALUES ('tech', 'g1', 'c1', 'tech', 'https://hook', '{}', 'x')")
+        conn.execute("INSERT INTO items (id, feed_id, key, title, fetched_at, status, notified_at, discord_thread_id,"
+                     " likes, dislikes, likes_checked_at) VALUES (1, ?, 'k', 't', 'f', 'notified', 'n', 'th1', 2, 1, 'c')",
+                     (fid,))
+        conn.execute("INSERT INTO digests (genre, day, thread_id, created_at) VALUES ('tech', 'd', 'm1', 'x')")
+    conn.close()
+    monkeypatch.undo()
+    conn = db.connect(path)
+    assert tuple(conn.execute("SELECT platform, key, webhook_url, guild_id FROM channels").fetchone()) == (
+        "discord", "tech", "https://hook", "g1")
+    assert tuple(conn.execute("SELECT item_id, platform, ref, url, likes, dislikes, checked_at FROM posts").fetchone()) == (
+        1, "discord", "th1", "https://discord.com/channels/g1/th1", 2, 1, "c")
+    assert tuple(conn.execute("SELECT likes, dislikes FROM items").fetchone()) == (2, 1)  # サービスごとの合計として残す
+    assert tuple(conn.execute("SELECT platform, genre, ref FROM digests").fetchone()) == ("discord", "tech", "m1")
+    assert "discord_thread_id" not in {r["name"] for r in conn.execute("PRAGMA table_info(items)")}

@@ -17,9 +17,10 @@ def setup():
     t = (now - timedelta(hours=1)).isoformat(timespec="seconds")
 
     def add(i, feed, title, priority=0.5, likes=0, dislikes=0):
-        conn.execute("INSERT INTO items (id, feed_id, key, title, fetched_at, notified_at, status, priority, likes, dislikes,"
-                     " discord_thread_id) VALUES (?, ?, ?, ?, ?, ?, 'notified', ?, ?, ?, ?)",
-                     (i, feed, str(i), title, t, t, priority, likes, dislikes, f"t{i}"))
+        conn.execute("INSERT INTO items (id, feed_id, key, title, fetched_at, notified_at, status, priority, likes, dislikes)"
+                     " VALUES (?, ?, ?, ?, ?, ?, 'notified', ?, ?, ?)", (i, feed, str(i), title, t, t, priority, likes, dislikes))
+        conn.execute("INSERT INTO posts (item_id, platform, ref, url, created_at) VALUES (?, 'discord', ?, ?, ?)",
+                     (i, f"t{i}", f"https://d/{i}", t))
     return conn, a, b, now, add
 
 
@@ -43,7 +44,7 @@ def test_digest_prefs_are_capped():
     add(2, b, "大事件", priority=0.9)
     add(3, a, "Cloudflareの値上げ", priority=0.3)
     learned = prefs.learn(conn, now, 60)
-    ranked = digest.collect(conn, "tech", now - timedelta(hours=2), learned=learned)
+    ranked = digest.collect(conn, "discord", "tech", now - timedelta(hours=2), learned=learned)
     # 好みは +0.3 まで（特徴 0.2 + サイト 0.1）なので、重要度 0.9 の記事は抜けない
     assert [i.title for i in ranked] == ["大事件", "Cloudflareの値上げ", "Cloudflareの障害"]
     assert [i.base for i in ranked] == [0.9, 0.3, 0.1]

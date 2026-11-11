@@ -3,7 +3,8 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
-from kawarabanya.core import db, discord_api
+from kawarabanya.core import chat, db, discord_api
+from kawarabanya.core.chat import DIGEST_KEY
 from kawarabanya.core.discord_api import GUILD_FORUM, DiscordClient, channel_name
 from kawarabanya.rss import notify
 from kawarabanya.rss.forums import apply_plan, feeds_by_category, make_plan
@@ -112,6 +113,16 @@ def ago(**kw) -> str:
     return (datetime.now(UTC) - timedelta(**kw)).isoformat(timespec="seconds")
 
 
+def chats(fake):
+    t = httpx.MockTransport(fake.handler)
+    return [discord_api.DiscordChat(DiscordClient("TOKEN", transport=t), transport=t)]
+
+
+def post(conn, item_id, ref):
+    conn.execute("INSERT OR REPLACE INTO posts (item_id, platform, ref, url, created_at) VALUES (?, 'discord', ?, ?, ?)",
+                 (item_id, ref, f"https://discord.com/channels/1/{ref}", ago(hours=1)))
+
+
 def setup():
     fake = FakeDiscord()
     client = DiscordClient("TOKEN", transport=httpx.MockTransport(fake.handler))
@@ -160,7 +171,7 @@ def test_plan_and_apply_forums(tmp_path):
     assert tech_ch["available_tags"][0]["id"] == "t1"  # 残すタグは id を保つ
     assert tech_ch["nsfw"] is True  # 既存のフォーラムも年齢制限にそろえる
 
-    rows = {r["category"]: r for r in conn.execute("SELECT * FROM discord_channels")}
+    rows = {r["key"]: r for r in conn.execute("SELECT * FROM channels")}
     assert rows["tech"]["webhook_url"] == "https://discord.com/api/webhooks/w11/k11"  # 既存を再利用
     assert set(json.loads(rows["tech"]["tags"])) == {"sub:tech/ai", "sub:tech/security"}
 
@@ -187,9 +198,7 @@ def test_notify_posts_forum_threads(tmp_path):
         db.insert_item(conn, feed_id, "c", "https://c", "既読", None, "seen")
         db.insert_item(conn, feed_id, "d", "https://d", "古い記事", ago(days=4), "saved")
 
-    stats = notify.notify_pending(
-        conn, limit=10, max_age_days=3, transport=httpx.MockTransport(fake.handler), interval=0
-    )
+    stats = notify.notify_pending(conn, chats(fake), limit=10, max_age_days=3, interval=0)
     assert (stats.sent, stats.failed, stats.stale) == (2, 0, 1)
     p1, p2 = fake.posts
     assert p1["thread_name"] == "記事1"
@@ -204,7 +213,7 @@ def test_notify_posts_forum_threads(tmp_path):
 
     rows = dict(conn.execute("SELECT key, status FROM items").fetchall())
     assert rows == {"a": "notified", "b": "notified", "c": "seen", "d": "stale"}
-    again = notify.notify_pending(conn, limit=10, max_age_days=3, transport=httpx.MockTransport(fake.handler))
+    again = notify.notify_pending(conn, chats(fake), limit=10, max_age_days=3)
     assert (again.sent, again.stale) == (0, 0)
 
 
@@ -213,7 +222,7 @@ def test_notify_limit_and_missing_channel():
     feed_id = db.list_feeds(conn)[0].id
     with conn:
         db.insert_item(conn, feed_id, "x", "https://x", "x", None, "saved")
-    stats = notify.notify_pending(conn, limit=10, max_age_days=3)
+    stats = notify.notify_pending(conn, [discord_api.DiscordChat()], limit=10, max_age_days=3)
     assert stats.no_channel == 1 and stats.sent == 0
 
 
@@ -241,7 +250,7 @@ def test_subgenre_tags(tmp_path):
         db.insert_item(conn, fixed, "k", "https://w.example/1", "固定", ago(hours=2), "saved")
         i = db.insert_item(conn, top, "m", "https://d.example/1", "判定", ago(hours=1), "saved")
         db.update_item(conn, i, subgenre="news/world")
-    notify.notify_pending(conn, limit=5, max_age_days=3, transport=httpx.MockTransport(fake.handler), interval=0)
+    notify.notify_pending(conn, chats(fake), limit=5, max_age_days=3, interval=0)
     [tag] = [t["id"] for t in forum["available_tags"]]
     assert [p["applied_tags"] for p in fake.posts] == [[tag], [tag]]
 
@@ -258,14 +267,15 @@ def test_default_reaction_and_like_sync():
         ids = {}
         for key, tid in [("a", "t-a"), ("b", "t-b"), ("gone", "t-gone")]:
             ids[key] = db.insert_item(conn, feed_id, key, None, key, ago(hours=1), "notified")
-            db.update_item(conn, ids[key], discord_thread_id=tid, notified_at=ago(hours=1))
+            db.update_item(conn, ids[key], notified_at=ago(hours=1))
+            post(conn, ids[key], tid)
     fake.likes = {"t-a": 2, "t-b": 0}
 
-    assert notify.sync_likes(conn, client, interval_hours=6) == 3
+    assert notify.sync_likes(conn, chats(fake), interval_hours=6) == 3
     rows = conn.execute("SELECT key, likes, dislikes FROM items WHERE key IN ('a','b','gone')").fetchall()
     assert {r[0]: (r[1], r[2]) for r in rows} == {"a": (2, 1), "b": (0, 1), "gone": (None, None)}
-    assert notify.sync_likes(conn, client, interval_hours=6) == 0  # 6 時間以内は再確認しない
-    assert notify.sync_likes(conn, client, interval_hours=0) == 3
+    assert notify.sync_likes(conn, chats(fake), interval_hours=6) == 0  # 6 時間以内は再確認しない
+    assert notify.sync_likes(conn, chats(fake), interval_hours=0) == 3
 
 
 def test_digest_render_and_post(tmp_path):
@@ -281,15 +291,16 @@ def test_digest_render_and_post(tmp_path):
     with conn:
         for key, title, prio, likes in [("a", "小ネタ", 0.1, None), ("b", "大事件 [速報]", 0.95, 2), ("c", "判定なし", None, None)]:
             iid = db.insert_item(conn, feed_id, key, None, title, ago(hours=2), "notified")
-            db.update_item(conn, iid, notified_at=ago(hours=2), discord_thread_id=f"t-{key}", priority=prio, likes=likes)
+            db.update_item(conn, iid, notified_at=ago(hours=2), priority=prio, likes=likes)
+            post(conn, iid, f"t-{key}")
 
     fake.channels.append({"id": "50", "type": 0, "name": "ニュース", "parent_id": "999"})  # kawarabanya の外
     ch = discord_api.find_text_channel(client, "1", "ニュース")
-    discord_api.register_webhook(client, conn, discord_api.DIGEST_KEY, "1", ch["id"], ch["name"], "kawarabanya")
+    discord_api.register_webhook(client, conn, DIGEST_KEY, "1", ch["id"], ch["name"], "kawarabanya")
 
     now = datetime.now(UTC)
-    content = asyncio.run(digest.post_digest(conn, None, "tech", label="テック", now=now, top=2, window_hours=24,
-                                               transport=httpx.MockTransport(fake.handler)))
+    [dc] = chats(fake)
+    content = asyncio.run(digest.post_digest(conn, dc, None, "tech", label="テック", now=now, top=2, window_hours=24))
     lines = content.splitlines()
     assert lines[0].startswith("## 📰 テック ") and lines[0].endswith("のまとめ（3 件）")
     assert lines[1] == "**注目の記事**"
@@ -297,36 +308,35 @@ def test_digest_render_and_post(tmp_path):
     assert lines[3] == "- [小ネタ](https://discord.com/channels/1/t-a)"
     assert lines[4] == "ほか 1 件"
     assert "thread_name" not in fake.posts[-1]  # テキストチャンネルへの普通のメッセージ
-    t = httpx.MockTransport(fake.handler)
     # 定時（due_after）より後に投稿済みなら投稿しない。前回のまとめ以降の記事がなければ、指示されても投稿しない
     slot = now - timedelta(minutes=10)
-    assert asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24, due_after=slot,
-                                          transport=t)) is None
-    assert asyncio.run(digest.post_digest(conn, None, "tech", now=now + timedelta(minutes=1), top=2,
-                                          window_hours=24, transport=t)) is None
-    [(mid, day)] = conn.execute("SELECT thread_id, day FROM digests").fetchall()
+    assert asyncio.run(digest.post_digest(conn, dc, None, "tech", now=now, top=2, window_hours=24,
+                                          due_after=slot)) is None
+    assert asyncio.run(digest.post_digest(conn, dc, None, "tech", now=now + timedelta(minutes=1), top=2,
+                                          window_hours=24)) is None
+    [(mid, day)] = conn.execute("SELECT ref, day FROM digests").fetchall()
 
     # 更新: 重要度が変わったら並びが変わって書き換わる（前のまとめがないので window_hours 分）
     with conn:
         conn.execute("UPDATE items SET priority = 0.99 WHERE key = 'a'")
-    updated = asyncio.run(digest.post_digest(conn, None, "tech", now=now, top=2, window_hours=24,
-                                             update=True, transport=t))
+    updated = asyncio.run(digest.post_digest(conn, dc, None, "tech", now=now, top=2, window_hours=24, update=True))
     assert fake.messages[mid]["content"] == updated and "- [小ネタ]" in updated.splitlines()[2]
-    assert asyncio.run(digest.post_digest(conn, None, "other", now=now, top=2, window_hours=24,
-                                          update=True, transport=t)) is None  # 未投稿は更新しない
+    assert asyncio.run(digest.post_digest(conn, dc, None, "other", now=now, top=2, window_hours=24,
+                                          update=True)) is None  # 未投稿は更新しない
 
     # 次の定時: 前回のまとめ以降に投稿した記事だけ
     later = now + timedelta(hours=12)
     with conn:
         iid = db.insert_item(conn, feed_id, "d", None, "新着", ago(hours=0), "notified")
-        db.update_item(conn, iid, notified_at=(now + timedelta(hours=1)).isoformat(timespec="seconds"), discord_thread_id="t-d")
-    nxt = asyncio.run(digest.post_digest(conn, None, "tech", now=later, top=2, window_hours=24,
-                                         due_after=later - timedelta(minutes=5), transport=t))
+        db.update_item(conn, iid, notified_at=(now + timedelta(hours=1)).isoformat(timespec="seconds"))
+        post(conn, iid, "t-d")
+    nxt = asyncio.run(digest.post_digest(conn, dc, None, "tech", now=later, top=2, window_hours=24,
+                                         due_after=later - timedelta(minutes=5)))
     assert "（1 件）" in nxt.splitlines()[0] and "新着" in nxt
 
     # 削除: メッセージと記録が消える
-    assert digest.delete_digest(conn, "tech", day, transport=t)
-    assert mid not in fake.messages and not digest.delete_digest(conn, "tech", day, transport=t)
+    assert digest.delete_digest(conn, dc, "tech", day)
+    assert mid not in fake.messages and not digest.delete_digest(conn, dc, "tech", day)
 
     # 投稿時刻: 直近の times（ローカル時刻）
     def local(*args):
@@ -340,17 +350,17 @@ def test_digest_render_and_post(tmp_path):
     since = datetime.now(UTC) - timedelta(hours=24)
     with conn:
         conn.execute("UPDATE items SET subgenre = 'tech/sports' WHERE key = 'b'")
-    assert {i.title for i in digest.collect(conn, "tech", since, {"tech/sports": "low"})} == {"小ネタ", "判定なし", "新着"}
-    assert digest.collect(conn, "tech", since, {"tech": "mute"}) == []
+    assert {i.title for i in digest.collect(conn, "discord", "tech", since, {"tech/sports": "low"})} == {"小ネタ", "判定なし", "新着"}
+    assert digest.collect(conn, "discord", "tech", since, {"tech": "mute"}) == []
     with conn:  # 好きなサブジャンルの記事は、重要度に LIKE_BONUS を足して上に寄せる
         conn.execute("UPDATE items SET subgenre = 'tech/ai', priority = 0.8 WHERE key = 'c'")
-    assert next(i.title for i in digest.collect(conn, "tech", since)) == "小ネタ"  # 0.99
-    assert next(i.title for i in digest.collect(conn, "tech", since, {"tech/ai": "like"})) == "判定なし"  # 0.8 + 0.3
+    assert next(i.title for i in digest.collect(conn, "discord", "tech", since)) == "小ネタ"  # 0.99
+    assert next(i.title for i in digest.collect(conn, "discord", "tech", since, {"tech/ai": "like"})) == "判定なし"  # 0.8 + 0.3
 
-    many = [digest.DigestItem(f"記事{i}" * 20, f"t{i}", 0.5, None) for i in range(50)]
-    text = digest.render(["話題 A", "話題 B"], many, "1", top=50)
+    many = [digest.DigestItem(f"記事{i}" * 20, f"https://discord.com/channels/1/t{i}", 0.5, None) for i in range(50)]
+    text = digest.render(["話題 A", "話題 B"], many, top=50)
     assert len(text) <= digest.MAX_CONTENT and text.endswith("件") and text.startswith("**話題**\n- 話題 A\n- 話題 B\n")
-    assert digest.render([], many[:1], "1", top=1).startswith("**注目の記事**")
+    assert digest.render([], many[:1], top=1).startswith("**注目の記事**")
 
 
 def test_notify_writes_discord_link(tmp_path):
@@ -364,7 +374,7 @@ def test_notify_writes_discord_link(tmp_path):
         iid = db.insert_item(conn, feed_id, "a", "https://a", "x", ago(hours=1), "saved")
         db.update_item(conn, iid, md_path=str(md))
     fake.rate_limited_once = True
-    notify.notify_pending(conn, limit=5, max_age_days=3, transport=httpx.MockTransport(fake.handler), interval=0)
+    notify.notify_pending(conn, chats(fake), limit=5, max_age_days=3, interval=0)
     assert 'discord: "https://discord.com/channels/1/thread1"' in md.read_text()
 
 
@@ -378,28 +388,29 @@ def test_retag_posts(tmp_path):
     feed_id = db.list_feeds(conn, category="tech")[0].id
     with conn:
         a = db.insert_item(conn, feed_id, "a", None, "判定済み", ago(hours=1), "notified")
-        db.update_item(conn, a, discord_thread_id="thread-a", subgenre="tech/security")
+        db.update_item(conn, a, subgenre="tech/security")
+        post(conn, a, "thread-a")
         b = db.insert_item(conn, feed_id, "b", None, "未判定・本文なし", ago(hours=1), "notified")
-        db.update_item(conn, b, discord_thread_id="thread-b")
-    changed, total = asyncio.run(notify.retag_posts(conn, client, None, genres))
+        post(conn, b, "thread-b")
+    changed, total = asyncio.run(notify.retag_posts(conn, chats(fake), None, genres))
     sec = next(t["id"] for c in fake.channels if c["id"] == "11" for t in c["available_tags"] if t["name"] == "セキュリティ")
     assert (changed, total) == (2, 2)
     assert fake.thread_tags == {"thread-a": [sec], "thread-b": []}  # 古いフィード名のタグは外れる
 
 
 def test_delete_duplicate_posts():
-    fake, client, conn = setup()
+    fake, _client, conn = setup()
     feed_id = db.list_feeds(conn)[0].id
     with conn:
         for key, status in [("a", "notified"), ("b", "duplicate"), ("c", "duplicate")]:
             iid = db.insert_item(conn, feed_id, key, None, key, ago(hours=1), status)
-            db.update_item(conn, iid, discord_thread_id=f"thread-{key}")
+            post(conn, iid, f"thread-{key}")
     fake.deleted.append("/channels/thread-c")  # すでに消えている
-    assert len(notify.delete_duplicate_posts(conn, client)) == 2 and fake.deleted == ["/channels/thread-c"]
-    assert len(notify.delete_duplicate_posts(conn, client, apply=True)) == 2
+    assert len(notify.delete_duplicate_posts(conn, chats(fake))) == 2 and fake.deleted == ["/channels/thread-c"]
+    assert len(notify.delete_duplicate_posts(conn, chats(fake), apply=True)) == 2
     assert fake.deleted == ["/channels/thread-c", "/channels/thread-b"]
-    assert notify.delete_duplicate_posts(conn, client) == []
-    assert conn.execute("SELECT discord_thread_id FROM items WHERE key = 'a'").fetchone()[0] == "thread-a"
+    assert notify.delete_duplicate_posts(conn, chats(fake)) == []
+    assert conn.execute("SELECT ref FROM posts").fetchall()[0][0] == "thread-a"
 
 
 def test_pending_items_follow_item_genre(tmp_path):
@@ -411,14 +422,14 @@ def test_pending_items_follow_item_genre(tmp_path):
     with conn:
         a = db.insert_item(conn, feed_id, "a", "https://a", "映画の記事", ago(hours=1), "saved")
         db.update_item(conn, a, subgenre="culture/movie")  # tech のフィードでも、LLM が別のジャンルに振り分けた
-    assert notify.pending_items(conn, "culture") == ([], 1)  # culture のフォーラムへ（テストでは未作成なので送り先なし）
-    assert notify.pending_items(conn, "tech") == ([], 0)
+    assert notify.pending_items(conn, ["discord"], "culture") == ([], 1)  # culture のフォーラムへ（テストでは未作成なので送り先なし）
+    assert notify.pending_items(conn, ["discord"], "tech") == ([], 0)
 
     # ミュートのジャンルの記事は投稿せず muted にする
     with conn:
         m = db.insert_item(conn, feed_id, "m", "https://m", "ミュートの記事", ago(hours=1), "saved")
         db.update_item(conn, m, subgenre="tech/ai")
-    stats = notify.notify_pending(conn, limit=5, max_age_days=3, levels={"tech/ai": "mute"}, interval=0)
+    stats = notify.notify_pending(conn, [discord_api.DiscordChat()], limit=5, max_age_days=3, levels={"tech/ai": "mute"}, interval=0)
     assert stats.muted == 1 and stats.sent == 0
     assert conn.execute("SELECT status FROM items WHERE id = ?", (m,)).fetchone()[0] == "muted"
 
@@ -434,43 +445,44 @@ def test_feed_interest_down_and_mute(tmp_path):
     with conn:
         for key, fid, prio in [("x", a, 0.9), ("y", b, 0.7)]:
             iid = db.insert_item(conn, fid, key, None, key, ago(hours=1), "notified")
-            db.update_item(conn, iid, notified_at=ago(hours=1), discord_thread_id=f"t-{key}", priority=prio)
+            db.update_item(conn, iid, notified_at=ago(hours=1), priority=prio)
+            post(conn, iid, f"t-{key}")
     since = datetime.now(UTC) - timedelta(hours=24)
-    assert [i.title for i in digest.collect(conn, "tech", since)] == ["x", "y"]
+    assert [i.title for i in digest.collect(conn, "discord", "tech", since)] == ["x", "y"]
     db.set_option(conn, a, "interest", "down")  # サイトごとの低め: 0.9 - 0.3 < 0.7
-    assert [i.title for i in digest.collect(conn, "tech", since)] == ["y", "x"]
+    assert [i.title for i in digest.collect(conn, "discord", "tech", since)] == ["y", "x"]
     db.set_option(conn, a, "interest", "low")
-    assert [i.title for i in digest.collect(conn, "tech", since, {"tech": "like"})] == ["y"]  # サイトの設定が優先
+    assert [i.title for i in digest.collect(conn, "discord", "tech", since, {"tech": "like"})] == ["y"]  # サイトの設定が優先
 
     with conn:
         db.insert_item(conn, a, "m", "https://m", "ミュート", ago(hours=1), "saved")
     db.set_option(conn, a, "interest", "mute")
-    assert notify.notify_pending(conn, limit=5, max_age_days=3, interval=0).muted == 1
+    assert notify.notify_pending(conn, [discord_api.DiscordChat()], limit=5, max_age_days=3, interval=0).muted == 1
 
 
 def test_health_alerts_once_and_rearm():
     from kawarabanya.rss import health
 
     fake, client, conn = setup()
-    t = httpx.MockTransport(fake.handler)
+    t = chats(fake)
     feed_id = db.list_feeds(conn)[0].id
     with conn:
         db.set_enabled(conn, feed_id, False, "fail_x5:forbidden")
         conn.execute("UPDATE feeds SET last_error = 'HTTP 403' WHERE id = ?", (feed_id,))
     found = health.find_problems(conn)
     assert list(found) == [f"feed:{feed_id}"] and "HTTP 403" in found[f"feed:{feed_id}"]
-    assert health.send_alerts(conn, found, t) == []  # 送り先がまだない → 覚えず、次に送る
+    assert health.send_alerts(conn, t, found) == []  # 送り先がまだない → 覚えず、次に送る
 
     fake.channels.append({"id": "50", "type": 0, "name": "ニュース", "parent_id": "999"})
-    discord_api.register_webhook(client, conn, discord_api.DIGEST_KEY, "1", "50", "ニュース", "kawarabanya")
-    assert health.send_alerts(conn, found, t) == [f"feed:{feed_id}"]
+    discord_api.register_webhook(client, conn, DIGEST_KEY, "1", "50", "ニュース", "kawarabanya")
+    assert health.send_alerts(conn, t, found) == [f"feed:{feed_id}"]
     assert "取得を止めました" in fake.posts[-1]["content"] and fake.posts[-1]["allowed_mentions"] == {"parse": []}
     count = len(fake.posts)
-    assert health.send_alerts(conn, found, t) == []  # 同じ不調は送らない
+    assert health.send_alerts(conn, t, found) == []  # 同じ不調は送らない
     assert len(fake.posts) == count
 
-    assert health.send_alerts(conn, {}, t) == []  # 直ったら忘れる
-    assert health.send_alerts(conn, found, t) == [f"feed:{feed_id}"]  # 再発したらまた送る
+    assert health.send_alerts(conn, t, {}) == []  # 直ったら忘れる
+    assert health.send_alerts(conn, t, found) == [f"feed:{feed_id}"]  # 再発したらまた送る
 
 
 def test_count_reaction_on_event():
@@ -478,13 +490,14 @@ def test_count_reaction_on_event():
     feed_id = db.insert_feed(conn, "https://a.example/rss", "A", None, "tech")
     with conn:
         iid = db.insert_item(conn, feed_id, "a", None, "a", ago(hours=1), "notified")
-        db.update_item(conn, iid, discord_thread_id="t-a", likes=None)
-    assert notify.count_reaction(conn, "t-a", "👍", 1)
-    assert notify.count_reaction(conn, "t-a", "👎", 1)
-    assert notify.count_reaction(conn, "t-a", "👎", -1)
-    assert notify.count_reaction(conn, "t-a", "👎", -1)  # 0 より下げない
-    assert not notify.count_reaction(conn, "t-a", "🎉", 1)
-    assert not notify.count_reaction(conn, "t-x", "👍", 1)  # 記事の投稿でない
+        post(conn, iid, "t-a")
+    assert chat.count_reaction(conn, "discord", "t-a", chat.LIKE, 1)
+    assert chat.count_reaction(conn, "discord", "t-a", chat.DISLIKE, 1)
+    assert chat.count_reaction(conn, "discord", "t-a", chat.DISLIKE, -1)
+    assert chat.count_reaction(conn, "discord", "t-a", chat.DISLIKE, -1)  # 0 より下げない
+    assert not chat.count_reaction(conn, "discord", "t-a", "", 1)  # 👍・👎 以外
+    assert not chat.count_reaction(conn, "discord", "t-x", chat.LIKE, 1)  # 記事の投稿でない
+    assert not chat.count_reaction(conn, "slack", "t-a", chat.LIKE, 1)  # 別のサービス
     assert tuple(conn.execute("SELECT likes, dislikes FROM items").fetchone()) == (1, 0)
 
 

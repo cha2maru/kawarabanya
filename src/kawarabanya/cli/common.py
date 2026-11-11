@@ -8,7 +8,9 @@ import unicodedata
 from pathlib import Path
 
 from kawarabanya.core import db, discord_api
+from kawarabanya.core.chat import Chat
 from kawarabanya.core.config import Config
+from kawarabanya.core.targets import build_chats
 from kawarabanya.rss import genres
 from kawarabanya.rss.sources.check import Status
 
@@ -54,6 +56,11 @@ def _discord_client(cfg: Config) -> discord_api.DiscordClient:
     if not token:
         raise ValueError(TOKEN_HELP)
     return discord_api.DiscordClient(token)
+
+def _chats(cfg: Config) -> list[Chat]:
+    """[chat] targets のチャット（core/targets.py）。"""
+    return build_chats(cfg)
+
 
 def _load_genres(cfg: Config) -> dict[str, genres.Genre] | None:
     """genres.toml を読む。ファイルがなければ None。"""

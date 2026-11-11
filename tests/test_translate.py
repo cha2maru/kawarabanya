@@ -41,8 +41,9 @@ def item(conn, tmp_path, title, body):
     fid = db.insert_feed(conn, "https://a.example/rss", "A", None, "tech")
     md = tmp_path / "a.md"
     md.write_text(f"---\ntitle: x\n---\n# {title}\n\n{body}\n", encoding="utf-8")
-    conn.execute("INSERT INTO items (id, feed_id, key, title, fetched_at, status, md_path, discord_thread_id)"
-                 " VALUES (1, ?, 'k', ?, 'x', 'notified', ?, '55')", (fid, title, str(md)))
+    conn.execute("INSERT INTO items (id, feed_id, key, title, fetched_at, status, md_path)"
+                 " VALUES (1, ?, 'k', ?, 'x', 'notified', ?)", (fid, title, str(md)))
+    conn.execute("INSERT INTO posts (item_id, platform, ref, created_at) VALUES (1, 'discord', '55', 'x')")
     return md
 
 
@@ -55,8 +56,8 @@ def test_foreign_article_is_summarized_and_title_translated(tmp_path):
     assert result == "summarized"  # 重要度が低くても要約する
     row = conn.execute("SELECT title_ja, summary FROM items").fetchone()
     assert tuple(row) == ("訳:Three new ", "日本語の要約")
-    p = notify.Pending(1, 1, "A", "tech", None, "Three new apps", None, None, "x", None, None, "w", None, {}, "新しいアプリ")
-    assert notify.build_payload(p)["thread_name"] == "新しいアプリ（Three new apps）"
+    p = notify.Pending(1, 1, "A", "tech", None, "Three new apps", None, None, "x", None, None, {}, "新しいアプリ")
+    assert p.article().title == "新しいアプリ（Three new apps）"
 
 
 def test_one_word_title_is_not_translated(tmp_path):
@@ -76,12 +77,15 @@ def test_translate_post(tmp_path):
         def request(self, method, path, json=None):
             posted.append((method, path, json["content"]))
 
+    from kawarabanya.core.discord_api import DiscordChat
+
+    chats = [DiscordChat(Client())]
     llm = FakeLLM()
-    msg = asyncio.run(notify.translate_post(conn, Client(), llm, 1))
+    msg = asyncio.run(notify.translate_post(conn, chats, llm, 1))
     assert "スレッドに 1 通" in msg
     assert "http://x" not in llm.translated[0]  # 画像とリンク先は渡さない
     assert md.with_suffix(".ja.md").read_text(encoding="utf-8").startswith("# Hello world news")
     assert posted[0][:2] == ("POST", "/channels/55/messages")
     md.write_text("---\n---\n# 日本語\n\nこれは日本語の記事です。\n", encoding="utf-8")
     with pytest.raises(ValueError):
-        asyncio.run(notify.translate_post(conn, Client(), llm, 1))
+        asyncio.run(notify.translate_post(conn, chats, llm, 1))

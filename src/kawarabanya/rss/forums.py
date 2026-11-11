@@ -192,7 +192,7 @@ def archive_old_posts(client: DiscordClient, conn: sqlite3.Connection, guild_id:
 
     フォーラムの設定を変えても、すでにある投稿は作ったときの閉じるまでの時間のままなので、これで一度に閉じる。
     """
-    forum_ids = {r[0] for r in conn.execute("SELECT channel_id FROM discord_channels WHERE category NOT LIKE '#%'")}
+    forum_ids = {r[0] for r in conn.execute("SELECT channel_id FROM channels WHERE platform = 'discord' AND key NOT LIKE '#%'")}
     cutoff = (datetime.now(UTC) - timedelta(hours=hours)).timestamp() * 1000 - DISCORD_EPOCH
     done = 0
     for t in client.request("GET", f"/guilds/{guild_id}/threads/active")["threads"]:

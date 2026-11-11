@@ -127,11 +127,66 @@ def _v4(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE items ADD COLUMN dislikes INTEGER")
 
 
+def _v5(conn: sqlite3.Connection) -> None:
+    """版 5: Discord と Slack の両対応。送り先（channels）・投稿（posts）・まとめ（digests）をサービスごとにする。
+
+    discord_channels → channels、items.discord_thread_id・likes・dislikes・likes_checked_at → posts
+    （items.likes・dislikes はサービスごとの数の合計として残す）、digests に platform を足す。
+    """
+    conn.executescript("""
+CREATE TABLE channels (
+    platform TEXT NOT NULL,     -- discord / slack
+    key TEXT NOT NULL,          -- ジャンル、または #digest・#schedule
+    channel_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    webhook_url TEXT,           -- Discord だけ
+    guild_id TEXT,              -- Discord のサーバー・Slack のワークスペース
+    tags TEXT,                  -- JSON: {"sub:<サブジャンル>": Discord のタグ ID・Slack のラベル}
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (platform, key)
+);
+INSERT INTO channels SELECT 'discord', category, channel_id, channel_name, webhook_url, guild_id, tags, created_at
+    FROM discord_channels;
+CREATE TABLE posts (
+    item_id INTEGER NOT NULL REFERENCES items(id),
+    platform TEXT NOT NULL,
+    ref TEXT NOT NULL,          -- Discord はスレッド ID、Slack は "チャンネル/ts"
+    url TEXT,
+    likes INTEGER,
+    dislikes INTEGER,
+    checked_at TEXT,            -- 👍・👎 を最後に数え直した時刻
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (item_id, platform)
+);
+CREATE INDEX posts_ref ON posts (platform, ref);
+INSERT INTO posts
+    SELECT i.id, 'discord', i.discord_thread_id,
+        'https://discord.com/channels/' || (SELECT guild_id FROM discord_channels LIMIT 1) || '/' || i.discord_thread_id,
+        i.likes, i.dislikes, i.likes_checked_at, COALESCE(i.notified_at, i.fetched_at)
+    FROM items i WHERE i.discord_thread_id IS NOT NULL;
+DROP TABLE discord_channels;
+ALTER TABLE items DROP COLUMN discord_thread_id;
+ALTER TABLE items DROP COLUMN likes_checked_at;
+CREATE TABLE digests_new (
+    platform TEXT NOT NULL,
+    genre TEXT NOT NULL,
+    day TEXT NOT NULL,
+    ref TEXT,                   -- 投稿したメッセージの ID
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (platform, genre, day)
+);
+INSERT INTO digests_new SELECT 'discord', genre, day, thread_id, created_at FROM digests;
+DROP TABLE digests;
+ALTER TABLE digests_new RENAME TO digests;
+""")
+
+
 MIGRATIONS: list[tuple[str, Callable[[sqlite3.Connection], None]]] = [
     ("テーブルの作成（0.1）", _v1),
     ("見出しの訳の列（items.title_ja）", _v2),
     ("予定のテーブル（events）", _v3),
     ("👎 の数の列（items.dislikes）", _v4),
+    ("Discord と Slack の両対応（channels・posts・digests.platform）", _v5),
 ]
 
 

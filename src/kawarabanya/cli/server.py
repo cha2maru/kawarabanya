@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from kawarabanya.cli.common import _discord_client, _fit, _load_genres, _open_db
+from kawarabanya.cli.common import _chats, _discord_client, _fit, _load_genres, _open_db
+from kawarabanya.core import chat as chatdb
 from kawarabanya.core import discord_api
+from kawarabanya.core.chat import DIGEST_KEY, SCHEDULE_KEY, Article
 from kawarabanya.core.config import Config
 from kawarabanya.rss import forums
 
@@ -86,21 +88,21 @@ def cmd_discord_setup(cfg: Config, args: argparse.Namespace) -> int:
         print(f"未使用のフォーラムを {len(plan.orphans)} 件削除しました")
     if digest_ch:
         discord_api.register_webhook(
-            client, conn, discord_api.DIGEST_KEY, guild["id"], digest_ch["id"], digest_ch["name"], cfg.discord.webhook_name
+            client, conn, DIGEST_KEY, guild["id"], digest_ch["id"], digest_ch["name"], cfg.discord.webhook_name
         )
     if cfg.schedule.enabled and schedule_ch is None:
         schedule_ch = discord_api.create_private_text_channel(client, guild["id"], cfg.schedule.channel)
     if schedule_ch:
         discord_api.register_webhook(
-            client, conn, discord_api.SCHEDULE_KEY, guild["id"], schedule_ch["id"], schedule_ch["name"],
+            client, conn, SCHEDULE_KEY, guild["id"], schedule_ch["id"], schedule_ch["name"],
             cfg.discord.webhook_name,
         )
     if genre_defs and not args.categories:
         # ジャンルに対応しなくなった送り先を消す（未割り当てのフィードが古いフォーラムに投稿されないように）
-        names = [pc.category for pc in plan.channels] + [discord_api.DIGEST_KEY, discord_api.SCHEDULE_KEY]
+        names = [pc.category for pc in plan.channels] + [DIGEST_KEY, SCHEDULE_KEY]
         with conn:
             conn.execute(
-                f"DELETE FROM discord_channels WHERE category NOT IN ({','.join('?' * len(names))})", names
+                f"DELETE FROM channels WHERE platform = 'discord' AND key NOT IN ({','.join('?' * len(names))})", names
             )
     print(f"\nフォーラムを {len(created)} 件作成し、{len(plan.channels)} 件の Webhook を登録しました")
     return 0
@@ -114,11 +116,9 @@ def cmd_discord_archive(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 def cmd_discord_channels(cfg: Config, args: argparse.Namespace) -> int:
-    """discord channels: 登録済みの送り先（ジャンル → チャンネル）を表示する。"""
-    conn = _open_db(cfg, args)
-    rows = conn.execute("SELECT category, channel_name, channel_id FROM discord_channels ORDER BY category")
-    for r in rows:
-        print(f"{_fit(r['category'], 16)} #{r['channel_name']}  ({r['channel_id']})")
+    """discord channels: 登録済みの送り先（サービス・ジャンル → チャンネル）を表示する。"""
+    for ch in chatdb.channels(_open_db(cfg, args)):
+        print(f"{ch.platform:<8} {_fit(ch.key, 16)} #{ch.name}  ({ch.channel_id})")
     return 0
 
 def cmd_discord_retag(cfg: Config, args: argparse.Namespace) -> int:
@@ -129,11 +129,11 @@ def cmd_discord_retag(cfg: Config, args: argparse.Namespace) -> int:
     from kawarabanya.rss.notify import retag_posts
 
     conn = _open_db(cfg, args)
-    client = _discord_client(cfg)
+    chats = _chats(cfg)
 
     async def go():
         async with Summarizer(cfg.summarize) as summarizer:
-            return await retag_posts(conn, client, summarizer, _load_genres(cfg))
+            return await retag_posts(conn, chats, summarizer, _load_genres(cfg))
 
     changed, total = asyncio.run(go())
     print(f"タグを付け直しました: {changed} / {total} 件")
@@ -144,9 +144,9 @@ def cmd_discord_delete_duplicates(cfg: Config, args: argparse.Namespace) -> int:
     """discord delete-duplicates: 重複と判定した記事のフォーラムの投稿を消す（--apply なしは一覧だけ）。"""
     from kawarabanya.rss.notify import delete_duplicate_posts
 
-    rows = delete_duplicate_posts(_open_db(cfg, args), _discord_client(cfg), apply=args.apply)
+    rows = delete_duplicate_posts(_open_db(cfg, args), _chats(cfg), apply=args.apply)
     for r in rows:
-        print(f"  {r['id']:>5} {r['title']}")
+        print(f"  {r['id']:>5} {r['platform']:<8} {r['title']}")
     print(f"重複の投稿: {len(rows)} 件" + ("を削除しました" if args.apply else "（--apply で削除）"))
     return 0
 
@@ -154,16 +154,15 @@ def cmd_discord_delete_duplicates(cfg: Config, args: argparse.Namespace) -> int:
 def cmd_discord_test(cfg: Config, args: argparse.Namespace) -> int:
     """discord test: ジャンルのフォーラムにテスト投稿する。"""
     conn = _open_db(cfg, args)
-    row = conn.execute("SELECT webhook_url, channel_name FROM discord_channels WHERE category = ?", (args.category,)).fetchone()
-    if row is None:
-        print(f"{args.category}: チャンネルが未登録です（kawarabanya discord setup --apply）", file=sys.stderr)
-        return 1
-    # フォーラムへの投稿にはスレッド名が必要
-    discord_api.send_webhook(
-        row["webhook_url"], {"thread_name": "kawarabanya テスト", "content": args.message, "username": "kawarabanya"}
-    )
-    print(f"#{row['channel_name']} に送信しました")
-    return 0
+    sent = 0
+    for c in _chats(cfg):
+        if (ch := chatdb.channel(conn, c.platform, args.category)) is None:
+            print(f"{c.platform}: {args.category} の送り先が未登録です（discord setup・slack setup --apply）", file=sys.stderr)
+            continue
+        c.post_article(ch, Article("kawarabanya テスト", "kawarabanya", args.message, None, None, args.category))
+        print(f"{c.platform}: #{ch.name} に送信しました")
+        sent += 1
+    return 0 if sent else 1
 
 def cmd_bot(cfg: Config, args: argparse.Namespace) -> int:
     """bot: 常駐 Bot を起動する。子プロセスにも同じ --config / --db を渡す。"""

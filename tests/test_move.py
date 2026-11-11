@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from kawarabanya.core import db
+from kawarabanya.core import chat, db, discord_api
 from kawarabanya.rss import notify, pipeline
 from kawarabanya.rss.genres import Genre
 
@@ -15,46 +15,46 @@ class FakeClient:
         self.calls.append((method, path, json))
 
 
-def setup():
+def setup(monkeypatch=None, send=None):
     conn = db.connect(":memory:")
     fid = db.insert_feed(conn, "https://a.example/rss", "A", None, "tech")
-    conn.execute("INSERT INTO items (id, feed_id, key, title, fetched_at, status, discord_thread_id, subgenre, likes)"
-                 " VALUES (1, ?, 'k', '記事', '2026-11-01T00:00:00+00:00', 'notified', '100', 'tech/ai', 3)", (fid,))
-    for cat, tags in (("tech", '{"sub:tech/net": "9"}'), ("culture", '{"sub:culture/movie": "8"}')):
-        conn.execute("INSERT INTO discord_channels (category, guild_id, channel_id, channel_name, webhook_url, tags, created_at)"
-                     " VALUES (?, 'g', ?, ?, ?, ?, 'x')", (cat, cat, cat, f"https://hook/{cat}", tags))
-    return conn
+    conn.execute("INSERT INTO items (id, feed_id, key, title, fetched_at, status, subgenre, likes)"
+                 " VALUES (1, ?, 'k', '記事', '2026-11-01T00:00:00+00:00', 'notified', 'tech/ai', 3)", (fid,))
+    conn.execute("INSERT INTO posts (item_id, platform, ref, likes, created_at) VALUES (1, 'discord', '100', 3, 'x')")
+    for cat, tags in (("tech", {"sub:tech/net": "9"}), ("culture", {"sub:culture/movie": "8"})):
+        chat.save_channel(conn, chat.Channel("discord", cat, cat, cat, f"https://hook/{cat}", "g", tags))
+    if monkeypatch:
+        monkeypatch.setattr(discord_api, "send_webhook", lambda url, payload, transport=None: send(url, payload))
+    client = FakeClient()
+    return conn, client, [discord_api.DiscordChat(client)]
 
 
 def test_move_within_forum_changes_tag():
-    conn, client = setup(), FakeClient()
-    notify.move_post(conn, client, 1, "tech/net")
+    conn, client, chats = setup()
+    notify.move_post(conn, chats, 1, "tech/net")
     assert client.calls == [("PATCH", "/channels/100", {"applied_tags": ["9"]})]
     assert conn.execute("SELECT subgenre FROM items").fetchone()[0] == "tech/net"
 
 
 def test_move_to_other_forum_posts_then_deletes(monkeypatch):
-    conn, client = setup(), FakeClient()
     sent = []
-    monkeypatch.setattr(notify, "send_webhook", lambda url, payload: sent.append((url, payload)) or {"channel_id": "200"})
-    notify.move_post(conn, client, 1, "culture/movie")
+    conn, client, chats = setup(monkeypatch, lambda url, payload: sent.append((url, payload)) or {"channel_id": "200"})
+    notify.move_post(conn, chats, 1, "culture/movie")
     assert sent[0][0] == "https://hook/culture" and "applied_tags" not in sent[0][1]
     assert client.calls == [("DELETE", "/channels/100", None)]
-    r = conn.execute("SELECT subgenre, discord_thread_id, likes FROM items").fetchone()
-    assert tuple(r) == ("culture", "200", 0)  # 別のジャンルへはサブジャンルなし
+    assert tuple(conn.execute("SELECT subgenre, likes FROM items").fetchone()) == ("culture", 0)  # 別のジャンルへはサブジャンルなし
+    assert tuple(conn.execute("SELECT ref, url FROM posts").fetchone()) == ("200", "https://discord.com/channels/g/200")
 
 
 def test_move_keeps_post_when_repost_fails(monkeypatch):
-    conn, client = setup(), FakeClient()
-
     def fail(url, payload):
-        raise notify.DiscordError("HTTP 500")
+        raise discord_api.DiscordError("HTTP 500")
 
-    monkeypatch.setattr(notify, "send_webhook", fail)
-    with pytest.raises(notify.DiscordError):
-        notify.move_post(conn, client, 1, "culture/movie")
+    conn, client, chats = setup(monkeypatch, fail)
+    with pytest.raises(discord_api.DiscordError):
+        notify.move_post(conn, chats, 1, "culture/movie")
     assert client.calls == []  # 投稿できなければ、元の投稿を消さない
-    assert conn.execute("SELECT discord_thread_id FROM items").fetchone()[0] == "100"
+    assert conn.execute("SELECT ref FROM posts").fetchone()[0] == "100"
 
 
 class Chooser:

@@ -24,7 +24,7 @@ systemd --user: kawarabanya-bot.service
 設定・データ:
   config.toml   … 動作設定（git 管理外）        .env         … Bot トークン（git 管理外）
   genres.toml   … ジャンルとフィードの割り当て（git 管理外。見本は genres.example.toml）
-  data/kawarabanya.db … SQLite（feeds / items / discord_channels）
+  data/kawarabanya.db … SQLite（feeds / items / channels / posts）
   archive/      … 記事の Markdown
 ```
 
@@ -37,7 +37,9 @@ systemd --user: kawarabanya-bot.service
 
 ```
 core/       # 共通の土台（上の層を import しない）
-  config.py（設定と .env） db.py（SQLite） llm.py（ローカル LLM のクライアント） discord_api.py（Discord の REST / Webhook）
+  config.py（設定と .env） db.py（SQLite） llm.py（ローカル LLM のクライアント）
+  chat.py（投稿先の共通の形 Chat・送り先と投稿の記録） discord_api.py（Discord の REST / Webhook・DiscordChat）
+  slack_api.py（Slack の Web API・SlackChat） targets.py（[chat] targets から Chat を作る）
 rss/        # RSS 機能
   genres.py（genres.toml） item.py fulltext.py（本文の取得） archive.py（Markdown 保存）
   pipeline.py（取得〜要約の流れ = run） suggest.py（サブジャンルの自動作成・統合）
@@ -183,10 +185,11 @@ RSSHub（Docker、`127.0.0.1:1200`）が出す RSS を普通のフィードと�
 | テーブル | 主な列 |
 |---|---|
 | `feeds` | url（移転で更新）/ original_url / title / category（= ジャンルのパス）/ enabled / disabled_reason / etag / last_modified / last_status / fail_count / latest_entry_at / initialized_at / options（JSON） |
-| `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ subgenre（LLM が判定したサブジャンル。当てはまらなければトップレベルのジャンル）/ content_hash（重複判定用の本文のハッシュ）/ title_ja（日本語以外の記事の見出しの訳。版 2）/ notified_at / discord_thread_id / likes / dislikes（👎 の数。版 4）/ likes_checked_at |
+| `items` | feed_id / key（guid か link）/ url / title / published / status / md_path / summary / priority（重要度 = A の確率）/ subgenre（LLM が判定したサブジャンル。当てはまらなければトップレベルのジャンル）/ content_hash（重複判定用の本文のハッシュ）/ title_ja（日本語以外の記事の見出しの訳。版 2）/ notified_at / likes / dislikes（👎 の数。版 4。版 5 からはサービスごとの posts の合計） |
 | `events` | 予定（版 3）: id（カレンダー ID:予定 ID）/ calendar / summary / start / end（ISO。終日なら日付）/ all_day / location / updated / reminded_at（直前の通知を送った日時） |
-| `discord_channels` | category（トップレベルのジャンル。まとめの投稿先は `#digest`）/ guild_id / channel_id / webhook_url / tags（JSON: `feed:<id>` と `sub:<パス>` → タグ ID） |
-| `digests` | genre / day（投稿したローカル日時。11/07 までは日付）/ thread_id（投稿したメッセージの ID）/ created_at — 投稿済みのまとめ |
+| `channels` | 送り先（版 5。版 4 までの `discord_channels`）: platform（discord・slack）/ key（トップレベルのジャンル。まとめは `#digest`、予定は `#schedule`）/ channel_id / name / webhook_url（Discord だけ）/ guild_id（Discord のサーバー・Slack のワークスペース）/ tags（JSON: `sub:<パス>` → Discord のタグ ID・Slack のラベル） |
+| `posts` | 記事の投稿（版 5。版 4 までの `items.discord_thread_id` など）: item_id / platform / ref（Discord はスレッド ID、Slack は `チャンネル/ts`）/ url / likes / dislikes / checked_at（👍・👎 を数え直した時刻）/ created_at |
+| `digests` | 投稿済みのまとめ: platform（版 5）/ genre / day（投稿したローカル日時。11/07 までは日付）/ ref（投稿したメッセージの ID。版 4 までは thread_id）/ created_at |
 | `state` | key / value — 定期処理の最後の実行時刻（`run_at` / `suggest_at`）、知らせた不調（`alerted`） |
 
 `items.status`: `seen`（初回の既読化）→ `new` → `saved` → `notified`。投稿しなかったものは `stale`、ミュートのジャンルの記事は `muted`、同じ記事が保存済みだったものは `duplicate`（error に元の記事の id）、失敗は `error`。状態を記録するので、途中で落ちても次の実行で続きから処理する。

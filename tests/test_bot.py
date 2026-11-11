@@ -91,7 +91,7 @@ def test_readonly_request_runs_without_waiting_for_lock(tmp_path):
 def test_job_failures_alert_after_three(tmp_path, monkeypatch):
     bot, _me, _ran = make_bot(tmp_path, {})
     sent = []
-    monkeypatch.setattr(botmod.health, "send_alerts", lambda conn, found: sent.append(dict(found)))
+    monkeypatch.setattr(botmod.health, "send_alerts", lambda conn, chats, found: sent.append(dict(found)))
 
     async def fail(*argv):
         return 1, "エラー"

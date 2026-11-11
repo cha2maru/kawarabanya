@@ -50,5 +50,5 @@ def test_digest_puts_buzz_first(tmp_path):
     add(5, feeds[0], "熊本県で震度4")
     since = datetime.now(UTC) - timedelta(hours=1)
     assert trends.source_counts(conn, since) == {2: 3}
-    titles = [i.title for i in digest.collect(conn, "news", since, words={"熊本県": 2000})]
+    titles = [i.title for i in digest.collect(conn, "discord", "news", since, words={"熊本県": 2000})]
     assert titles == ["熊本県で震度4", "3 サイトが報じた", "ふつう"]  # 0.5+0.23、0.5+0.2、0.6

@@ -89,9 +89,10 @@ def test_feed_interest_intent(tmp_path):
 
 
 def post_row(conn):
-    conn.execute("INSERT OR IGNORE INTO items (id, feed_id, key, title, fetched_at, status, discord_thread_id, subgenre)"
-                 " VALUES (5, 1, 'k', 'ゴジラの新作', 'x', 'notified', '777', 'tech')")
-    return assistant.find_post(conn, 777)
+    conn.execute("INSERT OR IGNORE INTO items (id, feed_id, key, title, fetched_at, status, subgenre)"
+                 " VALUES (5, 1, 'k', 'ゴジラの新作', 'x', 'notified', 'tech')")
+    conn.execute("INSERT OR IGNORE INTO posts (item_id, platform, ref, created_at) VALUES (5, 'discord', '777', 'x')")
+    return assistant.find_post(conn, "discord", "777")
 
 
 def test_genre_assign(tmp_path):
@@ -108,7 +109,8 @@ def test_genre_assign(tmp_path):
     assert ask(conn, genres, "これはVAPE", command="genre_assign", genre="hobby/vape", word="VAPE").error
     assert ask(conn, genres, "これはテック", command="genre_assign", genre="tech", word="Cloudflare").error
     assert ask(conn, genres, "Cloudflare", command="genre_assign", word="Cloudflare").error
-    assert assistant.find_post(conn, 1) is None
+    assert assistant.find_post(conn, "discord", "1") is None
+    assert assistant.find_post(conn, "slack", "777") is None
 
 
 def test_genre_written_in_request_wins(tmp_path):

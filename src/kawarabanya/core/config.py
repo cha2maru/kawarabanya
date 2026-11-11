@@ -149,12 +149,46 @@ class BotConfig:
 
 
 @dataclass
+class ChatConfig:
+    """[chat]: 記事・まとめ・予定を投稿するサービス（両方なら両方に同じものを投稿する）。"""
+    targets: list[str] = field(default_factory=lambda: ["discord"])
+
+    def __post_init__(self) -> None:
+        if bad := [t for t in self.targets if t not in ("discord", "slack")]:
+            raise ValueError(f"[chat] targets は discord・slack から選んでください: {', '.join(bad)}")
+
+
+@dataclass
+class SlackConfig:
+    """[slack]: Slack のワークスペースへの投稿。トークンは環境変数（.env）から読む。"""
+    # ジャンルのチャンネル名（kawarabanya-tech など）の前に付ける
+    channel_prefix: str = "kawarabanya-"
+    # まとめ・予定でメンションする自分のメンバー ID（プロフィールの「メンバー ID をコピー」。U で始まる）。空ならしない
+    mention_user_id: str = ""
+    token_env: str = "SLACK_BOT_TOKEN"
+    # Bot が Socket Mode でつなぐためのアプリのトークン（xapp-）
+    app_token_env: str = "SLACK_APP_TOKEN"
+
+    @property
+    def token(self) -> str | None:
+        """Bot のトークン（xoxb-）。未設定なら None。"""
+        return os.environ.get(self.token_env) or None
+
+    @property
+    def app_token(self) -> str | None:
+        """アプリのトークン（xapp-）。未設定なら None。"""
+        return os.environ.get(self.app_token_env) or None
+
+
+@dataclass
 class Config:
     """config.toml 全体。省略したセクション・キーは既定値になる。"""
     general: GeneralConfig = field(default_factory=GeneralConfig)
     fulltext: FulltextConfig = field(default_factory=FulltextConfig)
     summarize: SummarizeConfig = field(default_factory=SummarizeConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
+    chat: ChatConfig = field(default_factory=ChatConfig)
+    slack: SlackConfig = field(default_factory=SlackConfig)
     bot: BotConfig = field(default_factory=BotConfig)
     digest: DigestConfig = field(default_factory=DigestConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
@@ -182,6 +216,8 @@ def load_config(path: Path | None = None) -> Config:
         fulltext=_section(FulltextConfig, raw.get("fulltext", {}), "fulltext", path),
         summarize=_section(SummarizeConfig, raw.get("summarize", {}), "summarize", path),
         discord=_section(DiscordConfig, raw.get("discord", {}), "discord", path),
+        chat=_section(ChatConfig, raw.get("chat", {}), "chat", path),
+        slack=_section(SlackConfig, raw.get("slack", {}), "slack", path),
         bot=_section(BotConfig, raw.get("bot", {}), "bot", path),
         digest=_section(DigestConfig, raw.get("digest", {}), "digest", path),
         schedule=_section(ScheduleConfig, raw.get("schedule", {}), "schedule", path),

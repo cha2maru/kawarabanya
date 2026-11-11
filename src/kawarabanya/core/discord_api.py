@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import contextlib
 import logging
 import re
 import sqlite3
@@ -10,7 +10,16 @@ import time
 
 import httpx
 
-from kawarabanya.core import db
+from kawarabanya.core.chat import (
+    UNCATEGORIZED,
+    Article,
+    Channel,
+    ChatError,
+    Posted,
+    PostGoneError,
+    article_text,
+    save_channel,
+)
 
 log = logging.getLogger(__name__)
 
@@ -36,14 +45,9 @@ LIKE_EMOJI = "👍"
 DISLIKE_EMOJI = "👎"
 DEFAULT_REACTION = {"emoji_id": None, "emoji_name": LIKE_EMOJI}
 
-UNCATEGORIZED = "uncategorized"
-# discord_channels で、まとめの投稿先（テキストチャンネル）を表すキー
-DIGEST_KEY = "#digest"
-# 予定（schedule）の投稿先を discord_channels に登録するときの category
-SCHEDULE_KEY = "#schedule"
 
 
-class DiscordError(Exception):
+class DiscordError(ChatError):
     """Discord API が失敗したときの例外。"""
 
 
@@ -160,16 +164,7 @@ def register_webhook(
     if hook is None:
         hook = client.create_webhook(channel_id, webhook_name)
     url = f"https://discord.com/api/webhooks/{hook['id']}/{hook['token']}"
-    with conn:
-        conn.execute(
-            "INSERT INTO discord_channels"
-            " (category, guild_id, channel_id, channel_name, webhook_url, tags, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(category) DO UPDATE SET guild_id = excluded.guild_id,"
-            " channel_id = excluded.channel_id, channel_name = excluded.channel_name,"
-            " webhook_url = excluded.webhook_url, tags = excluded.tags",
-            (category, guild_id, channel_id, channel_name, url, json.dumps(tags or {}), db.now_iso()),
-        )
+    save_channel(conn, Channel("discord", category, channel_id, channel_name, url, guild_id, tags or {}))
 
 
 def find_text_channel(client: DiscordClient, guild_id: str, name: str) -> dict | None:
@@ -252,3 +247,105 @@ def edit_webhook_message(
 def delete_webhook_message(webhook_url: str, message_id: str, transport: httpx.BaseTransport | None = None) -> None:
     """Webhook で投稿したメッセージを消す。すでに消えていれば何もしない。"""
     _webhook_request("DELETE", f"{webhook_url}/messages/{message_id}", None, transport, ok_404=True)
+
+
+MAX_THREAD_NAME = 100
+MAX_CONTENT = 2000
+MAX_USERNAME = 80
+
+
+def _username(name: str | None) -> str:
+    """Webhook の表示名（フィード名）。Discord の制限で「discord」を含む名前は使えない。"""
+    name = (name or "kawarabanya").strip()[:MAX_USERNAME]
+    return "kawarabanya" if "discord" in name.lower() else name
+
+
+def _check(e: DiscordError, need: str = "スレッドの管理") -> None:
+    """404 なら PostGoneError、403 なら足りない権限を添えて投げ直す。"""
+    if "HTTP 404" in str(e):
+        raise PostGoneError(str(e)) from None
+    if "HTTP 403" in str(e):
+        raise DiscordError(f"{e}（Bot に「{need}」の権限が必要です）") from None
+    raise e
+
+
+class DiscordChat:
+    """Discord への投稿（記事 = フォーラムの投稿、サブジャンル = タグ、まとめ・予定 = テキストチャンネルへの Webhook）。
+
+    投稿・まとめは Webhook で送る。タグの付け替え・削除・返信・👍 の読み取りは Bot トークンの client を使う。
+    """
+
+    platform = "discord"
+
+    def __init__(self, client: DiscordClient | None = None, *, mention_user_id: str = "",
+                 transport: httpx.BaseTransport | None = None):
+        self.client = client
+        self.mention_user_id = mention_user_id
+        self.transport = transport
+
+    def _api(self) -> DiscordClient:
+        if self.client is None:
+            raise DiscordError("Bot のトークンが設定されていません（.env の DISCORD_BOT_TOKEN）")
+        return self.client
+
+    def payload(self, ch: Channel, a: Article) -> dict:
+        """記事 1 件をフォーラムに投稿する Webhook の内容（スレッド名・本文・タグ）。"""
+        out: dict = {
+            "thread_name": a.title[:MAX_THREAD_NAME],
+            "username": _username(a.feed_title),
+            "content": article_text(a, MAX_CONTENT),
+            # 記事中の @everyone などで通知が飛ばないようにする
+            "allowed_mentions": {"parse": []},
+        }
+        if tag := ch.tags.get(f"sub:{a.subgenre}"):
+            out["applied_tags"] = [tag]
+        return out
+
+    def post_article(self, ch: Channel, a: Article) -> Posted:
+        """フォーラムに投稿する（Webhook の応答の channel_id が投稿のスレッド ID）。"""
+        ref = send_webhook(ch.webhook_url, self.payload(ch, a), transport=self.transport)["channel_id"]
+        return Posted(ref, post_url(ch.guild_id, ref) if ch.guild_id else None)
+
+    def retag(self, ch: Channel, ref: str, a: Article) -> None:
+        """投稿のタグを付け替える。"""
+        try:
+            self._api().request("PATCH", f"/channels/{ref}", {"applied_tags": [t for t in [ch.tags.get(f"sub:{a.subgenre}")] if t]})
+        except DiscordError as e:
+            _check(e)
+
+    def delete_post(self, ref: str) -> None:
+        """投稿（スレッド）を消す。"""
+        try:
+            self._api().request("DELETE", f"/channels/{ref}")
+        except DiscordError as e:
+            with contextlib.suppress(PostGoneError):
+                _check(e)
+
+    def reply(self, ref: str, text: str) -> int:
+        """投稿のスレッドに、2,000 字ずつ返信する。"""
+        sent = 0
+        for i in range(0, len(text), MAX_CONTENT):
+            self._api().request("POST", f"/channels/{ref}/messages",
+                                {"content": text[i:i + MAX_CONTENT], "allowed_mentions": {"parse": []}})
+            sent += 1
+        return sent
+
+    def reactions(self, ref: str) -> tuple[int, int] | None:
+        """投稿の (👍, 👎) の数。"""
+        return count_reactions(self._api(), ref)
+
+    def send(self, ch: Channel, content: str, *, username: str, mention: bool = False) -> str:
+        """テキストチャンネルに Webhook で送る。"""
+        payload = {"username": username, "content": content[:MAX_CONTENT], "allowed_mentions": {"parse": []}}
+        if mention:
+            payload = with_mention(payload, self.mention_user_id)
+        return send_webhook(ch.webhook_url, payload, transport=self.transport)["id"]
+
+    def edit(self, ch: Channel, ref: str, content: str) -> None:
+        """send で送ったメッセージを書き換える。"""
+        edit_webhook_message(ch.webhook_url, ref, {"content": content[:MAX_CONTENT], "allowed_mentions": {"parse": []}},
+                             transport=self.transport)
+
+    def remove(self, ch: Channel, ref: str) -> None:
+        """send で送ったメッセージを消す。"""
+        delete_webhook_message(ch.webhook_url, ref, transport=self.transport)

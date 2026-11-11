@@ -261,6 +261,9 @@ priority_threshold = 0.8     # 重要度（A の確率）がこれ以上の記�
 [discord]
 mention_user_id = "123…"     # まとめ・予定で自分にメンションして通知を鳴らす（開発者モードで「ユーザー ID をコピー」）
 
+[chat]
+targets = ["discord"]        # 投稿するサービス。"slack" を足すと Slack にも同じものを投稿する（下の「Slack」）
+
 [digest]
 times = ["06:30", "18:30"]   # まとめを投稿する時刻
 trends_geo = "JP"            # Google トレンドの急上昇ワードの地域（"" で使わない）

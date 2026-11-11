@@ -4,6 +4,7 @@
 
 ## 未リリース
 
+- 投稿先を差し替えられる形にした（Discord と Slack の両対応の準備。`[chat] targets`）。DB は版 5（`discord_channels` → `channels`、`items.discord_thread_id` → `posts`、`digests` にサービス）。起動時に自動で上がる（前に `data/kawarabanya.db.bak-v4` にバックアップを取る）
 - フォーラムの投稿が 1 日（これまで 3 日）で閉じるようにし（`discord setup --apply` で揃える）、それより前の投稿を閉じる `discord archive` を足す。サーバー全体で開いているスレッドの上限 1,000 件に達して投稿できなくなっていた
 - 要約サーバーのメモリを 9 GB → 4.6 GB に減らす（`scripts/llama-server.sh` で llama-server のプロンプトのキャッシュ `--cache-ram` を切る。`LLAMA_CACHE_RAM` で戻せる）
 - 👍・👎 から好みを学び、まとめの並びに反映する（ジャンル・サブジャンル・見出しと冒頭の語・サイトごと。`[digest] pref_max`・`site_pref_max`・`pref_half_life_days`、`interests` で表示）。上位の最後の 1 枠は好みを除いた点で選ぶ。DB は版 4（`items.dislikes`）

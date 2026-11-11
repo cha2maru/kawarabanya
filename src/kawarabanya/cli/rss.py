@@ -15,6 +15,7 @@ import httpx
 
 from kawarabanya.cli.common import (
     STATUS_MARK,
+    _chats,
     _discord_client,
     _fit,
     _load_genres,
@@ -22,6 +23,7 @@ from kawarabanya.cli.common import (
     _require_genres,
 )
 from kawarabanya.core import db, discord_api
+from kawarabanya.core.chat import ChatError
 from kawarabanya.core.config import Config
 from kawarabanya.core.llm import Summarizer
 from kawarabanya.rss import forums, genres, notify, prefs
@@ -213,10 +215,9 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
     )
     db.set_state(conn, "run_at", datetime.now(UTC).isoformat(timespec="seconds"))
     rc = 0  # 記事単位の失敗は上の結果に出し、run の失敗にはしない（Bot が不調として数えないように）
-    if not args.no_notify and conn.execute("SELECT 1 FROM discord_channels LIMIT 1").fetchone():
+    if not args.no_notify and conn.execute("SELECT 1 FROM channels LIMIT 1").fetchone():
         rc |= _notify(cfg, conn)
-        if cfg.discord.token:
-            _sync_likes(cfg, conn)
+        _sync_likes(cfg, conn)
     if cfg.digest.enabled and cfg.digest.trends_geo:
         _fetch_trends(cfg, conn)
     return rc
@@ -236,12 +237,15 @@ def _fetch_trends(cfg: Config, conn: sqlite3.Connection) -> None:
     print(f"Google トレンド: {n} 語（直近 24 時間）")
 
 def _sync_likes(cfg: Config, conn: sqlite3.Connection, interval_hours: float = 6) -> int:
-    """投稿の 👍 の数を取得する。取得に失敗しても run は止めない。"""
+    """投稿の 👍・👎 の数を数え直す。失敗しても run は止めない。"""
+    # Discord は 👍 を読むのに Bot のトークンが要る（投稿は Webhook なのでなくてもできる）
+    chats = [c for c in _chats(cfg) if not (c.platform == "discord" and c.client is None)]
     try:
-        n = notify.sync_likes(conn, _discord_client(cfg), interval_hours=interval_hours)
-    except discord_api.DiscordError as e:
+        n = notify.sync_likes(conn, chats, interval_hours=interval_hours)
+    except (ChatError, httpx.HTTPError) as e:
         # 権限不足などで取得できなくても、記事の取り込みと通知は成功しているので止めない
-        print(f"👍 の取得に失敗: {e}（Bot に「メッセージ履歴を読む」権限があるか確認してください）", file=sys.stderr)
+        print(f"👍 の取得に失敗: {e}（Bot に「メッセージ履歴を読む」・reactions:read の権限があるか確認してください）",
+              file=sys.stderr)
         return 1
     print(f"👍: {n} 件の投稿を確認")
     return 0
@@ -255,7 +259,8 @@ def cmd_interests(cfg: Config, args: argparse.Namespace) -> int:
     conn = _open_db(cfg, args)
     since = (datetime.now(UTC) - timedelta(days=args.days)).isoformat(timespec="seconds")
     rows = conn.execute(
-        "SELECT f.category, f.title AS feed, i.title, i.likes, i.discord_thread_id FROM items i"
+        "SELECT f.category, f.title AS feed, i.title, i.likes,"
+        " (SELECT group_concat(url, ' ') FROM posts WHERE item_id = i.id) AS post_urls FROM items i"
         " JOIN feeds f ON f.id = i.feed_id"
         " WHERE i.status = 'notified' AND i.notified_at >= ?",
         (since,),
@@ -281,12 +286,11 @@ def cmd_interests(cfg: Config, args: argparse.Namespace) -> int:
     table("feed", "フィード", limit=args.top)
     liked_titles = [r for r in rows if r["likes"]][-args.top:]
     if liked_titles:
-        guild = conn.execute("SELECT guild_id FROM discord_channels LIMIT 1").fetchone()
         print("\n最近 👍 した記事")
         for r in reversed(liked_titles):
             print(f"  [{r['category']}] {r['title']}")
-            if guild and r["discord_thread_id"]:
-                print(f"      {discord_api.post_url(guild[0], r['discord_thread_id'])}")
+            if r["post_urls"]:
+                print(f"      {r['post_urls']}")
     _print_prefs(conn, prefs.learn(conn, datetime.now(UTC), cfg.digest.pref_half_life_days), args.top)
     return 0
 
@@ -510,6 +514,7 @@ def _notify(
     """保存済み・未投稿の記事を投稿し、結果を表示する。失敗があれば 1 を返す。"""
     stats = notify.notify_pending(
         conn,
+        _chats(cfg),
         limit=limit or cfg.discord.max_posts_per_run,
         max_age_days=cfg.discord.max_age_days,
         category=category,
@@ -526,7 +531,7 @@ def _notify(
     if stats.remaining:
         line += f" / 上限のため次回に回す {stats.remaining} 件"
     if stats.no_channel:
-        line += f" / 送り先未登録 {stats.no_channel} 件（kawarabanya discord setup）"
+        line += f" / 送り先未登録 {stats.no_channel} 件（kawarabanya discord setup・slack setup）"
     print(line)
     for e in stats.errors:
         print(f"  ! {e}")
@@ -601,18 +606,18 @@ def cmd_items_move(cfg: Config, args: argparse.Namespace) -> int:
         return 1
     if args.keyword:
         genres.add_keyword(cfg.general.genres_file, args.genre, args.keyword)
-    print(notify.move_post(_open_db(cfg, args), _discord_client(cfg), args.id, args.genre))
+    print(notify.move_post(_open_db(cfg, args), _chats(cfg), args.id, args.genre))
     return 0
 
 
 def cmd_items_translate(cfg: Config, args: argparse.Namespace) -> int:
     """items translate: 日本語以外の記事の全文を訳し、保存して投稿のスレッドに返信する。"""
     conn = _open_db(cfg, args)
-    client = _discord_client(cfg) if cfg.discord.token else None
+    chats = _chats(cfg)
 
     async def go():
         async with Summarizer(cfg.summarize) as summarizer:
-            return await notify.translate_post(conn, client, summarizer, args.id)
+            return await notify.translate_post(conn, chats, summarizer, args.id)
 
     print(asyncio.run(go()))
     return 0
@@ -697,19 +702,26 @@ def cmd_genres_suggest(cfg: Config, args: argparse.Namespace) -> int:
     )] if removed else []
     suggest.apply(conn, cfg.general.genres_file, found, merges)
     print(f"genres.toml に反映しました: {', '.join(s.path for s in found)}")
-    if not (cfg.discord.token and conn.execute("SELECT 1 FROM discord_channels LIMIT 1").fetchone()):
+    if not conn.execute("SELECT 1 FROM channels LIMIT 1").fetchone():
         return 0
     defs = _load_genres(cfg)
-    client = _discord_client(cfg)
-    guild = discord_api.resolve_guild(client, cfg.discord.guild_id)
-    only = [g.path for g in defs.values() if not g.is_sub]
-    plan = forums.make_plan(
-        client, guild, forums.feeds_by_category(conn, only), cfg.discord.parent_category, defs
-    )
-    forums.apply_plan(client, conn, plan, cfg.discord.webhook_name, nsfw=cfg.discord.nsfw)
+    chats = _chats(cfg)
+    if "discord" in cfg.chat.targets and cfg.discord.token:
+        client = _discord_client(cfg)
+        guild = discord_api.resolve_guild(client, cfg.discord.guild_id)
+        only = [g.path for g in defs.values() if not g.is_sub]
+        plan = forums.make_plan(
+            client, guild, forums.feeds_by_category(conn, only), cfg.discord.parent_category, defs
+        )
+        forums.apply_plan(client, conn, plan, cfg.discord.webhook_name, nsfw=cfg.discord.nsfw)
+    else:
+        chats = [c for c in chats if c.platform != "discord"]
+    if "slack" in cfg.chat.targets:
+        from kawarabanya.cli.slack import setup_channels
+        setup_channels(cfg, conn, defs, apply=True)
     ids = [i for s in found for i in s.item_ids] + merged_ids
-    changed, _ = asyncio.run(notify.retag_posts(conn, client, None, defs, ids))
-    print(f"Discord のタグを作り、投稿済みの {changed} 件のタグを付け直しました")
+    changed, _ = asyncio.run(notify.retag_posts(conn, chats, None, defs, ids))
+    print(f"タグ（Slack はラベル）を用意し、投稿済みの {changed} 件を付け直しました")
     return 0
 
 
@@ -720,15 +732,21 @@ def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
     conn = _open_db(cfg, args)
     now = datetime.now(UTC)
 
+    chats = _chats(cfg)
     if args.delete:
-        if args.day:  # その日のまとめをすべて
-            rows = conn.execute("SELECT genre, day FROM digests WHERE day LIKE ?", (f"{args.day}%",)).fetchall()
-        else:  # ジャンルごとに最後のまとめ
-            rows = conn.execute(
-                "SELECT genre, day FROM digests d WHERE created_at = (SELECT MAX(created_at) FROM digests WHERE genre = d.genre)"
-            ).fetchall()
-        deleted = [r["genre"] for r in rows if (not args.genre or r["genre"] in args.genre)
-                   and digest.delete_digest(conn, r["genre"], r["day"])]
+        deleted = []
+        for c in chats:
+            if args.day:  # その日のまとめをすべて
+                rows = conn.execute("SELECT genre, day FROM digests WHERE platform = ? AND day LIKE ?",
+                                    (c.platform, f"{args.day}%")).fetchall()
+            else:  # ジャンルごとに最後のまとめ
+                rows = conn.execute(
+                    "SELECT genre, day FROM digests d WHERE platform = ? AND created_at ="
+                    " (SELECT MAX(created_at) FROM digests WHERE platform = d.platform AND genre = d.genre)",
+                    (c.platform,),
+                ).fetchall()
+            deleted += [f"{c.platform}:{r['genre']}" for r in rows if (not args.genre or r["genre"] in args.genre)
+                        and digest.delete_digest(conn, c, r["genre"], r["day"])]
         print(f"まとめ: {len(deleted)} 件を削除しました（{', '.join(deleted) or 'なし'}）")
         return 0
     if args.day:
@@ -742,10 +760,7 @@ def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
     defs = _load_genres(cfg)
     genre_list = args.genre or (
         [g.path for g in defs.values() if not g.is_sub] if defs
-        else [r[0] for r in conn.execute(
-            "SELECT category FROM discord_channels WHERE category NOT IN (?, ?) ORDER BY category",
-            (discord_api.DIGEST_KEY, discord_api.SCHEDULE_KEY),
-        )]
+        else [r[0] for r in conn.execute("SELECT DISTINCT key FROM channels WHERE key NOT LIKE '#%' ORDER BY key")]
     )
 
     levels = genres.interest_levels(defs)
@@ -754,24 +769,29 @@ def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
     learned = prefs.learn(conn, now, d.pref_half_life_days)
 
     async def go():
+        cache: dict = {}  # 話題（LLM）はサービスが違っても同じ見出しなら使い回す
         async with Summarizer(cfg.summarize) as summarizer:
             return {
-                g: await digest.post_digest(
-                    conn, summarizer, g, label=defs[g].label if defs and g in defs else None,
+                (c.platform, g): await digest.post_digest(
+                    conn, c, summarizer, g, label=defs[g].label if defs and g in defs else None,
                     levels=levels, now=now, top=cfg.digest.top, window_hours=cfg.digest.window_hours,
                     due_after=due_after, learned=learned, pref_max=d.pref_max, site_max=d.site_pref_max,
-                    update=args.update, dry_run=args.dry_run,
+                    update=args.update, dry_run=args.dry_run, trend_cache=cache,
                 )
+                for c in chats
                 for g in genre_list
             }
 
     results = asyncio.run(go())
-    done = [g for g, c in results.items() if c]
+    done = list(dict.fromkeys(g for (_, g), content in results.items() if content))
     if args.dry_run:
-        for g in done:
-            print(f"===== {g} =====\n{results[g]}\n")
+        for (platform, g), content in results.items():
+            if content:
+                print(f"===== {platform}: {g} =====\n{content}\n")
     elif done and not args.update:
-        digest.announce(conn, [defs[g].label if defs and g in defs else g for g in done], cfg.discord.mention_user_id)
+        for c in chats:
+            mine = [g for (p, g), content in results.items() if p == c.platform and content]
+            digest.announce(conn, c, [defs[g].label if defs and g in defs else g for g in mine])
     if done or not args.due:
         verb = "表示" if args.dry_run else ("更新" if args.update else "投稿")
         print(f"まとめ: {verb} {len(done)} 件（{', '.join(done) or 'なし'}）")

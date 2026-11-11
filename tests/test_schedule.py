@@ -89,14 +89,15 @@ def test_mentions(monkeypatch):
     m = d.with_mention({"content": "x", "allowed_mentions": {"parse": []}}, "42")
     assert m["content"] == "<@42> x" and m["allowed_mentions"] == {"parse": [], "users": ["42"]}
 
+    from kawarabanya.core import chat
+
     sent = []
-    monkeypatch.setattr(d, "send_webhook", lambda url, payload, **kw: sent.append(payload))
-    monkeypatch.setattr(digest, "send_webhook", lambda url, payload, **kw: sent.append(payload))
+    monkeypatch.setattr(d, "send_webhook", lambda url, payload, **kw: sent.append(payload) or {"id": "m"})
     conn = db.connect(":memory:")
-    for key in (d.SCHEDULE_KEY, d.DIGEST_KEY):
-        conn.execute("INSERT INTO discord_channels (category, guild_id, channel_id, channel_name, webhook_url, created_at)"
-                     " VALUES (?, 'g', 'c', 'n', 'https://hook', 'x')", (key,))
-    assert cli._post(conn, "⏰ まもなく: 会議", "42")
-    digest.announce(conn, ["ニュース", "テック"], "42")
-    digest.announce(conn, ["ニュース"], "")  # 設定がなければ送らない
+    for key in (chat.SCHEDULE_KEY, chat.DIGEST_KEY):
+        chat.save_channel(conn, chat.Channel("discord", key, "c", "n", "https://hook", "g"))
+    me = d.DiscordChat(None, mention_user_id="42")
+    assert cli._post(conn, [me], "⏰ まもなく: 会議")
+    digest.announce(conn, me, ["ニュース", "テック"])
+    digest.announce(conn, d.DiscordChat(None), ["ニュース"])  # 設定がなければ送らない
     assert [p["content"] for p in sent] == ["<@42> ⏰ まもなく: 会議", "<@42> 📰 まとめを投稿しました: ニュース、テック"]

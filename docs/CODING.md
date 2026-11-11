@@ -6,7 +6,7 @@ kawarabanya の Python の書き方。元にしたもの: [PEP 8](https://peps.p
 
 ```
 src/kawarabanya/
-  core/   設定・SQLite・ローカル LLM・Discord の REST/Webhook   … 共通の土台
+  core/   設定・SQLite・ローカル LLM・チャット（chat.py の Chat と、Discord・Slack の実装）   … 共通の土台
   rss/    RSS 機能（取り込み〜保存・判定・要約・投稿・まとめ）
     sources/  記事の取り込み元（RSS・HTML・拡張・サイトマップ・OPML・RSSHub の確認）
   bot/    常駐 Bot と、Discord から日本語で頼まれたことの解釈

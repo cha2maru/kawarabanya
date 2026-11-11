@@ -14,21 +14,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
-import httpx
-
-from kawarabanya.core.discord_api import (
-    DIGEST_KEY,
-    delete_webhook_message,
-    edit_webhook_message,
-    post_url,
-    send_webhook,
-    with_mention,
-)
+from kawarabanya.core import chat as chatdb
+from kawarabanya.core.chat import DIGEST_KEY, Chat
 from kawarabanya.core.llm import Summarizer, lead
 from kawarabanya.rss import archive, prefs, trends
 from kawarabanya.rss.genres import interest_of, top_genre
 
 MAX_CONTENT = 2000
+USERNAME = "瓦版屋 まとめ"
 # 話題を選ばせる見出しの数（重要度の高い順）。150 件では話題が散り、見出しにない話を書くことが増えた
 MAX_TREND_TITLES = 20
 
@@ -37,7 +30,7 @@ MAX_TREND_TITLES = 20
 class DigestItem:
     """まとめに載せる 1 記事。"""
     title: str
-    thread_id: str | None
+    url: str | None  # 投稿へのリンク
     priority: float | None
     likes: int | None
     # 学んだ好み（rss/prefs.py）を除いた点。まとめの 1 枠は、これだけで選ぶ（好みに寄りすぎないため）
@@ -50,6 +43,7 @@ LIKE_BONUS = 0.3
 
 def collect(
     conn: sqlite3.Connection,
+    platform: str,
     genre: str,
     since: datetime,
     levels: dict[str, str] | None = None,
@@ -64,15 +58,17 @@ def collect(
     好きの記事は上に、低めの記事は下に寄せる。世間での話題になり方（rss/trends.py）でも上に寄せる:
     同じ出来事を報じたサイトの数と、words（Google トレンドの急上昇ワード → 検索数）に当たること。
     learned（👍・👎 から学んだ好み）があれば、その点も足す（DigestItem.base には含めない）。
+    リンクは platform（discord・slack）の投稿へ。
     """
     levels = levels or {}
     sources = trends.source_counts(conn, since - timedelta(days=1))
     rows = conn.execute(
         "SELECT i.id, i.feed_id, i.title AS original, i.md_path, COALESCE(i.subgenre, f.category) AS category, COALESCE(i.title_ja, i.title) AS title,"
-        " i.discord_thread_id, i.priority, i.likes,"
+        " p.url AS post_url, i.priority, i.likes,"
         " json_extract(f.options, '$.interest') AS feed_interest FROM items i"
-        " JOIN feeds f ON f.id = i.feed_id WHERE i.status = 'notified' AND i.notified_at >= ?",
-        (since.isoformat(timespec="seconds"),),
+        " JOIN feeds f ON f.id = i.feed_id LEFT JOIN posts p ON p.item_id = i.id AND p.platform = ?"
+        " WHERE i.status = 'notified' AND i.notified_at >= ?",
+        (platform, since.isoformat(timespec="seconds")),
     ).fetchall()
     scored = []
     for r in rows:
@@ -88,7 +84,7 @@ def collect(
         if learned:
             feats = prefs.features(r["category"], r["original"], body)
             liked = prefs.bonus(learned, r["feed_id"], feats, pref_max, site_max)
-        item = DigestItem(r["title"] or "(無題)", r["discord_thread_id"], r["priority"], r["likes"], score)
+        item = DigestItem(r["title"] or "(無題)", r["post_url"], r["priority"], r["likes"], score)
         scored.append((score + liked, item))
     return [it for _, it in sorted(scored, key=lambda x: -x[0])]
 
@@ -107,12 +103,12 @@ def _link_text(title: str) -> str:
     return title.replace("[", "［").replace("]", "］")
 
 
-def render(trend: list[str], items: list[DigestItem], guild_id: str, top: int, limit: int = MAX_CONTENT) -> str:
+def render(trend: list[str], items: list[DigestItem], top: int, limit: int = MAX_CONTENT) -> str:
     """まとめの本文（話題＋重要度順の投稿へのリンク＋「ほか N 件」）を limit 字に収めて作る。"""
     topics = "".join(f"- {t}\n" for t in trend)
     lines = [f"**話題**\n{topics}\n**注目の記事**" if trend else "**注目の記事**"]
     for it in items[:top]:
-        line = f"- [{_link_text(it.title)}]({post_url(guild_id, it.thread_id)})" if it.thread_id else f"- {it.title}"
+        line = f"- [{_link_text(it.title)}]({it.url})" if it.url else f"- {it.title}"
         if it.likes:
             line += f"  👍{it.likes}"
         # 「ほか N 件」の行（最大 20 字程度）の分を残して 2,000 字に収める
@@ -126,6 +122,7 @@ def render(trend: list[str], items: list[DigestItem], guild_id: str, top: int, l
 
 async def post_digest(
     conn: sqlite3.Connection,
+    chat: Chat,
     summarizer: Summarizer | None,
     genre: str,
     *,
@@ -140,7 +137,7 @@ async def post_digest(
     site_max: float = 0.1,
     update: bool = False,
     dry_run: bool = False,
-    transport: httpx.BaseTransport | None = None,
+    trend_cache: dict | None = None,
 ) -> str | None:
     """genre のまとめ（前回のまとめ以降の記事）を投稿し、本文を返す。見出しには label（なければ genre）を使う。
 
@@ -148,8 +145,8 @@ async def post_digest(
     update=True なら、最後に投稿したまとめを作り直して書き換える。
     投稿する記事がない・送り先がない・（更新なら）未投稿のときは None。
     """
-    channel = digest_channel(conn)
-    last, before = [*_history(conn, genre), None, None][:2]
+    channel = chatdb.channel(conn, chat.platform, DIGEST_KEY)
+    last, before = [*_history(conn, chat.platform, genre), None, None][:2]
     if channel is None or (update and last is None):
         return None
     if not update and due_after and last and datetime.fromisoformat(last["created_at"]) >= due_after:
@@ -160,72 +157,62 @@ async def post_digest(
     if prev:
         since = max(since, datetime.fromisoformat(prev["created_at"]))
     words = trends.load(conn, now.astimezone(UTC))
-    items = explore(collect(conn, genre, since, levels, words, learned, pref_max, site_max), top)
+    items = explore(collect(conn, chat.platform, genre, since, levels, words, learned, pref_max, site_max), top)
     if not items:
         return None
     trend = []
-    if summarizer:
-        trend = await summarizer.trend([i.title for i in items[:MAX_TREND_TITLES]])
+    titles = tuple(i.title for i in items[:MAX_TREND_TITLES])
+    if trend_cache is not None and titles in trend_cache:
+        trend = trend_cache[titles]
+    elif summarizer:
+        trend = await summarizer.trend(list(titles))
+        if trend_cache is not None:
+            trend_cache[titles] = trend
     header = f"## 📰 {label or genre} {now.astimezone():%m/%d %H:%M} のまとめ（{len(items)} 件）"
-    content = header + "\n" + render(trend, items, channel["guild_id"], top, limit=MAX_CONTENT - len(header) - 1)
+    content = header + "\n" + render(trend, items, top, limit=MAX_CONTENT - len(header) - 1)
     if dry_run:
         return content
-    payload = {"content": content, "allowed_mentions": {"parse": []}}
     if update:
-        edit_webhook_message(channel["webhook_url"], last["thread_id"], payload, transport=transport)
+        chat.edit(channel, last["ref"], content)
         return content
     # まとめはテキストチャンネル（#ニュース）に、ジャンルごとに 1 メッセージで投稿する
-    msg = send_webhook(channel["webhook_url"], {"username": "瓦版屋 まとめ", **payload}, transport=transport)
+    ref = chat.send(channel, content, username=USERNAME)
     with conn:
         conn.execute(
-            "INSERT OR REPLACE INTO digests (genre, day, thread_id, created_at) VALUES (?, ?, ?, ?)",
-            (genre, now.astimezone().strftime("%Y-%m-%d %H:%M:%S"), msg.get("id"), now.isoformat(timespec="seconds")),
+            "INSERT OR REPLACE INTO digests (platform, genre, day, ref, created_at) VALUES (?, ?, ?, ?, ?)",
+            (chat.platform, genre, now.astimezone().strftime("%Y-%m-%d %H:%M:%S"), ref, now.isoformat(timespec="seconds")),
         )
     return content
 
 
-def announce(conn: sqlite3.Connection, labels: list[str], user_id: str,
-             *, transport: httpx.BaseTransport | None = None) -> None:
+def announce(conn: sqlite3.Connection, chat: Chat, labels: list[str]) -> None:
     """まとめを投稿し終えたことを、メンション付きで 1 通だけ知らせる（ジャンルごとに鳴らさない）。"""
-    channel = digest_channel(conn)
-    if channel and labels and user_id:
-        payload = with_mention({"content": f"📰 まとめを投稿しました: {'、'.join(labels)}"}, user_id)
-        send_webhook(channel["webhook_url"], {"username": "瓦版屋 まとめ", **payload}, transport=transport)
+    channel = chatdb.channel(conn, chat.platform, DIGEST_KEY)
+    if channel and labels and chat.mention_user_id:
+        chat.send(channel, f"📰 まとめを投稿しました: {'、'.join(labels)}", username=USERNAME, mention=True)
 
 
-def delete_digest(
-    conn: sqlite3.Connection, genre: str, day: str, *, transport: httpx.BaseTransport | None = None
-) -> bool:
+def delete_digest(conn: sqlite3.Connection, chat: Chat, genre: str, day: str) -> bool:
     """genre のまとめ（digests.day が day のもの）を消す。投稿済みの記録も消す。"""
-    channel = digest_channel(conn)
-    message_id = _posted(conn, genre, day)
-    if message_id is None:
+    row = conn.execute(
+        "SELECT ref FROM digests WHERE platform = ? AND genre = ? AND day = ?", (chat.platform, genre, day)
+    ).fetchone()
+    if row is None:
         return False
-    if channel is not None:
-        delete_webhook_message(channel["webhook_url"], message_id, transport=transport)
+    if (channel := chatdb.channel(conn, chat.platform, DIGEST_KEY)) is not None and row[0]:
+        chat.remove(channel, row[0])
     with conn:
-        conn.execute("DELETE FROM digests WHERE genre = ? AND day = ?", (genre, day))
+        conn.execute("DELETE FROM digests WHERE platform = ? AND genre = ? AND day = ?", (chat.platform, genre, day))
     return True
 
 
-def _history(conn: sqlite3.Connection, genre: str) -> list[sqlite3.Row]:
+def _history(conn: sqlite3.Connection, platform: str, genre: str) -> list[sqlite3.Row]:
     """genre の投稿済みのまとめ（新しい順）。"""
     return conn.execute(
-        "SELECT day, thread_id, created_at FROM digests WHERE genre = ? ORDER BY created_at DESC", (genre,)
+        "SELECT day, ref, created_at FROM digests WHERE platform = ? AND genre = ? ORDER BY created_at DESC",
+        (platform, genre),
     ).fetchall()
 
-
-def digest_channel(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    """まとめの投稿先（Webhook とサーバー）。未登録なら None。"""
-    return conn.execute(
-        "SELECT webhook_url, guild_id FROM discord_channels WHERE category = ?", (DIGEST_KEY,)
-    ).fetchone()
-
-
-def _posted(conn: sqlite3.Connection, genre: str, day: str) -> str | None:
-    """投稿済みのまとめのメッセージ ID（未投稿なら None）。"""
-    row = conn.execute("SELECT thread_id FROM digests WHERE genre = ? AND day = ?", (genre, day)).fetchone()
-    return row[0] if row else None
 
 
 def _slots(now: datetime, times: list[str], days: tuple[int, ...]) -> list[datetime]:

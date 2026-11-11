@@ -14,8 +14,10 @@ from pathlib import Path
 import httpx
 
 from kawarabanya.core import db
+from kawarabanya.core.chat import DIGEST_KEY, SCHEDULE_KEY
 from kawarabanya.core.config import Config
-from kawarabanya.core.discord_api import DIGEST_KEY, SCHEDULE_KEY, DiscordClient, DiscordError
+from kawarabanya.core.discord_api import DiscordClient, DiscordError
+from kawarabanya.core.slack_api import SCOPES, SlackClient, SlackError
 from kawarabanya.rss import genres, health
 from kawarabanya.rss.sources import extensions
 
@@ -66,7 +68,7 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
         r("ok", "DB", f"{db_path}（版 {db.schema_version(conn)}・有効なフィード {len(feeds)} 件）")
         if not feeds:
             r("warn", "フィード", "ありません（import-opml か feeds add で登録する）")
-        channels = conn.execute("SELECT category FROM discord_channels").fetchall()
+        channels = conn.execute("SELECT platform, key FROM channels").fetchall()
     except (OSError, ValueError, sqlite3.Error) as e:
         r("ng", "DB", f"{db_path}: {e}")
         channels = []
@@ -81,7 +83,10 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
         r("ng", "保存先", f"{archive} に書き込めません: {e}")
 
     _check_rsshub(cfg, r)
-    _check_discord(cfg, r, channels)
+    if "discord" in cfg.chat.targets:
+        _check_discord(cfg, r, [(c[1],) for c in channels if c[0] == "discord"])
+    if "slack" in cfg.chat.targets:
+        _check_slack(cfg, r, [c[1] for c in channels if c[0] == "slack"])
     _check_llm(cfg, r)
     _check_service(r)
     print("問題はありません" if r.failures == 0 else f"❌ が {r.failures} 件あります")
@@ -135,6 +140,25 @@ def _check_discord(cfg: Config, r: Report, channels: list) -> None:
         r("ok", "フォーラム", f"{len(forums)} 個（まとめの投稿先: {'あり' if len(forums) < len(channels) else 'なし'}）")
     else:
         r("warn", "フォーラム", "まだありません（kawarabanya discord setup --apply で作る）")
+
+
+def _check_slack(cfg: Config, r: Report, keys: list[str]) -> None:
+    if not cfg.slack.token:
+        r("ng", "Slack", f"Bot のトークンがありません（.env に {cfg.slack.token_env}=xoxb-... を書く。README の「Slack」）")
+        return
+    try:
+        me = SlackClient(cfg.slack.token).me()
+    except (SlackError, httpx.HTTPError) as e:
+        r("ng", "Slack", f"Bot のトークンで接続できません: {e}")
+        return
+    r("ok", "Slack の Bot", f"{me.get('user')}（{me.get('team')}）")
+    if not cfg.slack.app_token:
+        r("warn", "Slack の Socket Mode", f"アプリのトークンがありません（.env の {cfg.slack.app_token_env}=xapp-...。ないと Slack で頼めない）")
+    genres_ = [k for k in keys if not k.startswith("#")]
+    if genres_:
+        r("ok", "Slack のチャンネル", f"{len(genres_)} 個（まとめ: {'あり' if DIGEST_KEY in keys else 'なし'}・予定: {'あり' if SCHEDULE_KEY in keys else 'なし'}）")
+    else:
+        r("warn", "Slack のチャンネル", f"まだありません（kawarabanya slack setup --apply。Bot の権限: {', '.join(SCOPES)}）")
 
 
 def _check_llm(cfg: Config, r: Report) -> None:

@@ -112,12 +112,12 @@ def find_feeds(conn: sqlite3.Connection, query: str) -> list[db.Feed]:
     return exact or [f for f in feeds if q in (f.title or "").lower() or q in f.url.lower()]
 
 
-def find_post(conn: sqlite3.Connection, thread_id: int) -> sqlite3.Row | None:
-    """スレッド（フォーラムの投稿）の記事。まとめのスレッドなど、記事の投稿でなければ None。"""
+def find_post(conn: sqlite3.Connection, platform: str, ref: str) -> sqlite3.Row | None:
+    """投稿（Discord はスレッド、Slack は "チャンネル/ts"）の記事。まとめなど、記事の投稿でなければ None。"""
     return conn.execute(
-        "SELECT i.id, i.title, COALESCE(i.subgenre, f.category) AS category"
-        " FROM items i JOIN feeds f ON f.id = i.feed_id WHERE i.discord_thread_id = ?",
-        (str(thread_id),),
+        "SELECT i.id, i.title, COALESCE(i.subgenre, f.category) AS category FROM items i"
+        " JOIN feeds f ON f.id = i.feed_id JOIN posts p ON p.item_id = i.id WHERE p.platform = ? AND p.ref = ?",
+        (platform, ref),
     ).fetchone()
 
 
