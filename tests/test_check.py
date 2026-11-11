@@ -226,3 +226,25 @@ def test_migration_v5_moves_discord_posts(tmp_path, monkeypatch):
     assert tuple(conn.execute("SELECT likes, dislikes FROM items").fetchone()) == (2, 1)  # サービスごとの合計として残す
     assert tuple(conn.execute("SELECT platform, genre, ref FROM digests").fetchone()) == ("discord", "tech", "m1")
     assert "discord_thread_id" not in {r["name"] for r in conn.execute("PRAGMA table_info(items)")}
+
+
+def test_migration_v5_rolls_back_on_failure(tmp_path, monkeypatch):
+    import sqlite3
+
+    import pytest
+
+    from kawarabanya.core import db
+
+    path = tmp_path / "v4.db"
+    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:4])
+    conn = db.connect(path)
+    conn.execute("CREATE TABLE digests_new (x)")  # 版 5 の途中の文がぶつかるようにする
+    conn.commit()
+    conn.close()
+    monkeypatch.undo()
+    with pytest.raises(sqlite3.OperationalError):
+        db.connect(path)
+    c = sqlite3.connect(path)
+    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "discord_channels" in tables and "channels" not in tables  # 途中まで進めずに全部戻る
+    assert c.execute("PRAGMA user_version").fetchone()[0] == 4

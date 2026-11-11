@@ -173,8 +173,3 @@ def count_reaction(conn: sqlite3.Connection, platform: str, ref: str, kind: str,
         sum_reactions(conn, row[0])
     return True
 
-
-def find_item(conn: sqlite3.Connection, platform: str, ref: str) -> int | None:
-    """投稿の ID から記事の ID を探す（なければ None）。"""
-    row = conn.execute("SELECT item_id FROM posts WHERE platform = ? AND ref = ?", (platform, ref)).fetchone()
-    return row[0] if row else None

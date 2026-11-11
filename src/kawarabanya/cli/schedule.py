@@ -7,11 +7,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from kawarabanya.cli.common import _chats, _open_db
+from kawarabanya.cli.common import _open_db
 from kawarabanya.core import chat as chatdb
 from kawarabanya.core import db
 from kawarabanya.core.chat import SCHEDULE_KEY, Chat
 from kawarabanya.core.config import Config
+from kawarabanya.core.targets import build_chats
 from kawarabanya.rss.digest import last_slot
 from kawarabanya.schedule import events
 
@@ -68,7 +69,7 @@ def cmd_schedule_check(cfg: Config, args: argparse.Namespace) -> int:
         messages.append("**今日と明日の予定**\n" + ("\n".join(f"- {events.line(e)}" for e in items) or "予定はありません"))
         if not args.dry_run:
             db.set_state(conn, "schedule_agenda_at", now.isoformat(timespec="seconds"))
-    chats = [] if args.dry_run else _chats(cfg)
+    chats = [] if args.dry_run else build_chats(cfg)
     for m in messages:
         if args.dry_run or not _post(conn, chats, m):
             print(m)

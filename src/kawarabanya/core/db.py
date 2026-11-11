@@ -133,7 +133,9 @@ def _v5(conn: sqlite3.Connection) -> None:
     discord_channels → channels、items.discord_thread_id・likes・dislikes・likes_checked_at → posts
     （items.likes・dislikes はサービスごとの数の合計として残す）、digests に platform を足す。
     """
+    # executescript は 1 文ずつ確定させるので、BEGIN〜COMMIT で囲んで途中で失敗しても全部戻す
     conn.executescript("""
+BEGIN;
 CREATE TABLE channels (
     platform TEXT NOT NULL,     -- discord / slack
     key TEXT NOT NULL,          -- ジャンル、または #digest・#schedule
@@ -178,6 +180,7 @@ CREATE TABLE digests_new (
 INSERT INTO digests_new SELECT 'discord', genre, day, thread_id, created_at FROM digests;
 DROP TABLE digests;
 ALTER TABLE digests_new RENAME TO digests;
+COMMIT;
 """)
 
 

@@ -63,7 +63,10 @@ class SlackClient:
                 log.info("Slack のレート制限のため %.1f 秒待ちます", wait)
                 time.sleep(wait)
                 continue
-            body = resp.json()
+            try:
+                body = resp.json()
+            except ValueError:  # 障害中は HTML のエラーページが返ることがある
+                raise SlackError(method, f"HTTP {resp.status_code}") from None
             if not body.get("ok"):
                 raise SlackError(method, body.get("error", f"HTTP {resp.status_code}"))
             return body
@@ -151,7 +154,11 @@ class SlackChat:
         r = self.client.call("chat.postMessage", channel=ch.channel_id, text=self.text(ch, a), blocks=self.blocks(ch, a),
                              username=(a.feed_title or "kawarabanya")[:80], unfurl_links=False, unfurl_media=False)
         for name in (LIKE_NAME, DISLIKE_NAME):
-            self.client.call("reactions.add", channel=r["channel"], timestamp=r["ts"], name=name)
+            # 投稿は済んでいるので、付けられなくても成功にする（失敗にすると次の回に同じ記事を投稿し直す）
+            try:
+                self.client.call("reactions.add", channel=r["channel"], timestamp=r["ts"], name=name)
+            except (SlackError, httpx.HTTPError) as e:
+                log.warning("Slack の投稿に %s を付けられませんでした: %s", name, e)
         return Posted(f"{r['channel']}/{r['ts']}", self.link(r["channel"], r["ts"]))
 
     def _gone(self, f, *args, **kw) -> dict:

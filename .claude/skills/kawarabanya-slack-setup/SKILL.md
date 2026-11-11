@@ -15,7 +15,7 @@ Slack のアプリの設定（https://api.slack.com/apps）は利用者にしか
 4. **設定**: 利用者のメンバー ID（プロフィール →「︙」→「メンバー ID をコピー」、U で始まる。秘密ではない）を聞いて `config.toml` の `[slack] mention_user_id` に書く。頼めるのはこの人だけ。`[chat] targets` は `["slack"]`（Slack だけ）か `["discord", "slack"]`（両方）を利用者に選んでもらう。
 5. **確かめる**: `uv run kawarabanya doctor` の「Slack の Bot」が ✅、権限が足りているか。
 6. **チャンネル**: `uv run kawarabanya slack setup`（予定の表示だけ）を見せ、問題なければ `uv run kawarabanya slack setup --apply`。ジャンルごと（`kawarabanya-tech` など）・まとめ（`kawarabanya-digest`）・予定（`kawarabanya-schedule`、非公開）ができ、どれにも `mention_user_id` の人を招待する。DB の版が上がる（前に `bak-v<旧版>` を取る）ので、初めてのときはそのことを伝えてから。
-7. **試す**: `uv run kawarabanya discord test tech "テスト"`（targets のすべてに送る）→ Bot を再起動（`systemctl --user restart kawarabanya-bot`。ログに「Slack に Socket Mode でつなぎました」）→ Slack で「@kawarabanya いまどうなってる？」に返事が来るか。
+7. **試す**: `uv run kawarabanya chat test tech "テスト"`（targets のすべてに送る）→ Bot を再起動（`systemctl --user restart kawarabanya-bot`。ログに「Slack に Socket Mode でつなぎました」）→ Slack で「@kawarabanya いまどうなってる？」に返事が来るか。
 
 ## うまくいかないとき
 
@@ -32,5 +32,5 @@ Slack のアプリの設定（https://api.slack.com/apps）は利用者にしか
 ## 決まり
 
 - 実行中の DB は版 5 以降（`channels`・`posts`）。古い版（Discord だけの kawarabanya）に戻すと開けないので、戻すときは `data/kawarabanya.db.bak-v4` を使う。
-- `discord delete-duplicates --apply`・`digest --delete` は Slack の投稿も消す（targets のすべて）。kawarabanya-discord-setup の決まりと同じく、利用者に実行してもらう。
+- `chat delete-duplicates --apply`・`digest --delete` は Slack の投稿も消す（targets のすべて）。kawarabanya-discord-setup の決まりと同じく、利用者に実行してもらう。
 - 権限を足したら `core/slack_api.py` の `SCOPES` と `slack-manifest.json` を両方直す（テストが一致を確かめる）。

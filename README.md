@@ -128,11 +128,12 @@ Bot にメンションして日本語で書くと、ローカル LLM がコマ�
 | `schedule login` / `schedule check [--agenda] [--dry-run]` | 予定（Google カレンダー）の許可 / 予定を読んで変更・直前の予定・今日と明日の予定を `#予定` に知らせる（「予定（Google カレンダー）」） |
 | `genres list` / `genres apply [--dry-run] [--disable-unassigned]` | ジャンルの一覧 / genres.toml の反映 |
 | `genres suggest [--apply] [--days 7] [--due]` | どのサブジャンルにも当てはまらなかった記事から、新しいサブジャンルを LLM に決めさせる（案は振り分け直して確かめる）。タグの上限（20）を超えるジャンルは似たサブジャンルを先にまとめる。`--apply` で genres.toml に反映し、タグ（Slack はラベル）を揃えて付け直す（Bot はまとめの時刻ごとに自動で実行する） |
-| `discord setup [--apply] [--prune]` / `channels` / `test GENRE [文]` / `guilds` / `invite-url` | フォーラム・タグ・Webhook の管理。`channels` は Slack も含めた登録済みの送り先、`test` は `[chat] targets` のすべてへのテスト投稿 |
-| `discord retag` | 投稿済みの記事のタグ（Slack はラベル）をサブジャンルに付け直す（未判定なら LLM で判定。Discord は Bot に「スレッドの管理」が必要） |
+| `discord setup [--apply] [--prune]` / `guilds` / `invite-url` | Discord のフォーラム・タグ・Webhook の管理 |
+| `chat channels` / `chat test GENRE [文]` | 登録済みの送り先（Discord・Slack）の一覧 / ジャンルの送り先（`[chat] targets` のすべて）へのテスト投稿 |
+| `chat retag` | 投稿済みの記事のタグ（Slack はラベル）をサブジャンルに付け直す（未判定なら LLM で判定。Discord は Bot に「スレッドの管理」が必要） |
 | `discord archive [--hours 24]` | 最後の動きから 24 時間たった開いている投稿を閉じる。Discord はサーバー全体で開いているスレッド（フォーラムの投稿）が 1,000 件までで、超えると投稿できない。`discord setup --apply` でフォーラムの投稿が 1 日で閉じるようにしたあと、それより前の投稿を一度に閉じるのに使う。閉じた投稿にはリアクションを付けられない |
 | `slack setup [--apply]` | Slack にジャンルごとのチャンネル（`kawarabanya-tech` など）と、まとめ（`kawarabanya-digest`）・予定（`kawarabanya-schedule`、非公開）のチャンネルを作って登録する（「Slack」） |
-| `discord delete-duplicates [--apply]` | 重複（同じ URL・同じ本文）と判定した記事の投稿を、`[chat] targets` のすべてから消す（なしは一覧だけ。Discord は「スレッドの管理」が必要） |
+| `chat delete-duplicates [--apply]` | 重複（同じ URL・同じ本文）と判定した記事の投稿を、`[chat] targets` のすべてから消す（なしは一覧だけ。Discord は「スレッドの管理」が必要） |
 
 全体のオプション: `-c config.toml`、`--db PATH`、`-v`（詳しいログ）。
 
@@ -275,7 +276,7 @@ mention_user_id = "U0123…"       # 自分のメンバー ID（プロフィー�
 ```bash
 uv run kawarabanya slack setup           # 作るチャンネルの予定を表示
 uv run kawarabanya slack setup --apply   # 作って登録する（DB の版が上がる前にバックアップを取る）
-uv run kawarabanya discord test tech "テスト"   # targets のすべてにテスト投稿（コマンド名は discord のまま）
+uv run kawarabanya chat test tech "テスト"   # targets のすべてにテスト投稿
 uv run kawarabanya doctor                # 「Slack の Bot」「Slack のチャンネル」が ✅ か
 ```
 

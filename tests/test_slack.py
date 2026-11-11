@@ -255,3 +255,22 @@ def test_manifest_matches_code():
     m = json.loads((Path(__file__).parent.parent / "slack-manifest.json").read_text(encoding="utf-8"))
     assert m["oauth_config"]["scopes"]["bot"] == list(slack_api.SCOPES)  # 権限を足したら manifest も直す
     assert m["settings"]["socket_mode_enabled"] and m["settings"]["interactivity"]["is_enabled"]
+
+
+def test_post_survives_reaction_failure_and_html_errors():
+    fake, _client, sc = setup()
+    handler = fake.handler
+
+    def flaky(req):
+        if req.url.path.endswith("reactions.add"):
+            raise httpx.ReadTimeout("timeout")
+        if req.url.path.endswith("chat.delete"):
+            return httpx.Response(503, text="<html>Service Unavailable</html>")
+        return handler(req)
+
+    sc.client = slack_api.SlackClient("xoxb-T", transport=httpx.MockTransport(flaky))
+    ch = chat.Channel("slack", "tech", "C1", "kawarabanya-tech")
+    posted = sc.post_article(ch, Article("見出し", None, "要約", None, None, "tech"))
+    assert posted.ref in fake.messages  # 👍👎 を付けられなくても投稿は成功（失敗にすると次の回に投稿し直す）
+    with pytest.raises(slack_api.SlackError, match="HTTP 503"):  # HTML のエラーページも Slack のエラーにする
+        sc.delete_post(posted.ref)

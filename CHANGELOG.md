@@ -4,6 +4,8 @@
 
 ## 未リリース
 
+- Discord・Slack に共通のコマンドを `discord` から `chat` に移した: `chat channels`・`chat test`・`chat retag`・`chat delete-duplicates`（`discord` には Discord だけの `setup`・`archive`・`guilds`・`invite-url` が残る）
+- Slack: 👍・👎 を付けられなくても投稿は成功にする（同じ記事を投稿し直さない）。障害中の HTML の応答も Slack のエラーとして扱う。DB の版 5 への移行は、途中で失敗したら全部戻す
 - Slack のアプリを manifest（`slack-manifest.json`）から作れる。README とスキルを Slack だけで使う場合にも合わせた
 - まとめのリンク: そのサービスに投稿がない記事（Slack に切り替える前に Discord にだけ投稿した記事など）は、元記事へリンクする（これまではリンクなし）
 - Slack から頼める（Socket Mode。`@kawarabanya` への依頼・確認ボタン・👍・👎 をその場で数える。`SLACK_APP_TOKEN`）。`targets = ["slack"]` なら Discord にはつながずに動く

@@ -15,7 +15,6 @@ import httpx
 
 from kawarabanya.cli.common import (
     STATUS_MARK,
-    _chats,
     _discord_client,
     _fit,
     _load_genres,
@@ -26,6 +25,7 @@ from kawarabanya.core import db, discord_api
 from kawarabanya.core.chat import ChatError
 from kawarabanya.core.config import Config
 from kawarabanya.core.llm import Summarizer
+from kawarabanya.core.targets import build_chats
 from kawarabanya.rss import forums, genres, notify, prefs
 from kawarabanya.rss.pipeline import FeedReport, run_feeds, summarize_pending
 from kawarabanya.rss.sources import opml
@@ -239,7 +239,7 @@ def _fetch_trends(cfg: Config, conn: sqlite3.Connection) -> None:
 def _sync_likes(cfg: Config, conn: sqlite3.Connection, interval_hours: float = 6) -> int:
     """投稿の 👍・👎 の数を数え直す。失敗しても run は止めない。"""
     # Discord は 👍 を読むのに Bot のトークンが要る（投稿は Webhook なのでなくてもできる）
-    chats = [c for c in _chats(cfg) if not (c.platform == "discord" and c.client is None)]
+    chats = [c for c in build_chats(cfg) if not (c.platform == "discord" and c.client is None)]
     try:
         n = notify.sync_likes(conn, chats, interval_hours=interval_hours)
     except (ChatError, httpx.HTTPError) as e:
@@ -514,7 +514,7 @@ def _notify(
     """保存済み・未投稿の記事を投稿し、結果を表示する。失敗があれば 1 を返す。"""
     stats = notify.notify_pending(
         conn,
-        _chats(cfg),
+        build_chats(cfg),
         limit=limit or cfg.discord.max_posts_per_run,
         max_age_days=cfg.discord.max_age_days,
         category=category,
@@ -606,14 +606,14 @@ def cmd_items_move(cfg: Config, args: argparse.Namespace) -> int:
         return 1
     if args.keyword:
         genres.add_keyword(cfg.general.genres_file, args.genre, args.keyword)
-    print(notify.move_post(_open_db(cfg, args), _chats(cfg), args.id, args.genre))
+    print(notify.move_post(_open_db(cfg, args), build_chats(cfg), args.id, args.genre))
     return 0
 
 
 def cmd_items_translate(cfg: Config, args: argparse.Namespace) -> int:
     """items translate: 日本語以外の記事の全文を訳し、保存して投稿のスレッドに返信する。"""
     conn = _open_db(cfg, args)
-    chats = _chats(cfg)
+    chats = build_chats(cfg)
 
     async def go():
         async with Summarizer(cfg.summarize) as summarizer:
@@ -705,7 +705,7 @@ def cmd_genres_suggest(cfg: Config, args: argparse.Namespace) -> int:
     if not conn.execute("SELECT 1 FROM channels LIMIT 1").fetchone():
         return 0
     defs = _load_genres(cfg)
-    chats = _chats(cfg)
+    chats = build_chats(cfg)
     if "discord" in cfg.chat.targets and cfg.discord.token:
         client = _discord_client(cfg)
         guild = discord_api.resolve_guild(client, cfg.discord.guild_id)
@@ -732,7 +732,7 @@ def cmd_digest(cfg: Config, args: argparse.Namespace) -> int:
     conn = _open_db(cfg, args)
     now = datetime.now(UTC)
 
-    chats = _chats(cfg)
+    chats = build_chats(cfg)
     if args.delete:
         deleted = []
         for c in chats:

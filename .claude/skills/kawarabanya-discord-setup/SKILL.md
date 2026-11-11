@@ -26,10 +26,10 @@ Developer Portal とサーバーの設定は、利用者にしかできない（
 | メンションしても何も起きない | Bot が止まっている（`journalctl --user -u kawarabanya-bot -n 50`）か、持ち主以外が頼んでいる（頼めるのはサーバーの持ち主だけ） |
 | 投稿できない・Boost を求められる | サーバー全体で開いているスレッドが 1,000 件に達している。`discord setup --apply`（投稿が 1 日で閉じる設定）→ `discord archive` |
 | `discord setup` で 403 / Missing Access | Bot のロールに権限が足りない。`discord invite-url` の URL で招待し直すか、サーバー設定 → ロール → Bot のロールで「チャンネルの管理・ウェブフックの管理・スレッドの管理・メッセージを送る・スレッドでメッセージを送る」をオン |
-| タグの付け直し（`discord retag`）が 403 | Bot のロールに「スレッドの管理」 |
+| タグの付け直し（`chat retag`）が 403 | Bot のロールに「スレッドの管理」 |
 | フォーラムが作れない | サーバーの「コミュニティ」が無効 |
 
 ## 決まり
 
-- `discord setup --apply --prune`（ジャンルにないフォーラムを中の投稿ごと削除）・`discord delete-duplicates --apply`・`digest --delete` は取り消せない。こちらで実行せず、何が消えるかを `--apply` なし（または予定の表示）で見せてから、利用者に実行してもらう。
+- `discord setup --apply --prune`（ジャンルにないフォーラムを中の投稿ごと削除）・`chat delete-duplicates --apply`・`digest --delete` は取り消せない。こちらで実行せず、何が消えるかを `--apply` なし（または予定の表示）で見せてから、利用者に実行してもらう。
 - Webhook の名前（`[discord] webhook_name`）は設定だけ変えない（Discord では Webhook で投稿したメッセージは同じ Webhook でしか書き換え・削除できず、設定だけ変えると `discord setup` が新しい Webhook を作るため）。変えるときは、先に Discord 上の既存の Webhook を同じ名前に改名してから設定を合わせる（カテゴリ名の `parent_category` も同じ）。

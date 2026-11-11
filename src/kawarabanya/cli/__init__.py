@@ -8,6 +8,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from kawarabanya.cli.chat import cmd_chat_channels, cmd_chat_delete_duplicates, cmd_chat_retag, cmd_chat_test
 from kawarabanya.cli.doctor import cmd_doctor
 from kawarabanya.cli.rss import (
     _cmd_set_enabled,
@@ -40,13 +41,9 @@ from kawarabanya.cli.schedule import cmd_schedule_check, cmd_schedule_login
 from kawarabanya.cli.server import (
     cmd_bot,
     cmd_discord_archive,
-    cmd_discord_channels,
-    cmd_discord_delete_duplicates,
     cmd_discord_guilds,
     cmd_discord_invite_url,
-    cmd_discord_retag,
     cmd_discord_setup,
-    cmd_discord_test,
 )
 from kawarabanya.cli.slack import cmd_slack_setup
 from kawarabanya.core import discord_api
@@ -237,17 +234,20 @@ def build_parser() -> argparse.ArgumentParser:
     s = dc.add_parser("archive", help="最後の動きから一定時間たった開いている投稿を閉じる（開いているスレッドは 1,000 件まで）")
     s.add_argument("--hours", type=float, default=24, help="この時間より前に動きが止まった投稿を閉じる")
     s.set_defaults(func=cmd_discord_archive)
-    s = dc.add_parser("channels", help="登録済みのチャンネル")
-    s.set_defaults(func=cmd_discord_channels)
-    s = dc.add_parser("retag", help="投稿済みの記事のタグを、サブジャンルに付け直す（未判定なら LLM で判定）")
-    s.set_defaults(func=cmd_discord_retag)
-    s = dc.add_parser("delete-duplicates", help="重複と判定した記事のフォーラムの投稿を消す")
-    s.add_argument("--apply", action="store_true", help="実際に消す（なしは一覧だけ）")
-    s.set_defaults(func=cmd_discord_delete_duplicates)
-    s = dc.add_parser("test", help="カテゴリのチャンネルにテスト送信")
+
+    ch = sub.add_parser("chat", help="投稿先（[chat] targets の Discord・Slack）に共通の操作").add_subparsers(
+        dest="chat_command", required=True)
+    s = ch.add_parser("channels", help="登録済みの送り先（サービス・ジャンル → チャンネル）")
+    s.set_defaults(func=cmd_chat_channels)
+    s = ch.add_parser("test", help="ジャンルの送り先（targets のすべて）にテスト投稿する")
     s.add_argument("category")
     s.add_argument("message", nargs="?", default="kawarabanya からのテスト送信です")
-    s.set_defaults(func=cmd_discord_test)
+    s.set_defaults(func=cmd_chat_test)
+    s = ch.add_parser("retag", help="投稿済みの記事のタグ（Slack はラベル）を、サブジャンルに付け直す（未判定なら LLM で判定）")
+    s.set_defaults(func=cmd_chat_retag)
+    s = ch.add_parser("delete-duplicates", help="重複と判定した記事の投稿を、targets のすべてから消す")
+    s.add_argument("--apply", action="store_true", help="実際に消す（なしは一覧だけ）")
+    s.set_defaults(func=cmd_chat_delete_duplicates)
 
     return p
 
